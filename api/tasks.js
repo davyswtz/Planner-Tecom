@@ -13,7 +13,10 @@ export default async function handler(req, res) {
     const idx = (data.tasks || []).findIndex((t) => Number(t.id) === id);
     if (idx >= 0) data.tasks[idx] = { ...data.tasks[idx], ...body };
     else data.tasks.push(body);
-    await saveData(data);
+    const saved = await saveData(data);
+    if (!saved) {
+      return sendJson(res, 503, { ok: false, error: 'BLOB_READ_WRITE_TOKEN ausente' });
+    }
     return sendJson(res, 200, { ok: true });
   } catch (error) {
     return sendJson(res, 500, { ok: false, error: error?.message || 'internal error' });

@@ -9,7 +9,13 @@ export default async function handler(req, res) {
     const data = await loadData();
     if (body.webhookConfig) data.webhookConfig = body.webhookConfig;
     if (body.plannerConfig) data.plannerConfig = body.plannerConfig;
-    await saveData(data);
+    const saved = await saveData(data);
+    if (!saved) {
+      return sendJson(res, 503, {
+        ok: false,
+        error: 'Defina BLOB_READ_WRITE_TOKEN no Vercel para persistir webhook e dados.',
+      });
+    }
     return sendJson(res, 200, { ok: true });
   } catch (error) {
     return sendJson(res, 500, { ok: false, error: error?.message || 'internal error' });

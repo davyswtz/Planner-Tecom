@@ -30,6 +30,9 @@
  * @typedef {{ webhookConfig: WebhookConfig, note: string }} PlannerConfig
  */
 
+/** Webhook padrão Google Chat da equipe (usado se não houver URL salva). Evite expor em repositórios públicos. */
+const DEFAULT_GOOGLE_CHAT_WEBHOOK_URL =
+  'https://chat.googleapis.com/v1/spaces/AAQAgqsNKYg/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=03UNaWYGsXuzDGcs-ascMurXLVsbxThfdDjda7taoDk';
 
 /* ─────────────────────────────────────────────────────────────
    STATE STORE — Fonte única da verdade
@@ -38,14 +41,40 @@
 const Store = (() => {
   const APP_CONFIG = window.APP_CONFIG || {};
   const STORAGE_KEYS = {
-    tasks: 'planner.tasks.v1',
-    opTasks: 'planner.opTasks.v1',
+    tasks: 'planner.tasks.v2',
+    opTasks: 'planner.opTasks.v2',
     webhook: 'planner.webhook.v1',
-    note: 'planner.note.v1',
+    note: 'planner.note.v2',
+  };
+
+  /**
+   * Base da API: `APP_CONFIG.apiBaseUrl` (string), ou mesma origem + `/api` em produção.
+   * Em localhost / 127.0.0.1 não ativa automático (Live Server não roda PHP/Node) — use só localStorage ou defina a URL manualmente.
+   */
+  const resolveApiBaseUrl = () => {
+    const raw = APP_CONFIG.apiBaseUrl;
+    if (raw === false) return '';
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim().replace(/\/$/, '');
+      if (trimmed) return trimmed;
+      return '';
+    }
+    try {
+      const { protocol, hostname, origin } = window.location;
+      if (protocol !== 'http:' && protocol !== 'https:') return '';
+      const h = String(hostname || '').toLowerCase();
+      if (h === 'localhost' || h === '127.0.0.1' || h === '[::1]' || h.endsWith('.local')) {
+        return '';
+      }
+      return `${origin}/api`.replace(/\/$/, '');
+    } catch {
+      /* ignore */
+    }
+    return '';
   };
 
   const ApiService = {
-    baseUrl: (APP_CONFIG.apiBaseUrl || '').replace(/\/$/, ''),
+    baseUrl: resolveApiBaseUrl(),
     enabled() {
       return Boolean(this.baseUrl);
     },
@@ -57,7 +86,12 @@ const Store = (() => {
           ...options,
         });
         if (!response.ok) return null;
-        return response.json();
+        const text = await response.text();
+        const head = text.trim().slice(0, 12).toLowerCase();
+        if (!text.trim() || head.startsWith('<!') || head.startsWith('<?') || head.startsWith('<htm')) {
+          return null;
+        }
+        return JSON.parse(text);
       } catch {
         return null;
       }
@@ -99,92 +133,28 @@ const Store = (() => {
     try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
   };
 
-  /** @type {Task[]} */
-  const tasks = readLocal(STORAGE_KEYS.tasks, [
-    { id: 1, titulo: 'Revisar relatório financeiro',   responsavel: 'Ana',    prazo: '2026-03-25', status: 'Em andamento', prioridade: 'Alta'  },
-    { id: 2, titulo: 'Atualizar planilha de vendas',   responsavel: 'Carlos', prazo: '2026-03-24', status: 'Atrasada',     prioridade: 'Média' },
-    { id: 3, titulo: 'Enviar documentação ao cliente', responsavel: 'João',   prazo: '2026-03-26', status: 'Pendente',     prioridade: 'Baixa' },
-    { id: 4, titulo: 'Reunião com fornecedores',       responsavel: 'Maria',  prazo: '2026-03-28', status: 'Pendente',     prioridade: 'Média' },
-    { id: 5, titulo: 'Fechamento de contrato',         responsavel: 'Pedro',  prazo: '2026-03-27', status: 'Em andamento', prioridade: 'Alta'  },
-  ]);
+  /** @type {Task[]} — sem dados fictícios; preenchido pelo servidor (bootstrap) ou criado pelos usuários */
+  const tasks = readLocal(STORAGE_KEYS.tasks, []);
   let nextTaskId = tasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
 
   /** @type {OpTask[]} */
-  const opTasks = readLocal(STORAGE_KEYS.opTasks, [
-    {
-      id: 1, titulo: 'Cabo rompido Rua das Flores 120', responsavel: 'Marcos',
-      categoria: 'rompimentos', prazo: '2026-03-24', prioridade: 'Alta',
-      taskCode: 'ROM-0001', setor: 'Manutenção Norte', clientesAfetados: '83',
-      descricao: 'Cabo de média tensão rompido — poste 1432', status: 'Em andamento',
-      historico: [
-        { status: 'Criada',       timestamp: '2026-03-23T08:00:00', autor: 'Sistema' },
-        { status: 'Em andamento', timestamp: '2026-03-23T09:15:00', autor: 'Marcos'  },
-      ],
-      criadaEm: '2026-03-23T08:00:00',
-    },
-    {
-      id: 2, titulo: 'Rompimento Av. Brasil 450', responsavel: 'Lucas',
-      categoria: 'rompimentos', prazo: '2026-03-25', prioridade: 'Média',
-      taskCode: 'ROM-0002', setor: 'Manutenção Centro', clientesAfetados: '41',
-      descricao: 'Cabo subterrâneo — verificar caixa de passagem', status: 'Criada',
-      historico: [{ status: 'Criada', timestamp: '2026-03-23T10:00:00', autor: 'Sistema' }],
-      criadaEm: '2026-03-23T10:00:00',
-    },
-    {
-      id: 3, titulo: 'Substituição Poste 2210 — Praça Central', responsavel: 'Roberto',
-      categoria: 'troca-poste', prazo: '2026-03-26', prioridade: 'Alta',
-      taskCode: 'POS-0001', setor: 'Infraestrutura', clientesAfetados: '27',
-      descricao: 'Poste danificado por acidente de trânsito', status: 'Concluída',
-      historico: [
-        { status: 'Criada',       timestamp: '2026-03-22T07:00:00', autor: 'Sistema' },
-        { status: 'Em andamento', timestamp: '2026-03-22T09:00:00', autor: 'Roberto' },
-        { status: 'Concluída',    timestamp: '2026-03-23T11:00:00', autor: 'Roberto' },
-      ],
-      criadaEm: '2026-03-22T07:00:00',
-    },
-    {
-      id: 4, titulo: 'Troca Poste 0891 — Rua Santos Dumont', responsavel: 'André',
-      categoria: 'troca-poste', prazo: '2026-03-27', prioridade: 'Baixa',
-      taskCode: 'POS-0002', setor: 'Infraestrutura', clientesAfetados: '12',
-      descricao: 'Poste desgastado — substituição preventiva', status: 'Criada',
-      historico: [{ status: 'Criada', timestamp: '2026-03-23T11:30:00', autor: 'Sistema' }],
-      criadaEm: '2026-03-23T11:30:00',
-    },
-    {
-      id: 5, titulo: 'Cliente sem sinal - Bairro Primavera', responsavel: 'Patrícia',
-      categoria: 'atendimento-cliente', prazo: '2026-03-27', prioridade: 'Média',
-      taskCode: 'ATD-0001', setor: 'Suporte Comercial', clientesAfetados: '1',
-      descricao: 'Cliente relata interrupção desde 08:20, validar histórico no CTO local', status: 'Criada',
-      isParentTask: true, parentTaskId: null,
-      historico: [{ status: 'Criada', timestamp: '2026-03-24T08:35:00', autor: 'Sistema' }],
-      criadaEm: '2026-03-24T08:35:00',
-    },
-    {
-      id: 6, titulo: 'Visita técnica na residência', responsavel: 'Patrícia',
-      categoria: 'atendimento-cliente', prazo: '2026-03-27', prioridade: 'Média',
-      taskCode: 'ATD-0002', setor: 'Suporte Comercial', clientesAfetados: '1',
-      descricao: 'Validar sinal no ponto final do cliente e equipamento interno', status: 'Criada',
-      isParentTask: false, parentTaskId: 5,
-      historico: [{ status: 'Criada', timestamp: '2026-03-24T09:10:00', autor: 'Sistema' }],
-      criadaEm: '2026-03-24T09:10:00',
-    },
-  ]);
+  const opTasks = readLocal(STORAGE_KEYS.opTasks, []);
   let nextOpTaskId = opTasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
 
+  const WEBHOOK_EVENTS_DEFAULT = { andamento: true, concluida: true, finalizada: true };
   /** @type {WebhookConfig} */
-  const webhookConfig = readLocal(STORAGE_KEYS.webhook, {
+  const webhookConfig = {
     url: '',
-    events: { andamento: true, concluida: true, finalizada: true },
-  });
+    events: { ...WEBHOOK_EVENTS_DEFAULT },
+    ...readLocal(STORAGE_KEYS.webhook, {}),
+  };
 
   /** @type {PlannerConfig} */
-  const plannerConfig = {
-    note: 'Lembrar de validar as atividades prioritárias do setor antes do fechamento semanal.',
-  };
-  const localNote = readLocal(STORAGE_KEYS.note, null);
-  if (typeof localNote === 'string' && localNote.trim()) plannerConfig.note = localNote;
+  const plannerConfig = { note: '' };
+  const localNote = readLocal(STORAGE_KEYS.note, '');
+  if (typeof localNote === 'string') plannerConfig.note = localNote;
 
-  const calendarStorageKey = 'planner.calendar.notes.v1';
+  const calendarStorageKey = 'planner.calendar.notes.v2';
   let calendarNotes = [];
   try {
     const raw = localStorage.getItem(calendarStorageKey);
@@ -208,9 +178,28 @@ const Store = (() => {
   const syncUpTask = (task) => { ApiService.saveTask(task); };
   const syncUpOpTask = (task) => { ApiService.saveOpTask(task); };
   const syncDeleteOpTask = (id, cascade = false) => { ApiService.deleteOpTask(id, cascade); };
-  const syncConfig = () => {
+  const syncConfig = () =>
     ApiService.saveConfig({ webhookConfig: { ...webhookConfig }, plannerConfig: { ...plannerConfig } });
+
+  const applyDefaultWebhookUrlIfNeeded = () => {
+    if (!webhookConfig.events || typeof webhookConfig.events !== 'object') {
+      webhookConfig.events = { ...WEBHOOK_EVENTS_DEFAULT };
+    }
+    for (const k of Object.keys(WEBHOOK_EVENTS_DEFAULT)) {
+      if (typeof webhookConfig.events[k] !== 'boolean') {
+        webhookConfig.events[k] = WEBHOOK_EVENTS_DEFAULT[k];
+      }
+    }
+    if (!String(webhookConfig.url || '').trim()) {
+      webhookConfig.url = DEFAULT_GOOGLE_CHAT_WEBHOOK_URL;
+    }
   };
+
+  applyDefaultWebhookUrlIfNeeded();
+  persistSnapshot();
+  if (ApiService.enabled()) {
+    void syncConfig();
+  }
 
   // UI state
   let currentPage = 'dashboard';
@@ -294,11 +283,13 @@ const Store = (() => {
 
     // Webhook
     getWebhookConfig: ()     => ({ ...webhookConfig }),
-    setWebhookConfig: (data) => {
+    /** @returns {Promise<{ok?: boolean}|null>} */
+    setWebhookConfig: async (data) => {
       Object.assign(webhookConfig, data);
       persistSnapshot();
-      syncConfig();
+      return syncConfig();
     },
+    isRemoteApiEnabled: () => ApiService.enabled(),
 
     // Config
     getPlannerConfig: () => ({ ...plannerConfig }),
@@ -345,8 +336,12 @@ const Store = (() => {
         calendarNotes = payload.calendarNotes;
         nextCalendarNoteId = calendarNotes.reduce((max, n) => Math.max(max, n.id || 0), 0) + 1;
       }
+      applyDefaultWebhookUrlIfNeeded();
       persistSnapshot();
       persistCalendarNotes();
+      if (ApiService.enabled()) {
+        void syncConfig();
+      }
       return true;
     },
 
@@ -489,6 +484,7 @@ const WebhookService = {
   _buildMessage(event, task, category) {
     if (category === 'Rompimentos' && event === 'andamento') {
       const setor = task.setor || 'Não informado';
+      const regiao = task.regiao || 'Não informada';
       const tecnico = task.responsavel || 'Não informado';
       const localizacao = task.coordenadas || 'Não informada';
       const endereco = task.localizacaoTexto || 'Não informado';
@@ -500,6 +496,7 @@ const WebhookService = {
 ⚠️ ROMPIMENTO confirmado no sistema. Ação imediata necessária!
 
 📌 SETOR / CTO: ${setor}
+🌎 REGIÃO: ${regiao}
 👨‍🔧 TÉCNICO RESPONSÁVEL: ${tecnico}
 📍 LOCALIZAÇÃO: ${localizacao}
 🏠 ENDEREÇO: ${endereco}
@@ -509,6 +506,7 @@ const WebhookService = {
 
     if (category === 'Rompimentos' && (event === 'concluida' || event === 'finalizada')) {
       const setor = task.setor || 'Não informado';
+      const regiao = task.regiao || 'Não informada';
       const tecnico = task.responsavel || 'Não informado';
       const localizacao = task.coordenadas || 'Não informada';
       const endereco = task.localizacaoTexto || 'Não informado';
@@ -522,6 +520,7 @@ const WebhookService = {
 `${title}
 
 📌 SETOR / CTO: ${setor}
+🌎 REGIÃO: ${regiao}
 👨‍🔧 TÉCNICO RESPONSÁVEL: ${tecnico}
 📍 LOCALIZAÇÃO: ${localizacao}
 🏠 ENDEREÇO: ${endereco}
@@ -1297,7 +1296,7 @@ const UI = {
         <span class="atd-parent-meta">${child.taskCode || ''}</span>
         <span class="atd-parent-meta">${child.responsavel}</span>
         <span class="atd-parent-meta">${Utils.formatDate(child.prazo)}</span>
-        <span>${statusBadgeAtd(child.status)}</span>
+        <span class="atd-status-cell">${statusBadgeAtd(child.status)}</span>
         <div class="atd-subtask-actions">
           <select class="atd-status-select" data-change-status="${child.id}">
             ${['Em andamento', 'Concluída', 'Finalizada'].map(s => `<option value="${s}" ${s === child.status ? 'selected' : ''}>${statusLabel(s)}</option>`).join('')}
@@ -1322,7 +1321,7 @@ const UI = {
             <span class="atd-parent-meta">${parent.taskCode || ''}</span>
             <span class="atd-parent-meta">${parent.responsavel}</span>
             <span class="atd-parent-meta">${Utils.formatDate(parent.prazo)}</span>
-            <span>${statusBadgeAtd(parent.status)}</span>
+            <span class="atd-status-cell">${statusBadgeAtd(parent.status)}</span>
             <span class="atd-parent-meta">${children.length ? `${doneCount}/${children.length} concluídas` : 'Sem subtarefas'}${allDone ? ' · OK' : ''}</span>
             <span class="atd-row-actions">
               <select class="atd-status-select" data-change-status="${parent.id}">
@@ -1351,12 +1350,11 @@ const UI = {
       return `
         <section class="atd-group" data-group="${status}">
           <header class="atd-group-head">
-            <button class="atd-group-toggle" data-toggle-group="${status}">
+            <button type="button" class="atd-group-toggle" data-toggle-group="${status}">
               <span class="atd-chevron ${expanded ? 'open' : ''}">▾</span>
               <span class="atd-group-title">${status.toUpperCase()}</span>
               <span class="atd-group-count">${groupParents.length}</span>
             </button>
-            <button class="atd-action-btn progress" data-add-parent-in-group="${status}">Nova lista</button>
           </header>
           <div class="atd-group-body ${expanded ? 'open' : ''}">
             ${groupParents.length
@@ -1392,12 +1390,6 @@ const UI = {
 
     document.getElementById('addAtdParentBtn')?.addEventListener('click', () => {
       Controllers.opTask.openNewModal({ kind: 'parent', category: 'atendimento-cliente', status: 'Backlog' });
-    });
-
-    board.querySelectorAll('[data-add-parent-in-group]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        Controllers.opTask.openNewModal({ kind: 'parent', category: 'atendimento-cliente', status: btn.dataset.addParentInGroup });
-      });
     });
 
     board.querySelectorAll('[data-toggle-group]').forEach(btn => {
@@ -2028,6 +2020,7 @@ const Controllers = {
       this._toggleGroup('opParentConfig', isAtendimento);
       this._toggleGroup('opRompimentoCoordsRow', isRompimento);
       this._toggleGroup('opRompimentoExtraRow', isRompimento);
+      this._toggleGroup('opRompimentoSetorGroup', isRompimento);
       if (modalTitle && !Store.editingOpTaskId) {
         modalTitle.textContent = isRompimento ? 'Nova tarefa de rompimento' : 'Nova tarefa';
       }
@@ -2151,6 +2144,8 @@ const Controllers = {
       if (coordsInput) coordsInput.value = '';
       if (addressInput) addressInput.value = '';
       if (addressHint) addressHint.textContent = 'Informe as coordenadas para localizar automaticamente.';
+      const setorCtoInput = document.getElementById('op-setor-cto');
+      if (setorCtoInput) setorCtoInput.value = '';
       this._syncParentTaskUi(category, null);
       this._syncCategorySpecificFields(category);
       this._newTaskPreset = { ...preset };
@@ -2181,6 +2176,7 @@ const Controllers = {
       const coordsRaw = document.getElementById('op-coords')?.value.trim() || '';
       const autoAddress = document.getElementById('op-address-readonly')?.value.trim() || '';
       const clientesAfetadosRaw = document.getElementById('op-clientes-afetados')?.value.trim() || '';
+      const setorCto = document.getElementById('op-setor-cto')?.value.trim() || '';
       const isRompimento = this._isRompimentoCategory(category);
 
       if (!isRompimento && !titulo)      { ToastService.show('Informe o título da tarefa', 'danger');       return null; }
@@ -2188,6 +2184,10 @@ const Controllers = {
       if (!isRompimento && isParentTask && !prazo)       { ToastService.show('Informe a data de vencimento', 'danger');      return null; }
       if (!isRompimento && !document.getElementById('op-prioridade').value) { ToastService.show('Informe a prioridade', 'danger'); return null; }
       if (isParentTask && !regiao)      { ToastService.show('Informe a região', 'danger');                   return null; }
+      if (isRompimento && !setorCto) {
+        ToastService.show('Informe o nome da CTO ou setor', 'danger');
+        return null;
+      }
       if (isRompimento && !coordsRaw)   { ToastService.show('Informe as coordenadas da localização', 'danger'); return null; }
       if (isRompimento && !autoAddress) { ToastService.show('A localização automática (rua/bairro) é obrigatória', 'danger'); return null; }
       if (isRompimento && (!clientesAfetadosRaw || !/^\d+$/.test(clientesAfetadosRaw) || Number(clientesAfetadosRaw) <= 0)) {
@@ -2214,12 +2214,18 @@ const Controllers = {
         : (isParentTask ? prazo : (selectedParent?.prazo || existing?.prazo || ''));
       const finalPrioridade = isRompimento ? 'Alta' : document.getElementById('op-prioridade').value;
       const finalDescricao = isRompimento ? `Coordenadas: ${coordsRaw} | Local: ${autoAddress}` : '';
+      const setorField = isRompimento
+        ? setorCto
+        : (isParentTask ? regiao : (selectedParent?.setor || selectedParent?.regiao || existing?.setor || ''));
+      const regiaoField = isRompimento
+        ? regiao
+        : (isParentTask ? regiao : (selectedParent?.regiao || selectedParent?.setor || existing?.regiao || ''));
       return {
         taskCode,
         titulo: finalTitulo,
         responsavel: isParentTask ? responsavel : (selectedParent?.responsavel || existing?.responsavel || ''),
-        setor: isParentTask ? regiao : (selectedParent?.setor || selectedParent?.regiao || existing?.setor || ''),
-        regiao: isParentTask ? regiao : (selectedParent?.regiao || selectedParent?.setor || existing?.regiao || ''),
+        setor: setorField,
+        regiao: regiaoField,
         clientesAfetados: isRompimento ? clientesAfetadosRaw : '',
         coordenadas: isRompimento ? coordsRaw : '',
         localizacaoTexto: isRompimento ? autoAddress : '',
@@ -2252,7 +2258,9 @@ const Controllers = {
       document.getElementById('op-responsavel').value = task.responsavel;
       document.getElementById('op-prazo').value       = task.prazo || '';
       document.getElementById('op-prioridade').value  = task.prioridade;
-      document.getElementById('op-regiao').value      = task.regiao || task.setor || '';
+      document.getElementById('op-regiao').value      = task.regiao || '';
+      const setorCtoInput = document.getElementById('op-setor-cto');
+      if (setorCtoInput) setorCtoInput.value = task.setor || '';
       const coordsInput = document.getElementById('op-coords');
       const addressInput = document.getElementById('op-address-readonly');
       const addressHint = document.getElementById('op-address-hint');
@@ -2534,10 +2542,10 @@ const Controllers = {
         await WebhookService.sendTest(url);
       });
 
-      document.getElementById('saveWebhookBtn').addEventListener('click', () => {
+      document.getElementById('saveWebhookBtn').addEventListener('click', async () => {
         const url = document.getElementById('f-webhookUrl').value.trim();
         if (!url) { ToastService.show('Insira a URL do webhook', 'danger'); return; }
-        Store.setWebhookConfig({
+        const res = await Store.setWebhookConfig({
           url,
           events: {
             andamento:  document.getElementById('ev-andamento').checked,
@@ -2546,19 +2554,31 @@ const Controllers = {
           },
         });
         this._syncBanner();
-        ToastService.show('Google Chat conectado com sucesso!', 'success');
         ModalService.close('webhookModal');
+        if (!Store.isRemoteApiEnabled()) {
+          ToastService.show('Google Chat conectado (salvo só neste navegador).', 'success');
+        } else if (res && res.ok) {
+          ToastService.show('Webhook salvo no servidor. Válido para todos que acessam o site.', 'success');
+        } else {
+          ToastService.show('Salvo no navegador. No servidor falhou: no Vercel, crie BLOB_READ_WRITE_TOKEN em Environment Variables.', 'danger');
+        }
       });
 
-      document.getElementById('disconnectWebhook').addEventListener('click', () => {
-        Store.setWebhookConfig({ url: '' });
+      document.getElementById('disconnectWebhook').addEventListener('click', async () => {
+        const res = await Store.setWebhookConfig({ url: '' });
         this._syncBanner();
-        ToastService.show('Webhook desconectado', 'info');
+        if (Store.isRemoteApiEnabled() && (!res || !res.ok)) {
+          ToastService.show('Desconectado aqui; não atualizou no servidor.', 'warning');
+        } else {
+          ToastService.show('Webhook desconectado', 'info');
+        }
       });
 
       ['closeWebhookModal','cancelWebhookModal'].forEach(id =>
         document.getElementById(id)?.addEventListener('click', () => ModalService.close('webhookModal'))
       );
+
+      this._syncBanner();
     },
   },
 

@@ -14,14 +14,20 @@ export default async function handler(req, res) {
       const idx = data.calendarNotes.findIndex((n) => Number(n.id) === id);
       if (idx >= 0) data.calendarNotes[idx] = { ...data.calendarNotes[idx], ...body };
       else data.calendarNotes.push(body);
-      await saveData(data);
+      const saved = await saveData(data);
+      if (!saved) {
+        return sendJson(res, 503, { ok: false, error: 'BLOB_READ_WRITE_TOKEN ausente' });
+      }
       return sendJson(res, 200, { ok: true });
     }
 
     if (req.method === 'DELETE') {
       if (!id) return sendJson(res, 422, { ok: false, error: 'id invalido' });
       data.calendarNotes = data.calendarNotes.filter((n) => Number(n.id) !== id);
-      await saveData(data);
+      const saved = await saveData(data);
+      if (!saved) {
+        return sendJson(res, 503, { ok: false, error: 'BLOB_READ_WRITE_TOKEN ausente' });
+      }
       return sendJson(res, 200, { ok: true });
     }
 

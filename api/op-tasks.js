@@ -14,7 +14,10 @@ export default async function handler(req, res) {
       const idx = data.opTasks.findIndex((t) => Number(t.id) === id);
       if (idx >= 0) data.opTasks[idx] = { ...data.opTasks[idx], ...body };
       else data.opTasks.push(body);
-      await saveData(data);
+      const saved = await saveData(data);
+      if (!saved) {
+        return sendJson(res, 503, { ok: false, error: 'BLOB_READ_WRITE_TOKEN ausente' });
+      }
       return sendJson(res, 200, { ok: true });
     }
 
@@ -24,7 +27,10 @@ export default async function handler(req, res) {
       data.opTasks = cascade
         ? data.opTasks.filter((t) => Number(t.id) !== id && Number(t.parentTaskId) !== id)
         : data.opTasks.filter((t) => Number(t.id) !== id);
-      await saveData(data);
+      const saved = await saveData(data);
+      if (!saved) {
+        return sendJson(res, 503, { ok: false, error: 'BLOB_READ_WRITE_TOKEN ausente' });
+      }
       return sendJson(res, 200, { ok: true });
     }
 

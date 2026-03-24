@@ -305,7 +305,7 @@
                 <span class="panel-title">Notas rápidas</span>
               </div>
               <div class="note-area">
-                <textarea class="note-textarea" id="noteTextarea" aria-label="Campo de notas" placeholder="Anote lembretes, prioridades ou observações do setor…">Lembrar de validar as atividades prioritárias do setor antes do fechamento semanal.</textarea>
+                <textarea class="note-textarea" id="noteTextarea" aria-label="Campo de notas" placeholder="Anote lembretes, prioridades ou observações do setor…"></textarea>
                 <div class="note-actions">
                   <button class="sm-btn" id="saveNoteBtn">Salvar nota</button>
                 </div>
@@ -675,13 +675,7 @@
         <div class="form-group" id="opResponsavelGroup">
           <label for="op-responsavel">Técnico responsável</label>
           <input type="text" id="op-responsavel" placeholder="Selecione ou digite o técnico" autocomplete="off" list="op-tecnicos-list"/>
-          <datalist id="op-tecnicos-list">
-            <option value="Marcos"></option>
-            <option value="Lucas"></option>
-            <option value="Roberto"></option>
-            <option value="André"></option>
-            <option value="Patrícia"></option>
-          </datalist>
+          <datalist id="op-tecnicos-list"></datalist>
         </div>
         <div class="form-group" id="opPrazoGroup">
           <label for="op-prazo">Data de vencimento</label>
@@ -707,6 +701,10 @@
           <label for="op-clientes-afetados">Quantidade de clientes afetados</label>
           <input type="number" id="op-clientes-afetados" min="1" step="1" placeholder="Ex.: 120" autocomplete="off"/>
         </div>
+      </div>
+      <div class="form-group" id="opRompimentoSetorGroup" style="display:none">
+        <label for="op-setor-cto">Nome da CTO ou setor</label>
+        <input type="text" id="op-setor-cto" placeholder="Ex.: CTO Centro, Setor Manutenção Norte" autocomplete="off"/>
       </div>
       <div class="form-group op-parent-config" id="opParentConfig">
         <label for="op-task-kind">Tipo de item (estilo ClickUp)</label>
