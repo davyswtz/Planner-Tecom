@@ -36,18 +36,81 @@
    Futura integração: substituir por chamadas à API/banco
 ───────────────────────────────────────────────────────────── */
 const Store = (() => {
+  const APP_CONFIG = window.APP_CONFIG || {};
+  const STORAGE_KEYS = {
+    tasks: 'planner.tasks.v1',
+    opTasks: 'planner.opTasks.v1',
+    webhook: 'planner.webhook.v1',
+    note: 'planner.note.v1',
+  };
+
+  const ApiService = {
+    baseUrl: (APP_CONFIG.apiBaseUrl || '').replace(/\/$/, ''),
+    enabled() {
+      return Boolean(this.baseUrl);
+    },
+    async request(path, options = {}) {
+      if (!this.enabled()) return null;
+      try {
+        const response = await fetch(`${this.baseUrl}${path}`, {
+          headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+          ...options,
+        });
+        if (!response.ok) return null;
+        return response.json();
+      } catch {
+        return null;
+      }
+    },
+    async requestAny(paths, options = {}) {
+      for (const path of paths) {
+        const result = await this.request(path, options);
+        if (result) return result;
+      }
+      return null;
+    },
+    async getBootstrap() {
+      return this.requestAny(['/bootstrap', '/bootstrap.php']);
+    },
+    async saveTask(task) {
+      return this.requestAny(['/tasks', '/tasks.php'], { method: 'POST', body: JSON.stringify(task) });
+    },
+    async saveOpTask(task) {
+      return this.requestAny(['/op-tasks', '/op_tasks.php'], { method: 'POST', body: JSON.stringify(task) });
+    },
+    async deleteOpTask(id, cascade = false) {
+      return this.requestAny(['/op-tasks', '/op_tasks.php'], { method: 'DELETE', body: JSON.stringify({ id, cascade }) });
+    },
+    async saveConfig(payload) {
+      return this.requestAny(['/config', '/config.php'], { method: 'POST', body: JSON.stringify(payload) });
+    },
+  };
+
+  const readLocal = (key, fallback) => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      return JSON.parse(raw);
+    } catch {
+      return fallback;
+    }
+  };
+  const writeLocal = (key, value) => {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  };
+
   /** @type {Task[]} */
-  const tasks = [
+  const tasks = readLocal(STORAGE_KEYS.tasks, [
     { id: 1, titulo: 'Revisar relatório financeiro',   responsavel: 'Ana',    prazo: '2026-03-25', status: 'Em andamento', prioridade: 'Alta'  },
     { id: 2, titulo: 'Atualizar planilha de vendas',   responsavel: 'Carlos', prazo: '2026-03-24', status: 'Atrasada',     prioridade: 'Média' },
     { id: 3, titulo: 'Enviar documentação ao cliente', responsavel: 'João',   prazo: '2026-03-26', status: 'Pendente',     prioridade: 'Baixa' },
     { id: 4, titulo: 'Reunião com fornecedores',       responsavel: 'Maria',  prazo: '2026-03-28', status: 'Pendente',     prioridade: 'Média' },
     { id: 5, titulo: 'Fechamento de contrato',         responsavel: 'Pedro',  prazo: '2026-03-27', status: 'Em andamento', prioridade: 'Alta'  },
-  ];
-  let nextTaskId = 6;
+  ]);
+  let nextTaskId = tasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
 
   /** @type {OpTask[]} */
-  const opTasks = [
+  const opTasks = readLocal(STORAGE_KEYS.opTasks, [
     {
       id: 1, titulo: 'Cabo rompido Rua das Flores 120', responsavel: 'Marcos',
       categoria: 'rompimentos', prazo: '2026-03-24', prioridade: 'Alta',
@@ -87,19 +150,39 @@ const Store = (() => {
       historico: [{ status: 'Criada', timestamp: '2026-03-23T11:30:00', autor: 'Sistema' }],
       criadaEm: '2026-03-23T11:30:00',
     },
-  ];
-  let nextOpTaskId = 5;
+    {
+      id: 5, titulo: 'Cliente sem sinal - Bairro Primavera', responsavel: 'Patrícia',
+      categoria: 'atendimento-cliente', prazo: '2026-03-27', prioridade: 'Média',
+      taskCode: 'ATD-0001', setor: 'Suporte Comercial', clientesAfetados: '1',
+      descricao: 'Cliente relata interrupção desde 08:20, validar histórico no CTO local', status: 'Criada',
+      isParentTask: true, parentTaskId: null,
+      historico: [{ status: 'Criada', timestamp: '2026-03-24T08:35:00', autor: 'Sistema' }],
+      criadaEm: '2026-03-24T08:35:00',
+    },
+    {
+      id: 6, titulo: 'Visita técnica na residência', responsavel: 'Patrícia',
+      categoria: 'atendimento-cliente', prazo: '2026-03-27', prioridade: 'Média',
+      taskCode: 'ATD-0002', setor: 'Suporte Comercial', clientesAfetados: '1',
+      descricao: 'Validar sinal no ponto final do cliente e equipamento interno', status: 'Criada',
+      isParentTask: false, parentTaskId: 5,
+      historico: [{ status: 'Criada', timestamp: '2026-03-24T09:10:00', autor: 'Sistema' }],
+      criadaEm: '2026-03-24T09:10:00',
+    },
+  ]);
+  let nextOpTaskId = opTasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
 
   /** @type {WebhookConfig} */
-  const webhookConfig = {
+  const webhookConfig = readLocal(STORAGE_KEYS.webhook, {
     url: '',
     events: { andamento: true, concluida: true, finalizada: true },
-  };
+  });
 
   /** @type {PlannerConfig} */
   const plannerConfig = {
     note: 'Lembrar de validar as atividades prioritárias do setor antes do fechamento semanal.',
   };
+  const localNote = readLocal(STORAGE_KEYS.note, null);
+  if (typeof localNote === 'string' && localNote.trim()) plannerConfig.note = localNote;
 
   const calendarStorageKey = 'planner.calendar.notes.v1';
   let calendarNotes = [];
@@ -116,6 +199,18 @@ const Store = (() => {
   const persistCalendarNotes = () => {
     try { localStorage.setItem(calendarStorageKey, JSON.stringify(calendarNotes)); } catch {}
   };
+  const persistSnapshot = () => {
+    writeLocal(STORAGE_KEYS.tasks, tasks);
+    writeLocal(STORAGE_KEYS.opTasks, opTasks);
+    writeLocal(STORAGE_KEYS.webhook, webhookConfig);
+    writeLocal(STORAGE_KEYS.note, plannerConfig.note || '');
+  };
+  const syncUpTask = (task) => { ApiService.saveTask(task); };
+  const syncUpOpTask = (task) => { ApiService.saveOpTask(task); };
+  const syncDeleteOpTask = (id, cascade = false) => { ApiService.deleteOpTask(id, cascade); };
+  const syncConfig = () => {
+    ApiService.saveConfig({ webhookConfig: { ...webhookConfig }, plannerConfig: { ...plannerConfig } });
+  };
 
   // UI state
   let currentPage = 'dashboard';
@@ -130,35 +225,88 @@ const Store = (() => {
   return {
     // Tasks
     getTasks:        ()      => [...tasks],
-    addTask:         (data)  => { const t = { id: nextTaskId++, ...data }; tasks.push(t); return t; },
-    updateTask:      (id, d) => { const i = tasks.findIndex(t => t.id === id); if (i !== -1) Object.assign(tasks[i], d); return tasks[i]; },
+    addTask:         (data)  => {
+      const t = { id: nextTaskId++, ...data };
+      tasks.push(t);
+      persistSnapshot();
+      syncUpTask(t);
+      return t;
+    },
+    updateTask:      (id, d) => {
+      const i = tasks.findIndex(t => t.id === id);
+      if (i !== -1) {
+        Object.assign(tasks[i], d);
+        persistSnapshot();
+        syncUpTask(tasks[i]);
+      }
+      return tasks[i];
+    },
     findTask:        (id)    => tasks.find(t => t.id === id),
 
     // OpTasks
     getOpTasks:      ()           => [...opTasks],
     getOpTasksByCategory: (cat)   => opTasks.filter(t => t.categoria === cat),
-    addOpTask:       (data)       => { const t = { id: nextOpTaskId++, ...data, criadaEm: new Date().toISOString(), historico: [{ status: 'Criada', timestamp: new Date().toISOString(), autor: 'Sistema' }] }; opTasks.push(t); return t; },
+    addOpTask:       (data)       => {
+      const t = { id: nextOpTaskId++, ...data, criadaEm: new Date().toISOString(), historico: [{ status: 'Criada', timestamp: new Date().toISOString(), autor: 'Sistema' }] };
+      opTasks.push(t);
+      persistSnapshot();
+      syncUpOpTask(t);
+      return t;
+    },
     updateOpTaskStatus: (id, newStatus, autor = 'Usuário') => {
       const task = opTasks.find(t => t.id === id);
       if (!task) return null;
       task.status = newStatus;
       task.historico.push({ status: newStatus, timestamp: new Date().toISOString(), autor });
+      persistSnapshot();
+      syncUpOpTask(task);
       return task;
     },
     updateOpTask: (id, data) => {
       const i = opTasks.findIndex(t => t.id === id);
-      if (i !== -1) Object.assign(opTasks[i], data);
+      if (i !== -1) {
+        Object.assign(opTasks[i], data);
+        persistSnapshot();
+        syncUpOpTask(opTasks[i]);
+      }
       return opTasks[i];
+    },
+    removeOpTask: (id, options = {}) => {
+      const cascade = Boolean(options.cascade);
+      const removeIds = cascade
+        ? [id, ...opTasks.filter(t => Number(t.parentTaskId) === Number(id)).map(t => t.id)]
+        : [id];
+      let changed = false;
+      for (const rid of removeIds) {
+        const idx = opTasks.findIndex(t => t.id === rid);
+        if (idx !== -1) {
+          opTasks.splice(idx, 1);
+          changed = true;
+        }
+      }
+      if (changed) {
+        persistSnapshot();
+        syncDeleteOpTask(id, cascade);
+      }
+      return changed;
     },
     findOpTask: (id) => opTasks.find(t => t.id === id),
 
     // Webhook
     getWebhookConfig: ()     => ({ ...webhookConfig }),
-    setWebhookConfig: (data) => Object.assign(webhookConfig, data),
+    setWebhookConfig: (data) => {
+      Object.assign(webhookConfig, data);
+      persistSnapshot();
+      syncConfig();
+    },
 
     // Config
     getPlannerConfig: () => ({ ...plannerConfig }),
-    setPlannerConfig: (data) => Object.assign(plannerConfig, data),
+    setPlannerConfig: (data) => {
+      Object.assign(plannerConfig, data);
+      persistSnapshot();
+      syncConfig();
+    },
 
     // Calendar Notes
     getCalendarNotes: () => [...calendarNotes],
@@ -167,12 +315,39 @@ const Store = (() => {
       const note = { id: nextCalendarNoteId++, ...data, createdAt: new Date().toISOString() };
       calendarNotes.push(note);
       persistCalendarNotes();
+      ApiService.requestAny(['/calendar-notes', '/calendar_notes.php'], { method: 'POST', body: JSON.stringify(note) });
       return note;
     },
     removeCalendarNote: (id) => {
       const sizeBefore = calendarNotes.length;
       calendarNotes = calendarNotes.filter(n => n.id !== id);
       if (calendarNotes.length !== sizeBefore) persistCalendarNotes();
+      ApiService.requestAny(['/calendar-notes', '/calendar_notes.php'], { method: 'DELETE', body: JSON.stringify({ id }) });
+    },
+    bootstrapFromRemote: async () => {
+      const payload = await ApiService.getBootstrap();
+      if (!payload || !payload.ok) return false;
+      if (Array.isArray(payload.tasks)) {
+        tasks.splice(0, tasks.length, ...payload.tasks);
+        nextTaskId = tasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
+      }
+      if (Array.isArray(payload.opTasks)) {
+        opTasks.splice(0, opTasks.length, ...payload.opTasks);
+        nextOpTaskId = opTasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
+      }
+      if (payload.webhookConfig && typeof payload.webhookConfig === 'object') {
+        Object.assign(webhookConfig, payload.webhookConfig);
+      }
+      if (payload.plannerConfig && typeof payload.plannerConfig === 'object') {
+        Object.assign(plannerConfig, payload.plannerConfig);
+      }
+      if (Array.isArray(payload.calendarNotes)) {
+        calendarNotes = payload.calendarNotes;
+        nextCalendarNoteId = calendarNotes.reduce((max, n) => Math.max(max, n.id || 0), 0) + 1;
+      }
+      persistSnapshot();
+      persistCalendarNotes();
+      return true;
     },
 
     // UI State
@@ -268,6 +443,34 @@ const Utils = {
    Ponto de extensão para outros canais no futuro
 ───────────────────────────────────────────────────────────── */
 const WebhookService = {
+  _formatDurationFromStart(task) {
+    const history = Array.isArray(task?.historico) ? task.historico : [];
+    if (!history.length) return 'Não foi possível calcular';
+
+    const startEntry = history.find(h => h.status === 'Em andamento');
+    if (!startEntry?.timestamp) return 'Não foi possível calcular';
+
+    const endEntry =
+      [...history].reverse().find(h => (h.status === 'Concluída' || h.status === 'Finalizada') && h.timestamp) ||
+      history[history.length - 1];
+
+    if (!endEntry?.timestamp) return 'Não foi possível calcular';
+
+    const start = new Date(startEntry.timestamp);
+    const end = new Date(endEntry.timestamp);
+    const diffMs = Math.max(0, end.getTime() - start.getTime());
+    const totalMinutes = Math.floor(diffMs / 60000);
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const minutes = totalMinutes % 60;
+
+    const parts = [];
+    if (days) parts.push(`${days}d`);
+    if (hours) parts.push(`${hours}h`);
+    parts.push(`${minutes}min`);
+    return parts.join(' ');
+  },
+
   /**
    * Envia mensagem formatada ao canal configurado
    * @param {'andamento'|'concluida'|'finalizada'} event
@@ -284,6 +487,49 @@ const WebhookService = {
 
   /** Monta o payload formatado */
   _buildMessage(event, task, category) {
+    if (category === 'Rompimentos' && event === 'andamento') {
+      const setor = task.setor || 'Não informado';
+      const tecnico = task.responsavel || 'Não informado';
+      const localizacao = task.coordenadas || 'Não informada';
+      const endereco = task.localizacaoTexto || 'Não informado';
+      const taskId = task.taskCode || `ROM-${String(task.id || '').padStart(4, '0')}`;
+      return {
+        text:
+`🚨 ALERTA CRÍTICO - ROMPIMENTO DETECTADO 🚨
+
+⚠️ ROMPIMENTO confirmado no sistema. Ação imediata necessária!
+
+📌 SETOR / CTO: ${setor}
+👨‍🔧 TÉCNICO RESPONSÁVEL: ${tecnico}
+📍 LOCALIZAÇÃO: ${localizacao}
+🏠 ENDEREÇO: ${endereco}
+🆔 ID DA TAREFA: ${taskId}`,
+      };
+    }
+
+    if (category === 'Rompimentos' && (event === 'concluida' || event === 'finalizada')) {
+      const setor = task.setor || 'Não informado';
+      const tecnico = task.responsavel || 'Não informado';
+      const localizacao = task.coordenadas || 'Não informada';
+      const endereco = task.localizacaoTexto || 'Não informado';
+      const taskId = task.taskCode || `ROM-${String(task.id || '').padStart(4, '0')}`;
+      const elapsed = this._formatDurationFromStart(task);
+      const title = event === 'concluida'
+        ? '✅ ROMPIMENTO CONCLUÍDO'
+        : '🏁 ROMPIMENTO FINALIZADO';
+      return {
+        text:
+`${title}
+
+📌 SETOR / CTO: ${setor}
+👨‍🔧 TÉCNICO RESPONSÁVEL: ${tecnico}
+📍 LOCALIZAÇÃO: ${localizacao}
+🏠 ENDEREÇO: ${endereco}
+🆔 ID DA TAREFA: ${taskId}
+⏱️ TEMPO DESDE O INÍCIO: ${elapsed}`,
+      };
+    }
+
     const labels = {
       andamento:  '🔵 *Tarefa em Andamento*',
       concluida:  '✅ *Tarefa Concluída*',
@@ -291,8 +537,11 @@ const WebhookService = {
     };
     const categoryLine = category ? `\nCategoria: *${category}*` : '';
     const descLine = task.descricao ? `\nDescrição: ${task.descricao}` : '';
+    const elapsedLine = (event === 'concluida' || event === 'finalizada')
+      ? `\nTempo desde o início: ${this._formatDurationFromStart(task)}`
+      : '';
     return {
-      text: `${labels[event]}\n*${task.titulo}*\nResponsável: ${task.responsavel} | Prazo: ${Utils.formatDate(task.prazo)} | Prioridade: ${task.prioridade}${categoryLine}${descLine}`,
+      text: `${labels[event]}\n*${task.titulo}*\nResponsável: ${task.responsavel} | Prazo: ${Utils.formatDate(task.prazo)} | Prioridade: ${task.prioridade}${categoryLine}${descLine}${elapsedLine}`,
     };
   },
 
@@ -365,6 +614,7 @@ const TaskService = {
   _opCategoryLabelMap: {
     'rompimentos': 'Rompimentos',
     'troca-poste': 'Troca de Poste',
+    'atendimento-cliente': 'Atendimento ao Cliente',
   },
 
   _isDoneStatus(status) {
@@ -372,7 +622,7 @@ const TaskService = {
   },
 
   _isPendingStatus(status) {
-    return status === 'Pendente' || status === 'Criada';
+    return status === 'Pendente' || status === 'Criada' || status === 'Backlog';
   },
 
   _isProgressStatus(status) {
@@ -473,6 +723,7 @@ const OpTaskService = {
   _categoryLabels: {
     'rompimentos': 'Rompimentos',
     'troca-poste': 'Troca de Poste',
+    'atendimento-cliente': 'Atendimento ao Cliente',
   },
 
   /**
@@ -504,8 +755,15 @@ const OpTaskService = {
 
   /** Retorna contagens por status para estatísticas */
   getStatusCounts() {
-    const counts = { Criada: 0, 'Em andamento': 0, Concluída: 0, Finalizada: 0 };
-    Store.getOpTasks().forEach(t => { if (counts[t.status] !== undefined) counts[t.status]++; });
+    const counts = { Criada: 0, 'Em andamento': 0, Concluída: 0, Finalizada: 0, Backlog: 0 };
+    Store.getOpTasks().forEach(t => {
+      if (t.status === 'Backlog' || t.status === 'Criada') {
+        counts.Criada++;
+        counts.Backlog++;
+        return;
+      }
+      if (counts[t.status] !== undefined) counts[t.status]++;
+    });
     return counts;
   },
 };
@@ -637,7 +895,8 @@ const ReportsService = {
           category === 'all' ||
           (category === 'dashboard' && t.source === 'dashboard') ||
           (category === 'rompimentos' && t.categoria === 'rompimentos') ||
-          (category === 'troca-poste' && t.categoria === 'troca-poste');
+          (category === 'troca-poste' && t.categoria === 'troca-poste') ||
+          (category === 'atendimento-cliente' && t.categoria === 'atendimento-cliente');
         return matchPeriod && matchCategory;
       });
   },
@@ -652,7 +911,7 @@ const ReportsService = {
   },
 
   getStatusDistribution(tasks) {
-    const statuses = ['Pendente', 'Criada', 'Em andamento', 'Concluída', 'Finalizada', 'Atrasada'];
+    const statuses = ['Pendente', 'Criada', 'Backlog', 'Em andamento', 'Concluída', 'Finalizada', 'Atrasada'];
     const counts = statuses.map(status => ({
       status,
       count: tasks.filter(t => t.status === status).length,
@@ -697,8 +956,21 @@ const ReportsService = {
 ───────────────────────────────────────────────────────────── */
 const UI = {
   _lastMovedOpTask: null,
+  _atendimentoExpanded: {},
+  _atendimentoGroupExpanded: {
+    Backlog: true,
+    'Em andamento': true,
+    'Concluída': true,
+    Finalizada: true,
+  },
+  _atdStatusOrder: ['Backlog', 'Em andamento', 'Concluída', 'Finalizada'],
+  _normalizeAtdStatus(status) {
+    if (status === 'Criada') return 'Backlog';
+    return status;
+  },
   /* ── Helpers de badge ───────────────────────────────────── */
   _statusBadgeMap: {
+    'Backlog':      's-pendente',
     'Pendente':     's-pendente',
     'Em andamento': 's-andamento',
     'Concluída':    's-concluida',
@@ -755,11 +1027,7 @@ const UI = {
       const isLate = t.effectiveStatus === 'Atrasada' || (t.prazo && t.prazo < tod && !['Concluída','Finalizada'].includes(t.status));
       const isDone = ['Concluída','Finalizada'].includes(t.effectiveStatus);
       const color  = Utils.getAvatarColor(t.responsavel);
-      const checkMarkup = t.source === 'dashboard'
-        ? `<div class="task-check ${isDone ? 'done' : ''}" data-check="${t.id}" data-check-source="${t.source}" role="checkbox" aria-checked="${isDone}" aria-label="Marcar como concluída" tabindex="0">
-             ${isDone ? this.checkSvg() : ''}
-           </div>`
-        : `<div class="task-check ${isDone ? 'done' : ''}" style="opacity:.55;cursor:default" aria-hidden="true">
+      const checkMarkup = `<div class="task-check ${isDone ? 'done' : ''}" data-check="${t.id}" data-check-source="${t.source}" role="checkbox" aria-checked="${isDone}" aria-label="Marcar como concluída" tabindex="0">
              ${isDone ? this.checkSvg() : ''}
            </div>`;
 
@@ -794,8 +1062,15 @@ const UI = {
     document.getElementById('op-count-finalizada').textContent= counts['Finalizada'];
 
     const allOpTasks = Store.getOpTasks();
-    document.getElementById('tab-count-rompimentos').textContent = allOpTasks.filter(t => t.categoria === 'rompimentos').length;
-    document.getElementById('tab-count-troca-poste').textContent = allOpTasks.filter(t => t.categoria === 'troca-poste').length;
+    const rompimentosCount = allOpTasks.filter(t => t.categoria === 'rompimentos').length;
+    const trocaPosteCount = allOpTasks.filter(t => t.categoria === 'troca-poste').length;
+    const atendimentoCount = allOpTasks.filter(t => t.categoria === 'atendimento-cliente').length;
+    const tabRompimentos = document.getElementById('tab-count-rompimentos');
+    const tabTrocaPoste = document.getElementById('tab-count-troca-poste');
+    const tabAtendimento = document.getElementById('tab-count-atendimento-cliente');
+    if (tabRompimentos) tabRompimentos.textContent = String(rompimentosCount);
+    if (tabTrocaPoste) tabTrocaPoste.textContent = String(trocaPosteCount);
+    if (tabAtendimento) tabAtendimento.textContent = String(atendimentoCount);
   },
 
   /* ── Kanban Board ───────────────────────────────────────── */
@@ -803,6 +1078,14 @@ const UI = {
     const category = Store.currentOpCategory;
     const tasks    = OpTaskService.getFilteredByCategory(category);
     const tod      = Utils.todayIso();
+    const isAtendimento = category === 'atendimento-cliente';
+    const board = document.getElementById('kanbanBoard');
+    if (isAtendimento) {
+      board?.classList.add('atd-mode');
+      this.renderAtendimentoList(tasks);
+      return;
+    }
+    board?.classList.remove('atd-mode');
 
     const columns = [
       { status: 'Criada',       key: 'col-criada',     label: 'Criada'       },
@@ -830,20 +1113,36 @@ const UI = {
       'Finalizada':   'to-finalizada',
     };
 
-    const board = document.getElementById('kanbanBoard');
     board.innerHTML = columns.map(col => {
       const colTasks = tasks.filter(t => t.status === col.status);
 
       const cards = colTasks.length
-        ? colTasks.map(t => {
+        ? colTasks
+          .filter(t => !(isAtendimento && t.parentTaskId))
+          .map(t => {
             const isLate = t.prazo && t.prazo < tod && !['Concluída','Finalizada'].includes(t.status);
+            const childTasks = isAtendimento
+              ? tasks.filter(c => Number(c.parentTaskId) === Number(t.id))
+              : [];
+            const parentTag = isAtendimento
+              ? `<span class="badge s-info" style="margin-bottom:6px">LISTA</span>`
+              : '';
             const nextStatuses = nextStatusMap[t.status] || [];
             const actionBtns = nextStatuses.map(ns =>
               `<button class="status-action-btn ${statusActionClass[ns]}" data-op-id="${t.id}" data-to-status="${ns}">${statusLabels[ns]}</button>`
             ).join('');
+            const childHtml = childTasks.length
+              ? `<div class="subtask-list">${childTasks.map(c => `
+                   <div class="subtask-item">
+                     <span>${c.taskCode || ''} · ${c.titulo}</span>
+                     <button type="button" data-open-subtask="${c.id}">${c.status}</button>
+                   </div>
+                 `).join('')}</div>`
+              : '';
 
             return `
               <article class="kanban-card ${this._lastMovedOpTask && this._lastMovedOpTask.id === t.id && this._lastMovedOpTask.status === t.status ? 'just-moved' : ''}" data-op-id="${t.id}" data-op-status="${t.status}" draggable="true" aria-label="${t.titulo}">
+                ${parentTag}
                 <div class="kanban-card-title">${t.titulo}</div>
                 <div class="kanban-card-date">${t.taskCode || ''}</div>
                 <div class="kanban-card-meta">
@@ -854,6 +1153,7 @@ const UI = {
                   <div class="kanban-card-date ${isLate ? 'late' : ''}">${Utils.formatDate(t.prazo)}</div>
                 </div>
                 <div class="kanban-card-actions">${actionBtns}</div>
+                ${childHtml}
               </article>
             `;
           }).join('')
@@ -892,6 +1192,11 @@ const UI = {
 
     board.querySelectorAll('.kanban-card').forEach(card => {
       card.addEventListener('click', e => {
+        const subtaskBtn = e.target.closest('[data-open-subtask]');
+        if (subtaskBtn) {
+          Controllers.opTask.openEditModal(+subtaskBtn.dataset.openSubtask);
+          return;
+        }
         if (e.target.closest('.status-action-btn')) return;
         const id = +card.dataset.opId;
         Controllers.opTask.openEditModal(id);
@@ -953,15 +1258,328 @@ const UI = {
     });
   },
 
+  renderAtendimentoList(tasks) {
+    const board = document.getElementById('kanbanBoard');
+    const statusLabel = (status) => status === 'Concluída' ? 'Concluído' : status;
+    const statusBadgeAtd = (status) => this.statusBadge(status).replace(status, statusLabel(status));
+    const normalized = tasks.map(t => {
+      const normalizedStatus = this._normalizeAtdStatus(t.status);
+      if (t.parentTaskId && normalizedStatus === 'Backlog') {
+        return { ...t, status: 'Em andamento' };
+      }
+      return { ...t, status: normalizedStatus };
+    });
+    const parentTasks = normalized.filter(t => t.isParentTask || !t.parentTaskId);
+    const childTasksAll = normalized.filter(t => t.parentTaskId);
+
+    const sortByDefault = (a, b) => {
+      const byDate = String(a.prazo || '9999-12-31').localeCompare(String(b.prazo || '9999-12-31'));
+      if (byDate !== 0) return byDate;
+      return String(a.criadaEm || '').localeCompare(String(b.criadaEm || ''));
+    };
+
+    const getChildren = (parentId) =>
+      childTasksAll
+        .filter(t => Number(t.parentTaskId) === Number(parentId))
+        .sort(sortByDefault);
+
+    const totals = {
+      listas: parentTasks.length,
+      subtarefas: childTasksAll.length,
+      concluidas: childTasksAll.filter(t => ['Concluída', 'Finalizada'].includes(t.status)).length,
+      emAndamento: childTasksAll.filter(t => t.status === 'Em andamento').length,
+    };
+
+    const renderSubtaskItem = (child, parentStatus) => `
+      <div class="atd-subtask-row ${this._atdLastMoved?.id === child.id ? 'just-moved' : ''}" data-task-row-id="${child.id}" data-open-subtask="${child.id}" draggable="true" data-drag-subtask="${child.id}">
+        <span class="atd-kind-badge child">Filha</span>
+        <span class="atd-subtask-title">${child.titulo}</span>
+        <span class="atd-parent-meta">${child.taskCode || ''}</span>
+        <span class="atd-parent-meta">${child.responsavel}</span>
+        <span class="atd-parent-meta">${Utils.formatDate(child.prazo)}</span>
+        <span>${statusBadgeAtd(child.status)}</span>
+        <div class="atd-subtask-actions">
+          <select class="atd-status-select" data-change-status="${child.id}">
+            ${['Em andamento', 'Concluída', 'Finalizada'].map(s => `<option value="${s}" ${s === child.status ? 'selected' : ''}>${statusLabel(s)}</option>`).join('')}
+          </select>
+          <button class="atd-action-btn" data-edit-subtask="${child.id}">Editar</button>
+          <button class="atd-action-btn danger" data-delete-subtask="${child.id}">Excluir</button>
+        </div>
+      </div>
+    `;
+
+    const renderTaskItem = (parent, groupStatus) => {
+      const children = getChildren(parent.id);
+      const expanded = this._atendimentoExpanded[parent.id] !== false;
+      const doneCount = children.filter(c => ['Concluída', 'Finalizada'].includes(c.status)).length;
+      const allDone = children.length > 0 && doneCount === children.length;
+      return `
+        <section class="atd-parent-card" data-parent-id="${parent.id}">
+          <div class="atd-parent-row ${this._atdLastMoved?.id === parent.id ? 'just-moved' : ''}" data-task-row-id="${parent.id}" data-toggle-parent="${parent.id}" role="button" tabindex="0" aria-expanded="${expanded ? 'true' : 'false'}">
+            <span class="atd-chevron ${expanded ? 'open' : ''}">▾</span>
+            <span class="atd-kind-badge parent">Pai</span>
+            <span class="atd-parent-title">${parent.titulo}</span>
+            <span class="atd-parent-meta">${parent.taskCode || ''}</span>
+            <span class="atd-parent-meta">${parent.responsavel}</span>
+            <span class="atd-parent-meta">${Utils.formatDate(parent.prazo)}</span>
+            <span>${statusBadgeAtd(parent.status)}</span>
+            <span class="atd-parent-meta">${children.length ? `${doneCount}/${children.length} concluídas` : 'Sem subtarefas'}${allDone ? ' · OK' : ''}</span>
+            <span class="atd-row-actions">
+              <select class="atd-status-select" data-change-status="${parent.id}">
+                ${this._atdStatusOrder.map(s => `<option value="${s}" ${s === parent.status ? 'selected' : ''}>${statusLabel(s)}</option>`).join('')}
+              </select>
+              <button class="atd-action-btn" data-edit-parent="${parent.id}">Editar</button>
+              <button class="atd-action-btn danger" data-delete-parent="${parent.id}">Excluir</button>
+            </span>
+          </div>
+          <div class="atd-subtasks ${expanded ? 'open' : ''}" data-drop-parent="${parent.id}">
+            ${children.length ? children.map(c => renderSubtaskItem(c, parent.status)).join('') : `<div class="calendar-empty" style="padding:12px 8px">Sem subtarefas nesta lista.</div>`}
+            <button class="kanban-col-add" style="margin:8px 0 0" data-add-child="${parent.id}" data-group-status="${groupStatus}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Adicionar subtarefa
+            </button>
+          </div>
+        </section>
+      `;
+    };
+
+    const renderTaskGroup = (status) => {
+      const groupParents = parentTasks
+        .filter(t => t.status === status)
+        .sort(sortByDefault);
+      const expanded = this._atendimentoGroupExpanded[status] !== false;
+      return `
+        <section class="atd-group" data-group="${status}">
+          <header class="atd-group-head">
+            <button class="atd-group-toggle" data-toggle-group="${status}">
+              <span class="atd-chevron ${expanded ? 'open' : ''}">▾</span>
+              <span class="atd-group-title">${status.toUpperCase()}</span>
+              <span class="atd-group-count">${groupParents.length}</span>
+            </button>
+            <button class="atd-action-btn progress" data-add-parent-in-group="${status}">Nova lista</button>
+          </header>
+          <div class="atd-group-body ${expanded ? 'open' : ''}">
+            ${groupParents.length
+              ? `<div class="atd-table-head"><span></span><span>Tipo</span><span>Tarefa</span><span>ID</span><span>Responsável</span><span>Prazo</span><span>Status</span><span>Progresso</span><span>Ações</span></div>${groupParents.map(p => renderTaskItem(p, status)).join('')}`
+              : `<div class="calendar-empty">Nenhuma tarefa neste grupo.</div>`}
+          </div>
+        </section>
+      `;
+    };
+
+    board.innerHTML = `
+      <div class="atd-list-wrap">
+        <div class="atd-list-toolbar">
+          <span class="panel-title">Atendimento ao Cliente · Listas e Subtarefas</span>
+          <div class="atd-toolbar-right">
+            <div class="atd-kpi-group" aria-label="Indicadores de atendimento">
+              <span class="atd-kpi">Listas: <strong>${totals.listas}</strong></span>
+              <span class="atd-kpi">Subtarefas: <strong>${totals.subtarefas}</strong></span>
+              <span class="atd-kpi">Em andamento: <strong>${totals.emAndamento}</strong></span>
+              <span class="atd-kpi">Concluídas: <strong>${totals.concluidas}</strong></span>
+            </div>
+            <button class="primary-btn" id="addAtdParentBtn">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Nova lista
+            </button>
+          </div>
+        </div>
+        <div class="atd-groups">
+          ${this._atdStatusOrder.map(renderTaskGroup).join('')}
+        </div>
+      </div>
+    `;
+
+    document.getElementById('addAtdParentBtn')?.addEventListener('click', () => {
+      Controllers.opTask.openNewModal({ kind: 'parent', category: 'atendimento-cliente', status: 'Backlog' });
+    });
+
+    board.querySelectorAll('[data-add-parent-in-group]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        Controllers.opTask.openNewModal({ kind: 'parent', category: 'atendimento-cliente', status: btn.dataset.addParentInGroup });
+      });
+    });
+
+    board.querySelectorAll('[data-toggle-group]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const status = btn.dataset.toggleGroup;
+        this._atendimentoGroupExpanded[status] = !(this._atendimentoGroupExpanded[status] !== false);
+        this.renderAtendimentoList(normalized);
+      });
+    });
+
+    board.querySelectorAll('[data-toggle-parent]').forEach(btn => {
+      const toggleParent = (e) => {
+        const parentId = Number(e.currentTarget.dataset.toggleParent);
+        if (e.target.closest('.atd-row-actions')) return;
+        this._atendimentoExpanded[parentId] = !(this._atendimentoExpanded[parentId] !== false);
+        this.renderAtendimentoList(normalized);
+      };
+      btn.addEventListener('click', toggleParent);
+      btn.addEventListener('keydown', e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggleParent(e);
+        }
+      });
+    });
+
+    board.querySelectorAll('[data-change-status]').forEach(select => {
+      select.addEventListener('change', e => {
+        e.stopPropagation();
+        const id = Number(select.dataset.changeStatus);
+        const newStatus = select.value;
+        const task = Store.findOpTask(id);
+        if (!task) return;
+        const isChild = Boolean(task.parentTaskId);
+        const targetGroup = isChild
+          ? this._normalizeAtdStatus(Store.findOpTask(Number(task.parentTaskId))?.status || 'Backlog')
+          : newStatus;
+        this._atdLastMoved = { id, status: targetGroup };
+        this._atendimentoGroupExpanded[targetGroup] = true;
+        OpTaskService.changeStatus(id, newStatus);
+        UI.renderOpPage();
+        UI.renderCalendarPage();
+        UI.renderReportsPage();
+      });
+    });
+
+    board.querySelectorAll('[data-edit-parent]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        Controllers.opTask.openEditModal(Number(btn.dataset.editParent));
+      });
+    });
+    board.querySelectorAll('[data-delete-parent]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        Controllers.opTask.deleteTask(Number(btn.dataset.deleteParent), { cascade: true });
+      });
+    });
+    board.querySelectorAll('[data-add-child]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        const parentId = Number(e.currentTarget.dataset.addChild);
+        Controllers.opTask.openNewModal({ kind: 'child', parentTaskId: parentId, category: 'atendimento-cliente' });
+      });
+    });
+
+    board.querySelectorAll('[data-open-subtask]').forEach(row => {
+      row.addEventListener('click', e => {
+        if (e.target.closest('.atd-subtask-actions')) return;
+        Controllers.opTask.openEditModal(Number(row.dataset.openSubtask));
+      });
+    });
+    board.querySelectorAll('[data-edit-subtask]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        Controllers.opTask.openEditModal(Number(btn.dataset.editSubtask));
+      });
+    });
+    board.querySelectorAll('[data-delete-subtask]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        Controllers.opTask.deleteTask(Number(btn.dataset.deleteSubtask), { cascade: false });
+      });
+    });
+
+    let draggedSubtaskId = null;
+    board.querySelectorAll('[data-drag-subtask]').forEach(row => {
+      row.addEventListener('dragstart', e => {
+        draggedSubtaskId = Number(row.dataset.dragSubtask);
+        row.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(draggedSubtaskId));
+      });
+      row.addEventListener('dragend', () => {
+        row.classList.remove('dragging');
+        board.querySelectorAll('.atd-subtasks.drop-over').forEach(el => el.classList.remove('drop-over'));
+      });
+    });
+    board.querySelectorAll('[data-drop-parent]').forEach(zone => {
+      zone.addEventListener('dragover', e => {
+        e.preventDefault();
+        zone.classList.add('drop-over');
+      });
+      zone.addEventListener('dragleave', e => {
+        if (e.relatedTarget && zone.contains(e.relatedTarget)) return;
+        zone.classList.remove('drop-over');
+      });
+      zone.addEventListener('drop', e => {
+        e.preventDefault();
+        zone.classList.remove('drop-over');
+        const targetParentId = Number(zone.dataset.dropParent);
+        if (!draggedSubtaskId || !targetParentId) return;
+        const subtask = Store.findOpTask(draggedSubtaskId);
+        if (!subtask || Number(subtask.parentTaskId) === targetParentId) return;
+        Store.updateOpTask(draggedSubtaskId, { parentTaskId: targetParentId, isParentTask: false });
+        UI.renderOpPage();
+        UI.renderCalendarPage();
+        UI.renderReportsPage();
+        ToastService.show('Subtarefa movida para outra lista', 'success');
+      });
+    });
+
+    if (this._atdLastMoved?.id) {
+      const movedId = this._atdLastMoved.id;
+      requestAnimationFrame(() => {
+        const el = board.querySelector(`[data-task-row-id="${movedId}"]`);
+        if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      });
+      setTimeout(() => { this._atdLastMoved = null; }, 650);
+    }
+  },
+
   /* ── Agenda ─────────────────────────────────────────────── */
   renderAgenda() {
-    const agenda = [
-      { day: 'Seg', text: 'Reunião de status',    time: '09:00' },
-      { day: 'Qua', text: 'Revisão de contratos', time: '14:00' },
-      { day: 'Sex', text: 'Entrega de relatório', time: '11:00' },
-      { day: 'Qui', text: 'Treinamento interno',  time: '15:30' },
-    ];
+    const now = new Date();
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    const weekDay = start.getDay(); // 0 dom ... 6 sab
+    const diffToMonday = weekDay === 0 ? -6 : 1 - weekDay;
+    start.setDate(start.getDate() + diffToMonday);
+
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+
+    const startIso = Utils.toIsoLocal(start);
+    const endIso = Utils.toIsoLocal(end);
+
+    const taskItems = TaskService.getAllDashboardTasks()
+      .filter(t => t.prazo && t.prazo >= startIso && t.prazo <= endIso)
+      .map(t => ({
+        date: t.prazo,
+        text: t.titulo,
+        source: t.sourceLabel,
+      }));
+
+    const noteItems = Store.getCalendarNotes()
+      .filter(n => n.date && n.date >= startIso && n.date <= endIso)
+      .map(n => ({
+        date: n.date,
+        text: n.title,
+        source: 'Anotação',
+      }));
+
+    const agenda = [...taskItems, ...noteItems]
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(0, 10)
+      .map(item => {
+        const [year, month, day] = item.date.split('-').map(Number);
+        const d = new Date(year, month - 1, day);
+        const dayLabel = d.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '');
+        return {
+          day: dayLabel.charAt(0).toUpperCase() + dayLabel.slice(1, 3),
+          text: item.text,
+          time: `${Utils.formatDate(item.date)} · ${item.source}`,
+        };
+      });
+
     const list = document.getElementById('agendaList');
+    if (!agenda.length) {
+      list.innerHTML = `<li class="agenda-item"><div><div class="agenda-desc">Nenhum item marcado para esta semana.</div><div class="agenda-time">Adicione tarefas ou anotações no calendário.</div></div></li>`;
+      return;
+    }
+
     list.innerHTML = agenda.map(a => `
       <li class="agenda-item">
         <div class="agenda-day">${a.day}</div>
@@ -1140,6 +1758,7 @@ const UI = {
 
   /* ── Full dashboard render ─────────────────────────────── */
   renderDashboard() {
+    this.renderAgenda();
     this.renderDashboardStats();
     this.renderTaskTable();
   },
@@ -1156,6 +1775,62 @@ const UI = {
    CONTROLLERS — Lógica de interação do usuário
 ───────────────────────────────────────────────────────────── */
 const Controllers = {
+  auth: {
+    _sessionKey: 'planner.session.v1',
+    _allowedUsers: [
+      { user: 'projetos', pass: '123' },
+    ],
+    _isAuthenticated() {
+      return localStorage.getItem(this._sessionKey) === '1';
+    },
+    _lock() {
+      document.body.classList.add('auth-locked');
+    },
+    _unlock() {
+      document.body.classList.remove('auth-locked');
+    },
+    _login(user, pass) {
+      if (!user || !pass) {
+        ToastService.show('Preencha usuário e senha para entrar', 'danger');
+        return false;
+      }
+      const normalizedUser = String(user).trim().toLowerCase();
+      const normalizedPass = String(pass).trim();
+      const valid = this._allowedUsers.some(
+        (item) => item.user.toLowerCase() === normalizedUser && item.pass === normalizedPass
+      );
+      if (!valid) {
+        ToastService.show('Usuário ou senha inválidos', 'danger');
+        return false;
+      }
+      localStorage.setItem(this._sessionKey, '1');
+      this._unlock();
+      return true;
+    },
+    logout() {
+      localStorage.removeItem(this._sessionKey);
+      this._lock();
+      const passInput = document.getElementById('loginPass');
+      if (passInput) passInput.value = '';
+      ToastService.show('Sessão encerrada', 'info');
+    },
+    init() {
+      if (this._isAuthenticated()) this._unlock();
+      else this._lock();
+
+      const form = document.getElementById('loginForm');
+      form?.addEventListener('submit', e => {
+        e.preventDefault();
+        const user = document.getElementById('loginUser')?.value.trim();
+        const pass = document.getElementById('loginPass')?.value.trim();
+        if (this._login(user, pass)) {
+          ToastService.show('Login realizado com sucesso', 'success');
+        }
+      });
+
+      document.getElementById('logoutBtn')?.addEventListener('click', () => this.logout());
+    },
+  },
 
   /* ── Sidebar ──────────────────────────────────────────── */
   sidebar: {
@@ -1233,11 +1908,20 @@ const Controllers = {
       UI.renderReportsPage();
     },
 
-    toggleDone(id) {
-      const task = Store.findTask(id);
-      if (!task) return;
-      const wasDone = task.status === 'Concluída';
-      Store.updateTask(id, { status: wasDone ? 'Pendente' : 'Concluída' });
+    toggleDone(id, source = 'dashboard') {
+      if (source === 'operacional') {
+        const task = Store.findOpTask(id);
+        if (!task) return;
+        const wasDone = task.status === 'Concluída' || task.status === 'Finalizada';
+        const nextStatus = wasDone ? 'Em andamento' : 'Concluída';
+        OpTaskService.changeStatus(id, nextStatus);
+        UI.renderOpPage();
+      } else {
+        const task = Store.findTask(id);
+        if (!task) return;
+        const wasDone = task.status === 'Concluída';
+        Store.updateTask(id, { status: wasDone ? 'Pendente' : 'Concluída' });
+      }
       UI.renderDashboard();
       UI.renderCalendarPage();
       UI.renderReportsPage();
@@ -1253,7 +1937,7 @@ const Controllers = {
       document.getElementById('taskTableBody').addEventListener('click', e => {
         const checkEl = e.target.closest('[data-check]');
         if (checkEl) {
-          if (checkEl.dataset.checkSource === 'dashboard') this.toggleDone(+checkEl.dataset.check);
+          this.toggleDone(+checkEl.dataset.check, checkEl.dataset.checkSource || 'dashboard');
           return;
         }
         const row = e.target.closest('tr[data-id]');
@@ -1270,54 +1954,292 @@ const Controllers = {
 
   /* ── Op Task Modal ────────────────────────────────────── */
   opTask: {
+    _newTaskPreset: null,
+    _coordsLookupTimer: null,
+    _isAtendimentoCategory(category = Store.currentOpCategory) {
+      return category === 'atendimento-cliente';
+    },
+    _isRompimentoCategory(category = Store.currentOpCategory) {
+      return category === 'rompimentos';
+    },
+    _toggleGroup(groupId, visible) {
+      const el = document.getElementById(groupId);
+      if (!el) return;
+      el.style.display = visible ? '' : 'none';
+    },
+    _parseCoords(raw) {
+      if (!raw) return null;
+      const normalized = raw.replace(/\s+/g, '');
+      const parts = normalized.split(',');
+      if (parts.length !== 2) return null;
+      const lat = Number(parts[0]);
+      const lon = Number(parts[1]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+      return { lat, lon };
+    },
+    async _resolveCoordsToAddress(rawCoords) {
+      const coords = this._parseCoords(rawCoords);
+      const addressInput = document.getElementById('op-address-readonly');
+      const hint = document.getElementById('op-address-hint');
+      if (!addressInput || !hint) return;
+
+      if (!coords) {
+        addressInput.value = '';
+        hint.textContent = 'Coordenadas inválidas. Use o formato: latitude, longitude.';
+        return;
+      }
+
+      hint.textContent = 'Buscando endereço...';
+      try {
+        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coords.lat}&lon=${coords.lon}&zoom=18&addressdetails=1`;
+        const response = await fetch(url, {
+          headers: {
+            Accept: 'application/json',
+          },
+        });
+        if (!response.ok) throw new Error('Falha na consulta');
+        const payload = await response.json();
+        const addr = payload?.address || {};
+        const rua = addr.road || addr.pedestrian || addr.residential || addr.path || '';
+        const bairro = addr.suburb || addr.neighbourhood || addr.city_district || addr.quarter || '';
+        const text = [rua, bairro].filter(Boolean).join(' - ');
+        if (!text) {
+          addressInput.value = '';
+          hint.textContent = 'Não foi possível identificar rua e bairro para essas coordenadas.';
+          return;
+        }
+        addressInput.value = text;
+        hint.textContent = 'Localização identificada automaticamente.';
+      } catch {
+        addressInput.value = '';
+        hint.textContent = 'Não foi possível converter coordenadas em endereço agora.';
+      }
+    },
+    _syncCategorySpecificFields(category = Store.currentOpCategory) {
+      const isAtendimento = this._isAtendimentoCategory(category);
+      const isRompimento = this._isRompimentoCategory(category);
+      const modalTitle = document.getElementById('opTaskModalTitle');
+
+      this._toggleGroup('opTituloGroup', !isRompimento);
+      this._toggleGroup('opPrazoGroup', !isRompimento);
+      this._toggleGroup('opPrioridadeGroup', !isRompimento);
+
+      this._toggleGroup('opParentConfig', isAtendimento);
+      this._toggleGroup('opRompimentoCoordsRow', isRompimento);
+      this._toggleGroup('opRompimentoExtraRow', isRompimento);
+      if (modalTitle && !Store.editingOpTaskId) {
+        modalTitle.textContent = isRompimento ? 'Nova tarefa de rompimento' : 'Nova tarefa';
+      }
+
+      if (isRompimento) {
+        const prioridade = document.getElementById('op-prioridade');
+        if (prioridade) prioridade.value = 'Alta';
+      }
+    },
+    _syncAtendimentoKindFields() {
+      const kindEl = document.getElementById('op-task-kind');
+      const isParent = (kindEl?.value || 'parent') === 'parent';
+      const responsavelInput = document.getElementById('op-responsavel');
+      const prazoInput = document.getElementById('op-prazo');
+      const regiaoSelect = document.getElementById('op-regiao');
+      const responsavelGroup = responsavelInput?.closest('.form-group');
+      const prazoGroup = prazoInput?.closest('.form-group');
+      const regiaoGroup = regiaoSelect?.closest('.form-group');
+      const isRompimento = this._isRompimentoCategory();
+
+      [responsavelGroup, prazoGroup, regiaoGroup].forEach(group => {
+        if (!group) return;
+        if (isRompimento) {
+          group.style.display = '';
+          return;
+        }
+        group.style.display = isParent ? '' : 'none';
+      });
+
+      if (responsavelInput) {
+        responsavelInput.disabled = isRompimento ? false : !isParent;
+      }
+      if (prazoInput) {
+        prazoInput.disabled = isRompimento ? true : !isParent;
+      }
+      if (regiaoSelect) {
+        regiaoSelect.disabled = isRompimento ? false : !isParent;
+      }
+    },
+
+    _parentTaskOptions(currentTaskId = null) {
+      return Store.getOpTasks().filter(t =>
+        t.categoria === 'atendimento-cliente' &&
+        t.isParentTask === true &&
+        t.id !== currentTaskId
+      );
+    },
+    _syncParentTaskUi(category = Store.currentOpCategory, currentTask = null) {
+      const wrap = document.getElementById('opParentConfig');
+      const kindEl = document.getElementById('op-task-kind');
+      const parentSelect = document.getElementById('op-parent-task');
+      if (!wrap || !kindEl || !parentSelect) return;
+
+      if (!this._isAtendimentoCategory(category)) {
+        wrap.style.display = 'none';
+        kindEl.value = 'parent';
+        parentSelect.value = '';
+        const responsavelInput = document.getElementById('op-responsavel');
+        const prazoInput = document.getElementById('op-prazo');
+        const regiaoSelect = document.getElementById('op-regiao');
+        [responsavelInput, prazoInput, regiaoSelect].forEach(input => {
+          const group = input?.closest('.form-group');
+          if (group) group.style.display = '';
+          if (input) input.disabled = false;
+        });
+        this._syncCategorySpecificFields(category);
+        return;
+      }
+
+      wrap.style.display = 'flex';
+      wrap.style.flexDirection = 'column';
+      const currentId = currentTask?.id || null;
+      const options = this._parentTaskOptions(currentId);
+      parentSelect.innerHTML = `<option value="">Selecione uma tarefa pai</option>${options.map(t =>
+        `<option value="${t.id}">${t.taskCode || `ATD-${String(t.id).padStart(4, '0')}`} - ${t.titulo}</option>`
+      ).join('')}`;
+
+      if (currentTask) {
+        kindEl.value = currentTask.isParentTask ? 'parent' : 'child';
+        parentSelect.value = currentTask.parentTaskId ? String(currentTask.parentTaskId) : '';
+      } else {
+        kindEl.value = 'parent';
+        parentSelect.value = '';
+      }
+
+      parentSelect.disabled = kindEl.value === 'parent';
+      this._syncCategorySpecificFields(category);
+      this._syncAtendimentoKindFields();
+    },
     _nextTaskCode(category = Store.currentOpCategory) {
-      const prefix = category === 'troca-poste' ? 'POS' : 'ROM';
+      const prefixMap = {
+        'rompimentos': 'ROM',
+        'troca-poste': 'POS',
+        'atendimento-cliente': 'ATD',
+      };
+      const prefix = prefixMap[category] || 'ROM';
       const count = Store.getOpTasks().filter(t => t.categoria === category).length + 1;
       return `${prefix}-${String(count).padStart(4, '0')}`;
     },
 
     _fallbackTaskCode(task) {
-      const prefix = task.categoria === 'troca-poste' ? 'POS' : 'ROM';
+      const prefixMap = {
+        'rompimentos': 'ROM',
+        'troca-poste': 'POS',
+        'atendimento-cliente': 'ATD',
+      };
+      const prefix = prefixMap[task.categoria] || 'ROM';
       return `${prefix}-${String(task.id).padStart(4, '0')}`;
     },
 
-    _clearForm() {
-      const category = Store.currentOpCategory;
-      document.getElementById('op-task-code').value  = this._nextTaskCode(category);
+    _clearForm(preset = {}) {
+      const category = preset.category || Store.currentOpCategory;
       document.getElementById('op-titulo').value      = '';
-      document.getElementById('op-setor').value       = '';
       document.getElementById('op-responsavel').value = '';
-      document.getElementById('op-clientes-afetados').value = '';
-      document.getElementById('op-descricao').value   = '';
+      document.getElementById('op-prazo').value       = '';
       document.getElementById('op-prioridade').value  = 'Alta';
+      document.getElementById('op-regiao').value      = '';
+      const coordsInput = document.getElementById('op-coords');
+      const addressInput = document.getElementById('op-address-readonly');
+      const addressHint = document.getElementById('op-address-hint');
+      if (coordsInput) coordsInput.value = '';
+      if (addressInput) addressInput.value = '';
+      if (addressHint) addressHint.textContent = 'Informe as coordenadas para localizar automaticamente.';
+      this._syncParentTaskUi(category, null);
+      this._syncCategorySpecificFields(category);
+      this._newTaskPreset = { ...preset };
+      if (this._isAtendimentoCategory(category)) {
+        const kindEl = document.getElementById('op-task-kind');
+        const parentSelect = document.getElementById('op-parent-task');
+        if (kindEl && preset.kind) kindEl.value = preset.kind;
+        if (parentSelect) {
+          parentSelect.disabled = (kindEl?.value || 'parent') === 'parent';
+          if (preset.parentTaskId) parentSelect.value = String(preset.parentTaskId);
+        }
+      }
     },
 
     _validate() {
-      const taskCode    = document.getElementById('op-task-code').value.trim();
       const titulo      = document.getElementById('op-titulo').value.trim();
-      const setor       = document.getElementById('op-setor').value.trim();
       const responsavel = document.getElementById('op-responsavel').value.trim();
-      const clientesAfetados = document.getElementById('op-clientes-afetados').value.trim();
+      const prazo       = document.getElementById('op-prazo').value;
+      const taskKind = document.getElementById('op-task-kind')?.value || 'parent';
+      const isParentTask = taskKind === 'parent';
+      const parentTaskIdRaw = document.getElementById('op-parent-task')?.value || '';
+      const parentTaskId = parentTaskIdRaw ? Number(parentTaskIdRaw) : null;
       const existing = Store.editingOpTaskId ? Store.findOpTask(Store.editingOpTaskId) : null;
+      const category = existing?.categoria || Store.currentOpCategory;
+      const regiao = document.getElementById('op-regiao').value;
+      const taskCode = existing?.taskCode || this._nextTaskCode(category);
+      const selectedParent = parentTaskId ? Store.findOpTask(parentTaskId) : null;
+      const coordsRaw = document.getElementById('op-coords')?.value.trim() || '';
+      const autoAddress = document.getElementById('op-address-readonly')?.value.trim() || '';
+      const clientesAfetadosRaw = document.getElementById('op-clientes-afetados')?.value.trim() || '';
+      const isRompimento = this._isRompimentoCategory(category);
 
-      if (!taskCode)    { ToastService.show('ID da tarefa é obrigatório', 'danger'); return null; }
-      if (!titulo)      { ToastService.show('Informe o título da tarefa', 'danger');       return null; }
-      if (!setor)       { ToastService.show('Informe o nome do setor', 'danger');          return null; }
-      if (!responsavel) { ToastService.show('Informe o responsável pela tarefa', 'danger'); return null; }
+      if (!isRompimento && !titulo)      { ToastService.show('Informe o título da tarefa', 'danger');       return null; }
+      if (isParentTask && !responsavel) { ToastService.show('Informe o responsável pela tarefa', 'danger'); return null; }
+      if (!isRompimento && isParentTask && !prazo)       { ToastService.show('Informe a data de vencimento', 'danger');      return null; }
+      if (!isRompimento && !document.getElementById('op-prioridade').value) { ToastService.show('Informe a prioridade', 'danger'); return null; }
+      if (isParentTask && !regiao)      { ToastService.show('Informe a região', 'danger');                   return null; }
+      if (isRompimento && !coordsRaw)   { ToastService.show('Informe as coordenadas da localização', 'danger'); return null; }
+      if (isRompimento && !autoAddress) { ToastService.show('A localização automática (rua/bairro) é obrigatória', 'danger'); return null; }
+      if (isRompimento && (!clientesAfetadosRaw || !/^\d+$/.test(clientesAfetadosRaw) || Number(clientesAfetadosRaw) <= 0)) {
+        ToastService.show('Informe uma quantidade de clientes afetados válida', 'danger');
+        return null;
+      }
+      if (this._isAtendimentoCategory(category) && !isParentTask && !parentTaskId) {
+        ToastService.show('Selecione a tarefa pai para criar uma tarefa filha', 'danger');
+        return null;
+      }
+      const presetStatus = this._newTaskPreset?.status || null;
+      const defaultStatus = this._isAtendimentoCategory(category)
+        ? (isParentTask ? (presetStatus || 'Backlog') : 'Em andamento')
+        : 'Criada';
+      const currentStatus = existing?.status || defaultStatus;
+      const normalizedStatus = (!isParentTask && this._isAtendimentoCategory(category) && (currentStatus === 'Backlog' || currentStatus === 'Criada'))
+        ? 'Em andamento'
+        : currentStatus;
+      const finalTitulo = isRompimento
+        ? `Rompimento - ${autoAddress}`
+        : titulo;
+      const finalPrazo = isRompimento
+        ? Utils.todayIso()
+        : (isParentTask ? prazo : (selectedParent?.prazo || existing?.prazo || ''));
+      const finalPrioridade = isRompimento ? 'Alta' : document.getElementById('op-prioridade').value;
+      const finalDescricao = isRompimento ? `Coordenadas: ${coordsRaw} | Local: ${autoAddress}` : '';
       return {
-        taskCode, titulo, setor, responsavel, clientesAfetados,
-        categoria:  existing?.categoria || Store.currentOpCategory,
-        prazo:      existing?.prazo || Utils.todayIso(),
-        prioridade: document.getElementById('op-prioridade').value,
-        descricao:  document.getElementById('op-descricao').value.trim(),
-        status:     existing?.status || 'Criada',
+        taskCode,
+        titulo: finalTitulo,
+        responsavel: isParentTask ? responsavel : (selectedParent?.responsavel || existing?.responsavel || ''),
+        setor: isParentTask ? regiao : (selectedParent?.setor || selectedParent?.regiao || existing?.setor || ''),
+        regiao: isParentTask ? regiao : (selectedParent?.regiao || selectedParent?.setor || existing?.regiao || ''),
+        clientesAfetados: isRompimento ? clientesAfetadosRaw : '',
+        coordenadas: isRompimento ? coordsRaw : '',
+        localizacaoTexto: isRompimento ? autoAddress : '',
+        categoria:  category,
+        prazo: finalPrazo,
+        prioridade: finalPrioridade,
+        descricao:  finalDescricao,
+        status:     normalizedStatus,
+        isParentTask: this._isAtendimentoCategory(category) ? isParentTask : false,
+        parentTaskId: this._isAtendimentoCategory(category) ? (isParentTask ? null : parentTaskId) : null,
       };
     },
 
-    openNewModal() {
+    openNewModal(preset = {}) {
       Store.editingOpTaskId = null;
+      if (preset.category) Store.currentOpCategory = preset.category;
       document.getElementById('opTaskModalTitle').textContent = 'Nova tarefa';
-      this._clearForm();
+      const deleteBtn = document.getElementById('deleteOpTaskBtn');
+      if (deleteBtn) deleteBtn.style.display = 'none';
+      this._clearForm(preset);
       ModalService.open('opTaskModal');
     },
 
@@ -1326,14 +2248,49 @@ const Controllers = {
       if (!task) return;
       Store.editingOpTaskId = id;
       document.getElementById('opTaskModalTitle').textContent = 'Editar tarefa';
-      document.getElementById('op-task-code').value   = task.taskCode || this._fallbackTaskCode(task);
       document.getElementById('op-titulo').value      = task.titulo;
-      document.getElementById('op-setor').value       = task.setor || '';
       document.getElementById('op-responsavel').value = task.responsavel;
-      document.getElementById('op-clientes-afetados').value = task.clientesAfetados || '';
-      document.getElementById('op-descricao').value   = task.descricao || '';
+      document.getElementById('op-prazo').value       = task.prazo || '';
       document.getElementById('op-prioridade').value  = task.prioridade;
+      document.getElementById('op-regiao').value      = task.regiao || task.setor || '';
+      const coordsInput = document.getElementById('op-coords');
+      const addressInput = document.getElementById('op-address-readonly');
+      const addressHint = document.getElementById('op-address-hint');
+      const clientesInput = document.getElementById('op-clientes-afetados');
+      if (coordsInput) coordsInput.value = task.coordenadas || '';
+      if (addressInput) addressInput.value = task.localizacaoTexto || '';
+      if (addressHint) addressHint.textContent = task.localizacaoTexto ? 'Localização carregada.' : 'Informe as coordenadas para localizar automaticamente.';
+      if (clientesInput) clientesInput.value = task.clientesAfetados || '';
+      const deleteBtn = document.getElementById('deleteOpTaskBtn');
+      if (deleteBtn) deleteBtn.style.display = 'inline-flex';
+      this._newTaskPreset = null;
+      this._syncParentTaskUi(task.categoria, task);
+      this._syncCategorySpecificFields(task.categoria);
+      this._syncAtendimentoKindFields();
       ModalService.open('opTaskModal');
+    },
+
+    deleteTask(id = Store.editingOpTaskId, options = {}) {
+      const task = Store.findOpTask(id);
+      if (!task) return;
+      const hasChildren = Store.getOpTasks().some(t => Number(t.parentTaskId) === Number(id));
+      const cascade = options.cascade ?? hasChildren;
+      const message = cascade
+        ? 'Excluir esta tarefa pai e todas as subtarefas vinculadas?'
+        : 'Excluir esta tarefa?';
+      if (!window.confirm(message)) return;
+
+      const removed = Store.removeOpTask(id, { cascade });
+      if (!removed) {
+        ToastService.show('Não foi possível excluir a tarefa', 'danger');
+        return;
+      }
+      ToastService.show('Tarefa excluída com sucesso', 'success');
+      ModalService.close('opTaskModal');
+      UI.renderOpPage();
+      UI.renderDashboard();
+      UI.renderCalendarPage();
+      UI.renderReportsPage();
     },
 
     save() {
@@ -1365,6 +2322,27 @@ const Controllers = {
     init() {
       document.getElementById('openOpTaskModalBtn').addEventListener('click', () => this.openNewModal());
       document.getElementById('saveOpTaskBtn').addEventListener('click', () => this.save());
+      document.getElementById('deleteOpTaskBtn')?.addEventListener('click', () => this.deleteTask());
+      document.getElementById('opCoordsLookupBtn')?.addEventListener('click', () => {
+        const value = document.getElementById('op-coords')?.value || '';
+        this._resolveCoordsToAddress(value);
+      });
+      document.getElementById('op-task-kind')?.addEventListener('change', e => {
+        const parentSelect = document.getElementById('op-parent-task');
+        if (!parentSelect) return;
+        const isParent = e.target.value === 'parent';
+        parentSelect.disabled = isParent;
+        if (isParent) parentSelect.value = '';
+        this._syncAtendimentoKindFields();
+      });
+      document.getElementById('op-coords')?.addEventListener('input', e => {
+        const value = e.target.value;
+        clearTimeout(this._coordsLookupTimer);
+        this._coordsLookupTimer = setTimeout(() => this._resolveCoordsToAddress(value), 500);
+      });
+      document.getElementById('op-coords')?.addEventListener('blur', e => {
+        this._resolveCoordsToAddress(e.target.value);
+      });
       ['closeOpTaskModal','cancelOpTaskModal'].forEach(id =>
         document.getElementById(id)?.addEventListener('click', () => ModalService.close('opTaskModal'))
       );
@@ -1407,6 +2385,7 @@ const Controllers = {
           tab.classList.add('active');
           tab.setAttribute('aria-selected', 'true');
           Store.currentOpCategory = tab.dataset.category;
+          Controllers.opTask._syncParentTaskUi(Store.currentOpCategory, null);
           UI.renderKanban();
         });
       });
@@ -1469,6 +2448,7 @@ const Controllers = {
       CalendarService.createNote({ date, title, description, priority });
       CalendarService.selectedDateIso = date;
       ModalService.close('calendarNoteModal');
+      UI.renderAgenda();
       UI.renderCalendarPage();
       ToastService.show('Anotação salva no calendário', 'success');
     },
@@ -1508,6 +2488,7 @@ const Controllers = {
         const removeBtn = e.target.closest('[data-remove-note]');
         if (!removeBtn) return;
         CalendarService.removeNote(+removeBtn.dataset.removeNote);
+        UI.renderAgenda();
         UI.renderCalendarPage();
         ToastService.show('Anotação removida', 'info');
       });
@@ -1616,7 +2597,9 @@ const Controllers = {
 /* ─────────────────────────────────────────────────────────────
    APP INIT — Bootstrap da aplicação
 ───────────────────────────────────────────────────────────── */
-function initApp() {
+async function initApp() {
+  await Store.bootstrapFromRemote();
+  Controllers.auth.init();
   // Inicializa todos os controllers
   Controllers.sidebar.init();
   Controllers.task.init();
@@ -1638,11 +2621,19 @@ function initApp() {
   // Clock
   UI.updateClock();
   setInterval(() => UI.updateClock(), 30000);
+  setInterval(async () => {
+    const updated = await Store.bootstrapFromRemote();
+    if (!updated) return;
+    UI.renderDashboard();
+    UI.renderOpPage();
+    UI.renderCalendarPage();
+    UI.renderReportsPage();
+  }, 25000);
 }
 
 // Inicia quando o DOM estiver pronto
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initApp);
+  document.addEventListener('DOMContentLoaded', () => { initApp(); });
 } else {
   initApp();
 }

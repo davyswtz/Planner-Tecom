@@ -1,0 +1,9 @@
+{
+  "name": "planner-vercel-test",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@vercel/blob": "latest"
+  }
+}
+

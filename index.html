@@ -9,9 +9,47 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;500;600;700;800&display=swap"/>
   <link rel="stylesheet" href="./src/css/main.css"/>
 </head>
-<body>
+<body class="auth-locked">
 
-<div class="app">
+<section class="login-screen" id="loginScreen" aria-label="Tela de login">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="logo-icon" aria-hidden="true">PS</div>
+      <div>
+        <h1 class="login-title">Burrinho Projetos</h1>
+        <p class="login-subtitle">Entre para acessar o painel de tarefas.</p>
+      </div>
+    </div>
+    <form id="loginForm" class="login-form" autocomplete="on">
+      <div class="form-group">
+        <label for="loginUser">Usuário</label>
+        <div class="login-input-wrap">
+          <span class="login-input-icon" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 21a8 8 0 10-16 0"/><circle cx="12" cy="7" r="4"/>
+            </svg>
+          </span>
+          <input type="text" id="loginUser" placeholder="Digite seu usuário" autocomplete="username"/>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="loginPass">Senha</label>
+        <div class="login-input-wrap">
+          <span class="login-input-icon" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
+            </svg>
+          </span>
+          <input type="password" id="loginPass" placeholder="Digite sua senha" autocomplete="current-password"/>
+        </div>
+      </div>
+      <button type="submit" class="primary-btn login-btn">Entrar</button>
+      <p class="login-hint">Acesso interno da equipe.</p>
+    </form>
+  </div>
+</section>
+
+<div class="app" id="appRoot">
 
   <!-- ═══════════ SIDEBAR ═══════════ -->
   <aside class="sidebar" id="sidebar" role="navigation" aria-label="Menu principal">
@@ -85,7 +123,7 @@
     </nav>
 
     <div class="sidebar-footer">
-      <button class="nav-item" style="color:var(--danger)" aria-label="Sair">
+      <button class="nav-item" id="logoutBtn" style="color:var(--danger)" aria-label="Sair">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
           <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
           <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
@@ -338,6 +376,11 @@
             Troca de Poste
             <span class="tasks-tab-count" id="tab-count-troca-poste">0</span>
           </button>
+          <button class="tasks-tab" role="tab" aria-selected="false" data-category="atendimento-cliente" id="tab-atendimento-cliente" aria-controls="panel-atendimento-cliente">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z"/></svg>
+            Atendimento ao Cliente
+            <span class="tasks-tab-count" id="tab-count-atendimento-cliente">0</span>
+          </button>
         </div>
 
         <!-- Toolbar das tarefas operacionais -->
@@ -417,6 +460,7 @@
                 <option value="dashboard">Dashboard</option>
                 <option value="rompimentos">Rompimentos</option>
                 <option value="troca-poste">Troca de Poste</option>
+                <option value="atendimento-cliente">Atendimento ao Cliente</option>
               </select>
               <button class="icon-btn" id="reportRefreshBtn" title="Atualizar relatório" aria-label="Atualizar relatório">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
@@ -623,26 +667,60 @@
       </button>
     </div>
     <div class="modal-body">
-      <div class="form-group">
-        <label for="op-task-code">ID da tarefa</label>
-        <input type="text" id="op-task-code" readonly/>
+      <div class="form-group" id="opTituloGroup">
+        <label for="op-titulo">Nome da tarefa</label>
+        <input type="text" id="op-titulo" placeholder="Descreva a tarefa" autocomplete="off"/>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label for="op-titulo">Nome da tarefa</label>
-          <input type="text" id="op-titulo" placeholder="Descreva o serviço" autocomplete="off"/>
+      <div class="form-row" id="opMainRow">
+        <div class="form-group" id="opResponsavelGroup">
+          <label for="op-responsavel">Técnico responsável</label>
+          <input type="text" id="op-responsavel" placeholder="Selecione ou digite o técnico" autocomplete="off" list="op-tecnicos-list"/>
+          <datalist id="op-tecnicos-list">
+            <option value="Marcos"></option>
+            <option value="Lucas"></option>
+            <option value="Roberto"></option>
+            <option value="André"></option>
+            <option value="Patrícia"></option>
+          </datalist>
         </div>
-        <div class="form-group">
-          <label for="op-setor">Nome do setor</label>
-          <input type="text" id="op-setor" placeholder="Ex.: Manutenção Norte" autocomplete="off"/>
+        <div class="form-group" id="opPrazoGroup">
+          <label for="op-prazo">Data de vencimento</label>
+          <input type="date" id="op-prazo"/>
         </div>
       </div>
-      <div class="form-row">
+      <div class="form-row" id="opRompimentoCoordsRow" style="display:none">
         <div class="form-group">
-          <label for="op-responsavel">Responsável</label>
-          <input type="text" id="op-responsavel" placeholder="Nome do técnico" autocomplete="off"/>
+          <label for="op-coords">Localização (coordenadas)</label>
+          <div class="wh-input-row">
+            <input type="text" id="op-coords" placeholder="-19.9208, -43.9378" autocomplete="off"/>
+            <button class="sm-btn" type="button" id="opCoordsLookupBtn">Localizar</button>
+          </div>
         </div>
         <div class="form-group">
+          <label for="op-address-readonly">Endereço encontrado (Rua / Bairro)</label>
+          <input type="text" id="op-address-readonly" readonly placeholder="Rua e bairro serão preenchidos automaticamente"/>
+          <div class="hint" id="op-address-hint" style="margin-top:6px">Informe as coordenadas para localizar automaticamente.</div>
+        </div>
+      </div>
+      <div class="form-row" id="opRompimentoExtraRow" style="display:none">
+        <div class="form-group">
+          <label for="op-clientes-afetados">Quantidade de clientes afetados</label>
+          <input type="number" id="op-clientes-afetados" min="1" step="1" placeholder="Ex.: 120" autocomplete="off"/>
+        </div>
+      </div>
+      <div class="form-group op-parent-config" id="opParentConfig">
+        <label for="op-task-kind">Tipo de item (estilo ClickUp)</label>
+        <select id="op-task-kind">
+          <option value="parent">Lista (tarefa pai)</option>
+          <option value="child">Subtarefa (tarefa filha)</option>
+        </select>
+        <label for="op-parent-task" style="margin-top:8px">Selecionar lista pai</label>
+        <select id="op-parent-task">
+          <option value="">Selecione uma tarefa pai</option>
+        </select>
+      </div>
+      <div class="form-row" id="opPriorityRegionRow">
+        <div class="form-group" id="opPrioridadeGroup">
           <label for="op-prioridade">Prioridade</label>
           <select id="op-prioridade">
             <option value="Alta">Alta</option>
@@ -650,17 +728,18 @@
             <option value="Baixa">Baixa</option>
           </select>
         </div>
-      </div>
-      <div class="form-group">
-        <label for="op-clientes-afetados">Clientes afetados</label>
-        <input type="text" id="op-clientes-afetados" placeholder="Quantidade ou observação" autocomplete="off"/>
-      </div>
-      <div class="form-group">
-        <label for="op-descricao">Descrição / Localização</label>
-        <textarea id="op-descricao" placeholder="Endereço, número do poste, observações…" style="min-height:70px;resize:vertical"></textarea>
+        <div class="form-group" id="opRegiaoGroup">
+          <label for="op-regiao">Região</label>
+          <select id="op-regiao">
+            <option value="">Selecione</option>
+            <option value="Goval">Goval</option>
+            <option value="Vale do Aço">Vale do Aço</option>
+          </select>
+        </div>
       </div>
     </div>
     <div class="modal-footer">
+      <button class="ghost-btn danger-btn" id="deleteOpTaskBtn" style="display:none">Excluir</button>
       <button class="ghost-btn" id="cancelOpTaskModal">Cancelar</button>
       <button class="primary-btn" id="saveOpTaskBtn">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>

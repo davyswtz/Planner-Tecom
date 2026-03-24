@@ -1,0 +1,44 @@
+CREATE TABLE IF NOT EXISTS tasks (
+  id INT PRIMARY KEY,
+  titulo VARCHAR(255) NOT NULL,
+  responsavel VARCHAR(120) NOT NULL,
+  prazo DATE NULL,
+  status VARCHAR(40) NOT NULL,
+  prioridade VARCHAR(20) NOT NULL,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS op_tasks (
+  id INT PRIMARY KEY,
+  taskCode VARCHAR(30) NOT NULL,
+  titulo VARCHAR(255) NOT NULL,
+  setor VARCHAR(120) DEFAULT '',
+  responsavel VARCHAR(120) NOT NULL,
+  clientesAfetados VARCHAR(80) DEFAULT '',
+  descricao TEXT,
+  categoria VARCHAR(40) NOT NULL,
+  prazo DATE NULL,
+  prioridade VARCHAR(20) NOT NULL,
+  status VARCHAR(40) NOT NULL,
+  is_parent_task TINYINT(1) DEFAULT 0,
+  parent_task_id INT NULL,
+  criadaEm VARCHAR(50) DEFAULT '',
+  historico LONGTEXT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS calendar_notes (
+  id INT PRIMARY KEY,
+  date DATE NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+  priority VARCHAR(20) DEFAULT 'Média',
+  createdAt VARCHAR(50) DEFAULT '',
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS app_config (
+  cfg_key VARCHAR(60) PRIMARY KEY,
+  cfg_value LONGTEXT
+);
+
