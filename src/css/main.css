@@ -259,10 +259,24 @@ body.auth-locked .login-screen { display: flex; }
 }
 .user-pill:hover { background: var(--green-muted); }
 .avatar-main {
+  position: relative;
   width: 30px; height: 30px; border-radius: 50%; border: 1.5px solid var(--green);
   background: var(--green-dark); display: flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 700; color: var(--green); flex-shrink: 0; font-family: var(--font-mono);
+  flex-shrink: 0; overflow: hidden;
 }
+.sidebar-user-initials {
+  font-size: 11px; font-weight: 700; color: var(--green); font-family: var(--font-mono);
+  display: flex; align-items: center; justify-content: center; width: 100%; height: 100%;
+}
+.sidebar-user-avatar {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover;
+  /* Logo quadrado com arte centralizada: prioriza rosto/capacete no círculo */
+  object-position: center 28%;
+  border-radius: 50%; display: none;
+}
+.avatar-main.has-photo .sidebar-user-avatar { display: block; }
+.avatar-main.has-photo .sidebar-user-initials { display: none; }
 .user-info { overflow: hidden; white-space: nowrap; transition: opacity var(--transition), width var(--transition); }
 .sidebar.collapsed .user-info { opacity: 0; width: 0; }
 .user-name { font-size: 13px; font-weight: 600; color: var(--white); }
@@ -316,11 +330,57 @@ body.auth-locked .login-screen { display: flex; }
 }
 
 /* ═══ CONTENT ══════════════════════════════════════════════ */
-.content { flex: 1; min-width: 0; overflow-y: auto; padding: 22px 24px; display: flex; flex-direction: column; gap: 18px; }
+.content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
 
 /* Pages */
 .page { display: none; flex-direction: column; gap: 18px; }
-.page.active { display: flex; }
+.page.active {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Dashboard: rolagem só na lista de tarefas (painel da tabela) */
+#page-dashboard .dashboard-tasks-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: min(68vh, 640px);
+}
+#page-dashboard .dashboard-tasks-panel .panel-header {
+  flex-shrink: 0;
+}
+#page-dashboard .dashboard-tasks-panel .table-wrap {
+  flex: 1;
+  min-height: 0;
+  max-height: min(58vh, 520px);
+  overflow-y: auto;
+  overflow-x: auto;
+  scrollbar-gutter: stable;
+}
+#page-dashboard .dashboard-tasks-panel .table-wrap::-webkit-scrollbar { width: 8px; height: 8px; }
+#page-dashboard .dashboard-tasks-panel .table-wrap::-webkit-scrollbar-track { background: transparent; }
+#page-dashboard .dashboard-tasks-panel .table-wrap::-webkit-scrollbar-thumb {
+  background: var(--border3);
+  border-radius: 4px;
+}
+#page-dashboard .dashboard-tasks-panel .table-wrap::-webkit-scrollbar-thumb:hover { background: var(--white4); }
+#page-dashboard .dashboard-tasks-panel thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  box-shadow: 0 1px 0 var(--border);
+}
 
 /* Webhook Banner */
 .webhook-banner {
@@ -423,6 +483,12 @@ body.auth-locked .login-screen { display: flex; }
   padding: 14px 18px; border-bottom: 1px solid var(--border);
 }
 .panel-title { font-size: 13px; font-weight: 700; color: var(--white); letter-spacing: .02em; }
+.panel-title-hint {
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--white4);
+  letter-spacing: 0;
+}
 .panel-actions { display: flex; gap: 6px; }
 
 /* ═══ TABLE ═════════════════════════════════════════════════ */
@@ -437,6 +503,10 @@ thead th {
 tbody tr { border-bottom: 1px solid var(--border); transition: background var(--transition); cursor: pointer; }
 tbody tr:last-child { border-bottom: none; }
 tbody tr:hover { background: var(--black4); }
+#page-dashboard tbody tr.dashboard-row-readonly {
+  cursor: default;
+}
+#page-dashboard tbody tr.dashboard-row-readonly:hover { background: var(--black4); }
 tbody td { padding: 12px 16px; font-size: 13px; color: var(--white3); vertical-align: middle; }
 tbody td:first-child { color: var(--white); font-weight: 500; }
 
@@ -1414,6 +1484,12 @@ input[type=date]::-webkit-calendar-picker-indicator { filter: invert(1) opacity(
   .stats { grid-template-columns: 1fr 1fr; }
   .kanban-board { grid-template-columns: 1fr; }
   .side-stack { grid-template-columns: 1fr; }
+  #page-dashboard .dashboard-tasks-panel {
+    max-height: min(52vh, 440px);
+  }
+  #page-dashboard .dashboard-tasks-panel .table-wrap {
+    max-height: min(42vh, 360px);
+  }
   .calendar-grid { grid-auto-rows: minmax(72px, 1fr); }
   .calendar-day { padding: 5px 4px; min-height: 0; }
   .calendar-day-number {

@@ -9,6 +9,7 @@
  *   defaultWebhookUrl?: string,
  *   ctoDataBase?: string,
  *   authUsers?: AuthUser[],
+ *   sidebarAvatarUrl?: string,
  * }} AppConfig
  */
 window.APP_CONFIG = {
@@ -25,4 +26,7 @@ window.APP_CONFIG = {
 
   /** Credenciais de login (fallback apenas quando API remota estiver desabilitada). */
   // authUsers: [{ user: 'nome', pass: 'senha-segura' }],
+
+  /** Foto na barra lateral (sobrescreve o mascote padrão em `assets/sidebar-mascote-projetos.png`). */
+  // sidebarAvatarUrl: 'https://exemplo.com/foto.jpg',
 };

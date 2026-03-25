@@ -31,6 +31,8 @@ Estrutura típica no **`public_html`** (ou subpasta do domínio):
 ```text
 public_html/
 ├── index.html
+├── assets/
+│   └── sidebar-mascote-projetos.png   ← avatar circular na barra lateral
 ├── src/
 │   ├── css/
 │   ├── data/

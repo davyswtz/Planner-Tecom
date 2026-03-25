@@ -39,6 +39,19 @@ function resolveDefaultWebhookUrlFromConfig() {
   return typeof raw === 'string' && raw.trim() ? raw.trim() : '';
 }
 
+/**
+ * Foto na barra lateral (circular). Por padrão usa o mascote do projeto em `assets/`.
+ * Substitua por URL absoluta se preferir; vazio = só iniciais do usuário.
+ * Opcional: `window.APP_CONFIG.sidebarAvatarUrl` em `config.js` sobrescreve isto.
+ */
+const SIDEBAR_USER_AVATAR_URL = './assets/sidebar-mascote-projetos.png';
+
+function resolveSidebarAvatarUrl() {
+  const fromConfig = window.APP_CONFIG && window.APP_CONFIG.sidebarAvatarUrl;
+  if (typeof fromConfig === 'string' && fromConfig.trim()) return fromConfig.trim();
+  return typeof SIDEBAR_USER_AVATAR_URL === 'string' ? SIDEBAR_USER_AVATAR_URL.trim() : '';
+}
+
 /* ─────────────────────────────────────────────────────────────
    STATE STORE — Fonte única da verdade
    Futura integração: substituir por chamadas à API/banco
@@ -405,6 +418,19 @@ const Utils = {
     d.setHours(0, 0, 0, 0);
     d.setDate(d.getDate() + days);
     return this.toIsoLocal(d);
+  },
+
+  /** Semana civil: segunda a domingo (horário local), retorno em ISO YYYY-MM-DD */
+  weekRangeIso(date = new Date()) {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    const dow = d.getDay();
+    const offsetToMonday = dow === 0 ? -6 : 1 - dow;
+    const monday = new Date(d);
+    monday.setDate(d.getDate() + offsetToMonday);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return { start: this.toIsoLocal(monday), end: this.toIsoLocal(sunday) };
   },
 
   monthLabel(date) {
@@ -786,7 +812,7 @@ const TaskService = {
   /** Retorna tarefas filtradas pelos critérios atuais */
   getFilteredTasks() {
     const tod = Utils.todayIso();
-    const weekStr = Utils.addDaysIso(7);
+    const week = Utils.weekRangeIso();
     const filter = Store.dashboardFilter;
     const query  = Store.dashboardSearch;
 
@@ -794,7 +820,7 @@ const TaskService = {
       const matchFilter =
         filter === 'all' ||
         (filter === 'today' && t.prazo === tod) ||
-        (filter === 'week'  && t.prazo >= tod && t.prazo <= weekStr);
+        (filter === 'week' && t.prazo && t.prazo >= week.start && t.prazo <= week.end);
       const matchSearch = !query ||
         t.titulo.toLowerCase().includes(query) ||
         t.responsavel.toLowerCase().includes(query) ||
@@ -1139,16 +1165,13 @@ const UI = {
       const isLate = t.effectiveStatus === 'Atrasada' || (t.prazo && t.prazo < tod && !['Concluída','Finalizada'].includes(t.status));
       const isDone = ['Concluída','Finalizada'].includes(t.effectiveStatus);
       const color  = Utils.getAvatarColor(t.responsavel);
-      const checkMarkup = `<div class="task-check ${isDone ? 'done' : ''}" data-check="${t.id}" data-check-source="${t.source}" role="checkbox" aria-checked="${isDone}" aria-label="Marcar como concluída" tabindex="0">
-             ${isDone ? this.checkSvg() : ''}
-           </div>`;
+      const titleStyle = isDone ? 'text-decoration:line-through;opacity:.45' : '';
 
       return `
-        <tr data-id="${t.id}" data-source="${t.source}">
+        <tr class="dashboard-row-readonly">
           <td>
             <div class="task-name-cell">
-              ${checkMarkup}
-              <span style="${isDone ? 'text-decoration:line-through;opacity:.45' : ''}">${t.titulo}</span>
+              <span style="${titleStyle}">${t.titulo}</span>
             </div>
           </td>
           <td>
@@ -2009,6 +2032,7 @@ const CtoLocationRegistry = (() => {
 const Controllers = {
   auth: {
     _sessionKey: 'planner.session.v1',
+    _displayNameKey: 'planner.session.displayName.v1',
     _getAllowedUsers() {
       const list = window.APP_CONFIG && window.APP_CONFIG.authUsers;
       if (!Array.isArray(list) || !list.length) return [];
@@ -2024,6 +2048,51 @@ const Controllers = {
     _unlock() {
       document.body.classList.remove('auth-locked');
     },
+    _finishLogin(displayName) {
+      const name = String(displayName || '').trim() || 'Usuário';
+      localStorage.setItem(this._sessionKey, '1');
+      localStorage.setItem(this._displayNameKey, name);
+      this._unlock();
+      this._syncSidebarUser();
+    },
+    _syncSidebarUser() {
+      const nameEl = document.getElementById('sidebarUserName');
+      const roleEl = document.getElementById('sidebarUserRole');
+      const img = document.getElementById('sidebarUserAvatar');
+      const initialsEl = document.getElementById('sidebarUserInitials');
+      const wrap = document.getElementById('sidebarAvatarWrap');
+      if (!nameEl || !roleEl) return;
+
+      const logged = this._isAuthenticated();
+      const storedName = (localStorage.getItem(this._displayNameKey) || '').trim();
+      const display = logged ? (storedName || 'Usuário') : '—';
+
+      nameEl.textContent = display;
+      roleEl.textContent = logged ? 'Administrador' : '—';
+
+      if (!img || !initialsEl || !wrap) return;
+
+      const url = resolveSidebarAvatarUrl();
+      const showPhoto = Boolean(url && logged);
+
+      wrap.classList.toggle('has-photo', showPhoto);
+
+      if (showPhoto) {
+        img.alt = display;
+        img.onerror = () => {
+          img.removeAttribute('src');
+          wrap.classList.remove('has-photo');
+          initialsEl.textContent = Utils.getInitials(display);
+          img.onerror = null;
+        };
+        if (img.getAttribute('src') !== url) img.setAttribute('src', url);
+      } else {
+        img.removeAttribute('src');
+        img.alt = '';
+        img.onerror = null;
+        initialsEl.textContent = logged ? Utils.getInitials(display) : '—';
+      }
+    },
     async _login(user, pass) {
       if (!user || !pass) {
         ToastService.show('Preencha usuário e senha para entrar', 'danger');
@@ -2037,8 +2106,7 @@ const Controllers = {
         try {
           const res = await Store.loginRemote(normalizedUser, normalizedPass);
           if (res && res.ok) {
-            localStorage.setItem(this._sessionKey, '1');
-            this._unlock();
+            this._finishLogin(user);
             return true;
           }
         } catch {
@@ -2062,20 +2130,22 @@ const Controllers = {
         return false;
       }
 
-      localStorage.setItem(this._sessionKey, '1');
-      this._unlock();
+      this._finishLogin(user);
       return true;
     },
     logout() {
       localStorage.removeItem(this._sessionKey);
+      localStorage.removeItem(this._displayNameKey);
       this._lock();
       const passInput = document.getElementById('loginPass');
       if (passInput) passInput.value = '';
+      this._syncSidebarUser();
       ToastService.show('Sessão encerrada', 'info');
     },
     init() {
       if (this._isAuthenticated()) this._unlock();
       else this._lock();
+      this._syncSidebarUser();
 
       const form = document.getElementById('loginForm');
       form?.addEventListener('submit', async e => {
@@ -2262,25 +2332,11 @@ const Controllers = {
     },
 
     init() {
-      document.getElementById('openTaskModalBtn').addEventListener('click', () => this.openNewModal());
+      document.getElementById('openTaskModalBtn')?.addEventListener('click', () => this.openNewModal());
       document.getElementById('saveTaskBtn').addEventListener('click', () => this.save());
       ['closeTaskModal','cancelTaskModal'].forEach(id =>
         document.getElementById(id)?.addEventListener('click', () => ModalService.close('taskModal'))
       );
-
-      document.getElementById('taskTableBody').addEventListener('click', e => {
-        const checkEl = e.target.closest('[data-check]');
-        if (checkEl) {
-          this.toggleDone(+checkEl.dataset.check, checkEl.dataset.checkSource || 'dashboard');
-          return;
-        }
-        const row = e.target.closest('tr[data-id]');
-        if (row) {
-          const id = +row.dataset.id;
-          if (row.dataset.source === 'operacional') Controllers.opTask.openEditModal(id);
-          else this.openEditModal(id);
-        }
-      });
 
       document.getElementById('refreshBtn').addEventListener('click', () => UI.renderDashboard());
     },

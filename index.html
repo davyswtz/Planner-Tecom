@@ -134,10 +134,13 @@
         <span class="nav-label">Sair</span>
       </button>
       <div class="user-pill" role="status" aria-label="Usuário atual">
-        <div class="avatar-main" aria-hidden="true">EQ</div>
+        <div class="avatar-main" id="sidebarAvatarWrap" aria-hidden="true">
+          <img class="sidebar-user-avatar" id="sidebarUserAvatar" alt="" width="30" height="30" loading="lazy" decoding="async" />
+          <span class="sidebar-user-initials" id="sidebarUserInitials">—</span>
+        </div>
         <div class="user-info">
-          <div class="user-name">Equipe</div>
-          <div class="user-role">Administrador</div>
+          <div class="user-name" id="sidebarUserName">—</div>
+          <div class="user-role" id="sidebarUserRole">—</div>
         </div>
       </div>
     </div>
@@ -263,21 +266,17 @@
             <button class="icon-btn" id="refreshBtn" title="Atualizar" aria-label="Atualizar tarefas">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
             </button>
-            <button class="icon-btn" title="Exportar" aria-label="Exportar tarefas">
+            <button type="button" class="icon-btn" title="Exportar" aria-label="Exportar tarefas">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            </button>
-            <button class="primary-btn" id="openTaskModalBtn" aria-label="Criar nova tarefa">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              Nova tarefa
             </button>
           </div>
         </div>
 
         <div class="content-grid">
           <!-- Tabela de tarefas -->
-          <div class="panel" role="region" aria-label="Lista de tarefas">
+          <div class="panel dashboard-tasks-panel" role="region" aria-label="Lista de tarefas">
             <div class="panel-header">
-              <span class="panel-title">Tarefas Gerais</span>
+              <span class="panel-title">Tarefas <span class="panel-title-hint">(somente leitura)</span></span>
               <div class="panel-actions">
                 <button class="icon-btn" title="Atualizar" aria-label="Atualizar lista">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
