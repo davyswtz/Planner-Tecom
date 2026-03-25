@@ -30,9 +30,14 @@
  * @typedef {{ webhookConfig: WebhookConfig, note: string }} PlannerConfig
  */
 
-/** Webhook padrão Google Chat da equipe (usado se não houver URL salva). Evite expor em repositórios públicos. */
-const DEFAULT_GOOGLE_CHAT_WEBHOOK_URL =
-  'https://chat.googleapis.com/v1/spaces/AAQAgqsNKYg/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=03UNaWYGsXuzDGcs-ascMurXLVsbxThfdDjda7taoDk';
+/**
+ * URL inicial do webhook somente se definida em `window.APP_CONFIG.defaultWebhookUrl`.
+ * Nunca commitar tokens reais no código: use config local (ver `src/js/config.example.js`).
+ */
+function resolveDefaultWebhookUrlFromConfig() {
+  const raw = window.APP_CONFIG && window.APP_CONFIG.defaultWebhookUrl;
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : '';
+}
 
 /* ─────────────────────────────────────────────────────────────
    STATE STORE — Fonte única da verdade
@@ -190,8 +195,9 @@ const Store = (() => {
         webhookConfig.events[k] = WEBHOOK_EVENTS_DEFAULT[k];
       }
     }
-    if (!String(webhookConfig.url || '').trim()) {
-      webhookConfig.url = DEFAULT_GOOGLE_CHAT_WEBHOOK_URL;
+    const fallbackUrl = resolveDefaultWebhookUrlFromConfig();
+    if (!String(webhookConfig.url || '').trim() && fallbackUrl) {
+      webhookConfig.url = fallbackUrl;
     }
   };
 
@@ -1895,15 +1901,44 @@ const CtoLocationRegistry = (() => {
     });
   }
 
+  function resolveCtoDataJsonUrls() {
+    const files = [
+      'cto-locations-1.json',
+      'cto-locations-2.json',
+      'cto-ipatinga-viabilidade.json',
+      'cto-gv-viabilidade.json',
+    ];
+    const cfg = typeof window !== 'undefined' ? window.APP_CONFIG : null;
+    if (cfg && typeof cfg.ctoDataBase === 'string' && cfg.ctoDataBase.trim()) {
+      const base = cfg.ctoDataBase.trim().replace(/\/?$/, '/');
+      return files.map(f => `${base}${f}`);
+    }
+    const scripts = document.getElementsByTagName('script');
+    for (let i = scripts.length - 1; i >= 0; i--) {
+      const src = scripts[i].src;
+      if (src && /\/main\.js(\?|#|$)/i.test(src)) {
+        const dataBase = new URL('../data/', src).href;
+        return files.map(f => new URL(f, dataBase).href);
+      }
+    }
+    const path = window.location.pathname || '/';
+    let dirPath = path;
+    if (!dirPath.endsWith('/')) {
+      const last = (path.split('/').pop() || '');
+      if (/\.[a-z0-9]+$/i.test(last)) {
+        dirPath = path.replace(/\/[^/]+$/, '/');
+      } else {
+        dirPath = `${path}/`;
+      }
+    }
+    const base = `${window.location.origin}${dirPath}`;
+    return files.map(f => new URL(`src/data/${f}`, base).href);
+  }
+
   function load() {
     if (loadPromise) return loadPromise;
     loadPromise = (async () => {
-      const paths = [
-        new URL('src/data/cto-locations-1.json', window.location.href).href,
-        new URL('src/data/cto-locations-2.json', window.location.href).href,
-        new URL('src/data/cto-ipatinga-viabilidade.json', window.location.href).href,
-        new URL('src/data/cto-gv-viabilidade.json', window.location.href).href,
-      ];
+      const paths = resolveCtoDataJsonUrls();
       const results = await Promise.all(
         paths.map(p =>
           fetch(p, { cache: 'no-cache' })
@@ -1964,9 +1999,17 @@ const CtoLocationRegistry = (() => {
 const Controllers = {
   auth: {
     _sessionKey: 'planner.session.v1',
-    _allowedUsers: [
-      { user: 'projetos', pass: '123' },
-    ],
+    /** Substituir via `APP_CONFIG.authUsers` em produção (não commitar senhas reais em repositório público). */
+    _allowedUsersFallback: [{ user: 'projetos', pass: '123' }],
+    _getAllowedUsers() {
+      const list = window.APP_CONFIG && window.APP_CONFIG.authUsers;
+      if (Array.isArray(list) && list.length) {
+        return list.filter(
+          u => u && typeof u.user === 'string' && typeof u.pass === 'string'
+        );
+      }
+      return this._allowedUsersFallback;
+    },
     _isAuthenticated() {
       return localStorage.getItem(this._sessionKey) === '1';
     },
@@ -1983,7 +2026,7 @@ const Controllers = {
       }
       const normalizedUser = String(user).trim().toLowerCase();
       const normalizedPass = String(pass).trim();
-      const valid = this._allowedUsers.some(
+      const valid = this._getAllowedUsers().some(
         (item) => item.user.toLowerCase() === normalizedUser && item.pass === normalizedPass
       );
       if (!valid) {

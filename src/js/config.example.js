@@ -1,9 +1,28 @@
+/**
+ * Copie para `config.js` na mesma pasta e ajuste (não versionar `config.js` com segredos).
+ * Em `index.html`, antes de `main.js`:
+ *   <script src="./src/js/config.js"></script>
+ *
+ * @typedef {{ user: string, pass: string }} AuthUser
+ * @typedef {{
+ *   apiBaseUrl?: string|false,
+ *   defaultWebhookUrl?: string,
+ *   ctoDataBase?: string,
+ *   authUsers?: AuthUser[],
+ * }} AppConfig
+ */
 window.APP_CONFIG = {
-  // HostGator: em geral NÃO precisa definir nada (mesmo site + pasta /api).
-  // Ver HOSTGATOR.md na raiz do projeto.
-  // Produção Vercel: mesma origem + "/api" se não definir apiBaseUrl.
-  // Localhost/Live Server: API desligada por padrão (só localStorage).
-  // apiBaseUrl: "https://outro-subdominio.com/api",
-  apiBaseUrl: "",
-};
+  apiBaseUrl: '',
 
+  /** URL do webhook Google Chat (só para ambiente fechado; em geral configure pelo modal do app). */
+  // defaultWebhookUrl: 'https://chat.googleapis.com/v1/spaces/...',
+
+  /**
+   * Pasta base dos JSON de CTO (termina com /). Ex.: `https://meusite.com/burrinho/src/data/`
+   * Só necessário se os arquivos não estiverem relativos ao `main.js`.
+   */
+  // ctoDataBase: 'https://meusite.com/subpasta/src/data/',
+
+  /** Credenciais de login (substitui o demo interno `projetos`/`123`). */
+  // authUsers: [{ user: 'nome', pass: 'senha-segura' }],
+};

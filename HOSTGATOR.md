@@ -32,8 +32,13 @@ public_html/
 ├── index.html
 ├── src/
 │   ├── css/
+│   ├── data/
+│   │   ├── ipatinga_cto.json
+│   │   └── governadorvaladares_cto.json  (e outros JSON de CTO, se houver)
 │   └── js/
-│       └── main.js
+│       ├── main.js
+│       ├── config.example.js
+│       └── config.js              ← opcional: cópia local (não commitar segredos)
 └── api/
     ├── .htaccess
     ├── db.php
@@ -68,23 +73,48 @@ O **`main.js`** monta a base da API como **`https://seudominio.com/api`** (mesmo
 </script>
 ```
 
-## 6. Teste rápido
+### JSON de CTO (cadastro rompimento)
+
+O front-end carrega **`src/data/*.json`**. Envie a pasta **`src/data/`** completa no FTP, na mesma hierarquia relativa a `index.html`.  
+Se o JSON estiver em outro caminho absoluto (CDN ou subpasta diferente), defina em `config.js` a chave **`ctoDataBase`** (URL da pasta terminando em `/`, apontando para onde estão os `.json`).
+
+## 6. Arquivo `config.js` (opcional)
+
+Copie **`src/js/config.example.js`** → **`src/js/config.js`** e, em **`index.html`**, carregue **antes** de `main.js`:
+
+```html
+<script src="./src/js/config.js"></script>
+<script src="./src/js/main.js"></script>
+```
+
+Chaves úteis de `window.APP_CONFIG`:
+
+| Chave | Uso |
+|--------|-----|
+| `apiBaseUrl` | Base da API PHP (já documentada acima). |
+| `defaultWebhookUrl` | Webhook Google Chat padrão (só se quiser pré-preencher; usuário ainda pode trocar no modal). |
+| `ctoDataBase` | Pasta base dos JSON de CTO, se não forem servidos em `src/data/` relativo ao site. |
+| `authUsers` | Array `{ user, pass }` para login; sem isso o app usa credenciais de demonstração internas. |
+
+Não versionar **`config.js`** com URLs ou senhas reais em repositório público.
+
+## 7. Teste rápido
 
 1. No navegador: `https://seudominio.com/api/bootstrap.php`  
    Deve retornar **JSON** com `"ok": true` e listas (podem estar vazias).
 2. Se aparecer erro de banco, confira **`credentials.php`** e se o **`schema.sql`** foi importado.
 3. Faça login no painel, crie uma tarefa e atualize a página — o dado deve persistir.
 
-## 7. Segurança (recomendado)
+## 8. Segurança (recomendado)
 
-- Login atual é **fixo no front-end** (`projetos` / `123`) — adequado só para equipe interna. Para ambiente mais sensível, evolua para autenticação no servidor.
-- **Webhook** do Google Chat com URL no código: em repositório público, considere não commitar segredos.
+- Login padrão no front é **demonstração** (`projetos` / `123`). Em produção, prefira **`authUsers`** em `config.js` (ainda é front-end; para dados sensíveis, evolua para auth no servidor).
+- **Webhook Google Chat:** não commitar URL com `key`/token no repositório. Use o modal do app ou `defaultWebhookUrl` só em deploy fechado. Se uma URL já vazou no histórico do Git, **revogue/regenere o webhook** no Google Chat e use uma URL nova.
 - Force **HTTPS** no cPanel (**SSL/TLS**) e, se quiser, redirecionamento HTTP → HTTPS.
 
-## 8. Suporte HostGator
+## 9. Suporte HostGator
 
 Limites de PHP (timeout, upload) e versão do MySQL variam por plano. Em erro **500**, verifique **Errors** no cPanel ou ative log de erros PHP temporariamente.
 
 ---
 
-**Resumo:** importar **`schema.sql`** → criar **`api/credentials.php`** → enviar arquivos → testar **`bootstrap.php`**.
+**Resumo:** importar **`schema.sql`** → criar **`api/credentials.php`** → enviar arquivos (**incluindo `src/data/`**) → opcional **`config.js`** → testar **`bootstrap.php`**.
