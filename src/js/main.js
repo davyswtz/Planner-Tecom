@@ -453,6 +453,73 @@ const WebhookService = {
       .join('\n');
   },
 
+  /**
+   * Se o título for só coordenadas (lat, lon), devolve texto normalizado em uma linha para copiar.
+   */
+  _trocaPosteTitleAsLocation(tituloRaw) {
+    const t = String(tituloRaw || '').trim();
+    if (!t) return { mode: 'empty', line: 'Não informado' };
+    const normalized = t.replace(/\s+/g, '');
+    const parts = normalized.split(',');
+    if (parts.length === 2) {
+      const lat = Number(parts[0]);
+      const lon = Number(parts[1]);
+      if (Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
+        return { mode: 'coords', line: `${lat}, ${lon}` };
+      }
+    }
+    return { mode: 'texto', line: this._chatSafe(t) };
+  },
+
+  /**
+   * Mesmo layout do rompimento: blocos com linha em branco, coordenadas em linha solta.
+   * @param {'andamento'|'concluida'|'finalizada'} event
+   */
+  _buildTrocaPosteMessage(event, task) {
+    const tecnico = task.responsavel || 'Não informado';
+    const regiao = (task.regiao || '').trim() || 'Não informada';
+    const titulo = (task.titulo || '').trim();
+    const descExtra = (task.descricao || '').trim();
+    const loc = this._trocaPosteTitleAsLocation(titulo);
+    const taskId = task.taskCode || `POS-${String(task.id || '').padStart(4, '0')}`;
+
+    const statusLine = {
+      andamento: '⚠️ Troca de poste em andamento na rede.',
+      concluida: '✅ Troca de poste concluída.',
+      finalizada: '🏁 Troca de poste finalizada.',
+    }[event] || '🔔 Atualização — troca de poste.';
+
+    const head = this._rompimentoBoldLines([
+      '🪵⚡🔧 TROCA DE POSTE',
+      '',
+      statusLine,
+      '',
+      `🌎 REGIÃO: ${regiao}`,
+      `👷‍♂️ TÉCNICO RESPONSÁVEL: ${tecnico}`,
+    ]);
+
+    const coordLabel = loc.mode === 'coords' ? '📍 COORDENADAS' : '📍 LOCAL / DESCRIÇÃO';
+    const locationBlock = `*${this._chatSafe(coordLabel)}*\n${this._chatSafe(loc.line)}`;
+
+    const sections = [
+      head,
+      locationBlock,
+      this._rompimentoBoldLines([`🆔 ID DA TAREFA: ${taskId}`]),
+    ];
+    if (descExtra) {
+      sections.push(this._rompimentoBoldLines([`📝 OBSERVAÇÃO: ${descExtra}`]));
+    }
+    if (event === 'concluida' || event === 'finalizada') {
+      sections.push(
+        this._rompimentoBoldLines([
+          `⏱️ TEMPO NO SERVIÇO: ${this._formatDurationFromStart(task)}`,
+        ]),
+      );
+    }
+
+    return { text: sections.join('\n\n') };
+  },
+
   _formatDurationFromStart(task) {
     const history = Array.isArray(task?.historico) ? task.historico : [];
     if (!history.length) return 'Não foi possível calcular';
@@ -497,7 +564,13 @@ const WebhookService = {
 
   /** Monta o payload formatado */
   _buildMessage(event, task, category) {
-    if (category === 'Rompimentos' && event === 'andamento') {
+    const opCat = String(task?.categoria ?? '').trim();
+
+    if (opCat === 'troca-poste') {
+      return this._buildTrocaPosteMessage(event, task);
+    }
+
+    if (opCat === 'rompimentos' && event === 'andamento') {
       const setor = task.setor || 'Não informado';
       const regiao = task.regiao || 'Não informada';
       const tecnico = task.responsavel || 'Não informado';
@@ -523,7 +596,7 @@ const WebhookService = {
       return { text: `${head}\n\n${coordBlock}${tail}` };
     }
 
-    if (category === 'Rompimentos' && (event === 'concluida' || event === 'finalizada')) {
+    if (opCat === 'rompimentos' && (event === 'concluida' || event === 'finalizada')) {
       const setor = task.setor || 'Não informado';
       const regiao = task.regiao || 'Não informada';
       const tecnico = task.responsavel || 'Não informado';
