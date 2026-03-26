@@ -345,11 +345,39 @@ const Store = (() => {
     bootstrapFromRemote: async () => {
       const payload = await ApiService.getBootstrap();
       if (!payload || !payload.ok) return false;
+
+      // Preserva metadados locais que não existem no servidor (ex.: threadKey do Google Chat).
+      const mergeLocalFieldsById = (localArr, incomingArr, fields) => {
+        const map = new Map();
+        for (const item of (Array.isArray(localArr) ? localArr : [])) {
+          const id = Number(item?.id);
+          if (!Number.isFinite(id)) continue;
+          const snapshot = {};
+          for (const f of fields) {
+            const v = item?.[f];
+            if (v !== undefined && v !== null && String(v).trim() !== '') snapshot[f] = v;
+          }
+          if (Object.keys(snapshot).length) map.set(id, snapshot);
+        }
+        for (const inc of (Array.isArray(incomingArr) ? incomingArr : [])) {
+          const id = Number(inc?.id);
+          if (!Number.isFinite(id) || !map.has(id)) continue;
+          const snap = map.get(id);
+          for (const f of Object.keys(snap)) {
+            if (inc[f] === undefined || inc[f] === null || String(inc[f]).trim() === '') {
+              inc[f] = snap[f];
+            }
+          }
+        }
+      };
+
       if (Array.isArray(payload.tasks)) {
+        mergeLocalFieldsById(tasks, payload.tasks, ['chatThreadKey']);
         tasks.splice(0, tasks.length, ...payload.tasks);
         nextTaskId = tasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
       }
       if (Array.isArray(payload.opTasks)) {
+        mergeLocalFieldsById(opTasks, payload.opTasks, ['chatThreadKey']);
         opTasks.splice(0, opTasks.length, ...payload.opTasks);
         nextOpTaskId = opTasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
       }
@@ -601,11 +629,27 @@ const WebhookService = {
     const message = this._buildMessage(event, task, category);
 
     // Google Chat threading (tópicos): cria no "andamento" e responde no mesmo thread nas demais.
-    const threadKey = this._ensureThreadKeyForTask(event, task);
-    const url = threadKey ? this._withThreadParams(config.url, threadKey) : config.url;
-    const payload = threadKey ? { ...message, thread: { threadKey } } : message;
+    const threadKey = this._resolveThreadKey(event, task);
+    if (threadKey) {
+      this._persistThreadKeyIfNeeded(event, task, threadKey);
+      const url = this._buildThreadedWebhookUrl(config.url, threadKey);
+      const payload = { ...message, thread: { threadKey } };
+      await this._post(url, payload);
+      return;
+    }
 
-    await this._post(url, payload);
+    await this._post(config.url, message);
+  },
+
+  _resolveThreadKey(event, task) {
+    const existing = String(task?.chatThreadKey ?? '').trim();
+    if (existing) return existing;
+
+    // Regra atual: só cria tópico no "andamento".
+    if (event !== 'andamento') return '';
+
+    const stableId = this._taskStableId(task);
+    return `burrinho-${stableId}`.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 120);
   },
 
   _taskStableId(task) {
@@ -615,41 +659,41 @@ const WebhookService = {
     return code || (id ? `${cat}-${id}` : `${cat}-unknown`);
   },
 
-  _ensureThreadKeyForTask(event, task) {
-    // Se já tem, usa.
-    const existing = String(task?.chatThreadKey ?? '').trim();
-    if (existing) return existing;
+  _persistThreadKeyIfNeeded(event, task, threadKey) {
+    if (event !== 'andamento') return;
+    const current = String(task?.chatThreadKey ?? '').trim();
+    if (current) return;
 
-    // Regra pedida: só cria thread quando entrar em andamento.
-    if (event !== 'andamento') return '';
+    const idNum = Number(task?.id);
+    if (!Number.isFinite(idNum)) return;
 
-    // ThreadKey precisa ser estável e curto; usar código/ID da tarefa.
-    const key = `burrinho-${this._taskStableId(task)}`.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 120);
-
-    // Persistir no store (opTask ou task geral), para próximas mensagens caírem no mesmo tópico.
     try {
-      const idNum = Number(task?.id);
+      // Compatível com o shape atual: dashboard → updateTask; operacional → updateOpTask
       if (task?.source === 'dashboard') {
-        if (Number.isFinite(idNum)) Store.updateTask(idNum, { chatThreadKey: key });
-      } else if (Number.isFinite(idNum)) {
-        Store.updateOpTask(idNum, { chatThreadKey: key });
+        Store.updateTask(idNum, { chatThreadKey: threadKey });
+      } else {
+        Store.updateOpTask(idNum, { chatThreadKey: threadKey });
       }
-      // Também atualiza o objeto em memória, quando for o mesmo reference.
-      task.chatThreadKey = key;
     } catch {
-      /* ignore */
+      // não quebra o envio ao Chat se persistência falhar
     }
-    return key;
   },
 
-  _withThreadParams(webhookUrl, threadKey) {
-    // Para webhooks, a forma mais compatível é passar threadKey + messageReplyOption na URL.
-    // Isso garante que o Chat trate o POST como "resposta no tópico" quando possível.
-    const base = String(webhookUrl || '');
-    if (!base) return base;
-    const sep = base.includes('?') ? '&' : '?';
-    const tk = encodeURIComponent(threadKey);
-    return `${base}${sep}threadKey=${tk}&messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD`;
+  _buildThreadedWebhookUrl(webhookUrl, threadKey) {
+    // Evita duplicar parâmetros e lida com URLs já com query.
+    try {
+      const u = new URL(String(webhookUrl));
+      u.searchParams.set('threadKey', threadKey);
+      u.searchParams.set('messageReplyOption', 'REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD');
+      return u.toString();
+    } catch {
+      // Fallback simples (mantém compatibilidade).
+      const base = String(webhookUrl || '');
+      if (!base) return base;
+      const sep = base.includes('?') ? '&' : '?';
+      const tk = encodeURIComponent(threadKey);
+      return `${base}${sep}threadKey=${tk}&messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD`;
+    }
   },
 
   /** Monta o payload formatado */
@@ -740,7 +784,8 @@ const WebhookService = {
         body:    JSON.stringify(payload),
         mode:    'no-cors',
       });
-      ToastService.show('Notificação enviada ao Google Chat', 'success');
+      // Com `no-cors` não é possível validar status; feedback otimista, porém sem garantir entrega.
+      ToastService.show('Mensagem enviada ao Google Chat', 'success');
     } catch {
       ToastService.show('Erro ao enviar para o Google Chat', 'danger');
     }
