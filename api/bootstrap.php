@@ -11,7 +11,7 @@ try {
     $tasks = $pdo->query('SELECT id, titulo, responsavel, prazo, status, prioridade FROM tasks ORDER BY id ASC')->fetchAll();
     $opSql = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
       coordenadas, localizacao_texto AS localizacaoTexto, descricao, categoria, prazo, prioridade, status,
-      is_parent_task, parent_task_id, criadaEm, historico
+      is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey
       FROM op_tasks ORDER BY id ASC';
     $opTasks = $pdo->query($opSql)->fetchAll();
     $calendarNotes = $pdo->query(

@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS op_tasks (
   parent_task_id INT NULL,
   criadaEm VARCHAR(64) NOT NULL DEFAULT '',
   historico LONGTEXT,
+  chat_thread_key VARCHAR(140) NOT NULL DEFAULT '',
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_op_tasks_categoria (categoria),

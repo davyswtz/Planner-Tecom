@@ -42,12 +42,12 @@ try {
     $sql = 'INSERT INTO op_tasks (
               id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
               coordenadas, localizacao_texto, descricao, categoria, prazo, prioridade, status,
-              is_parent_task, parent_task_id, criadaEm, historico
+              is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key
             )
             VALUES (
               :id, :taskCode, :titulo, :setor, :regiao, :responsavel, :clientesAfetados,
               :coordenadas, :localizacao_texto, :descricao, :categoria, :prazo, :prioridade, :status,
-              :is_parent_task, :parent_task_id, :criadaEm, :historico
+              :is_parent_task, :parent_task_id, :criadaEm, :historico, :chat_thread_key
             )
             ON DUPLICATE KEY UPDATE
               taskCode = VALUES(taskCode),
@@ -66,7 +66,8 @@ try {
               is_parent_task = VALUES(is_parent_task),
               parent_task_id = VALUES(parent_task_id),
               criadaEm = VALUES(criadaEm),
-              historico = VALUES(historico)';
+              historico = VALUES(historico),
+              chat_thread_key = VALUES(chat_thread_key)';
     $stmt = $pdo->prepare($sql);
     $stmt->execute([
         ':id' => $id,
@@ -87,6 +88,7 @@ try {
         ':parent_task_id' => isset($data['parentTaskId']) && $data['parentTaskId'] !== '' ? (int) $data['parentTaskId'] : null,
         ':criadaEm' => (string) ($data['criadaEm'] ?? date('c')),
         ':historico' => json_encode($data['historico'] ?? [], JSON_UNESCAPED_UNICODE),
+        ':chat_thread_key' => (string) ($data['chatThreadKey'] ?? ''),
     ]);
 
     jsonResponse(['ok' => true]);
