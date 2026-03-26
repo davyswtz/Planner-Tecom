@@ -371,42 +371,109 @@
           </div>
         </div>
 
-        <!-- Tabs: Rompimentos / Troca de Poste -->
-        <div class="tasks-tabs" role="tablist" aria-label="Categorias de tarefas">
-          <button class="tasks-tab active" role="tab" aria-selected="true" data-category="rompimentos" id="tab-rompimentos" aria-controls="panel-rompimentos">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-            Rompimentos
-            <span class="tasks-tab-count" id="tab-count-rompimentos">0</span>
-          </button>
-          <button class="tasks-tab" role="tab" aria-selected="false" data-category="troca-poste" id="tab-troca-poste" aria-controls="panel-troca-poste">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
-            Troca de Poste
-            <span class="tasks-tab-count" id="tab-count-troca-poste">0</span>
-          </button>
-          <button class="tasks-tab" role="tab" aria-selected="false" data-category="atendimento-cliente" id="tab-atendimento-cliente" aria-controls="panel-atendimento-cliente">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z"/></svg>
-            Atendimento ao Cliente
-            <span class="tasks-tab-count" id="tab-count-atendimento-cliente">0</span>
-          </button>
-        </div>
+        <div class="tasks-layout-grid" aria-label="Organização das tarefas">
+          <div class="tasks-folders-col" aria-label="Categorias de tarefas">
+            <div class="tasks-sessions" aria-label="Pastas de tarefas">
+              <details class="tasks-folder">
+                <summary class="tasks-folder-summary" aria-label="Projetos de Rede">
+                  <span class="tasks-folder-summary-left">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path d="M4 12a8 8 0 0 1 16 0"/>
+                      <path d="M7 12a5 5 0 0 1 10 0"/>
+                      <circle cx="12" cy="12" r="1.5"/>
+                    </svg>
+                    Projetos de Rede
+                  </span>
+                </summary>
+                <div class="tasks-tabs" role="tablist" aria-label="Projetos de Rede">
+                  <button class="tasks-tab" role="tab" aria-selected="false" data-category="atendimento-cliente" id="tab-atendimento-cliente" aria-controls="panel-atendimento-cliente">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z"/></svg>
+                    Atendimento ao Cliente
+                    <span class="tasks-tab-count" id="tab-count-atendimento-cliente">0</span>
+                  </button>
+                  <button class="tasks-tab" role="tab" aria-selected="false" data-category="otimizacao-rede" id="tab-otimizacao-rede" aria-controls="panel-otimizacao-rede">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path d="M4 12a8 8 0 0 1 16 0"/>
+                      <path d="M7 12a5 5 0 0 1 10 0"/>
+                      <circle cx="12" cy="12" r="1.5"/>
+                    </svg>
+                    Otimização de Rede
+                    <span class="tasks-tab-count" id="tab-count-otimizacao-rede">0</span>
+                  </button>
+                </div>
+              </details>
 
-        <!-- Toolbar das tarefas operacionais -->
-        <div class="toolbar" role="toolbar" aria-label="Controles de tarefas operacionais">
-          <div class="toolbar-left">
-            <div class="search-box" role="search">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input type="search" id="opSearchInput" placeholder="Buscar tarefas operacionais…" aria-label="Buscar tarefas operacionais"/>
+              <details class="tasks-folder">
+                <summary class="tasks-folder-summary" aria-label="Atividade de Manutenção">
+                  <span class="tasks-folder-summary-left">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                    </svg>
+                    Atividade de Manutenção
+                  </span>
+                </summary>
+                <div class="tasks-tabs" role="tablist" aria-label="Atividade de Manutenção">
+                  <button class="tasks-tab active" role="tab" aria-selected="true" data-category="rompimentos" id="tab-rompimentos" aria-controls="panel-rompimentos">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                    Rompimentos
+                    <span class="tasks-tab-count" id="tab-count-rompimentos">0</span>
+                  </button>
+                  <button class="tasks-tab" role="tab" aria-selected="false" data-category="troca-poste" id="tab-troca-poste" aria-controls="panel-troca-poste">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+                    Troca de Poste
+                    <span class="tasks-tab-count" id="tab-count-troca-poste">0</span>
+                  </button>
+                </div>
+              </details>
             </div>
           </div>
-          <button class="primary-btn" id="openOpTaskModalBtn" aria-label="Nova tarefa operacional">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Nova tarefa
-          </button>
-        </div>
 
-        <!-- Kanban board -->
-        <div id="kanbanBoard" class="kanban-board" role="region" aria-label="Quadro Kanban de tarefas operacionais">
-          <!-- Gerado via JS -->
+          <div class="tasks-content-col" aria-label="Painel de visualização">
+            <div id="opPanelContent" class="op-panel-content hidden">
+              <div class="op-content-panel">
+                <!-- Toolbar das tarefas operacionais -->
+                <div class="toolbar" role="toolbar" aria-label="Controles de tarefas operacionais">
+                  <div class="toolbar-left">
+                    <div class="search-box" role="search">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                      <input type="search" id="opSearchInput" placeholder="Buscar tarefas operacionais…" aria-label="Buscar tarefas operacionais"/>
+                    </div>
+
+                    <div class="search-box" role="group" aria-label="Filtro de região">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                      <select id="opRegionSelectFilter" aria-label="Filtrar por região">
+                        <option value="">Todas as regiões</option>
+                        <option value="Goval">Goval</option>
+                        <option value="Vale do Aço">Vale do Aço</option>
+                        <option value="Caratinga">Caratinga</option>
+                      </select>
+                    </div>
+
+                    <div class="search-box" role="search">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                      <input type="search" id="opTecnicoInput" placeholder="Filtrar por técnico…" aria-label="Filtrar por técnico"/>
+                    </div>
+
+                    <div class="search-box" role="search">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 16V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2h14a2 2 0 002-2z"/><polyline points="7 12 10 15 17 8"/></svg>
+                      <input type="search" id="opTaskIdInput" placeholder="ID da tarefa…" aria-label="ID da tarefa"/>
+                    </div>
+                  </div>
+                  <button class="primary-btn" id="openOpTaskModalBtn" aria-label="Nova tarefa operacional">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    Nova tarefa
+                  </button>
+                </div>
+
+                <!-- Kanban board -->
+                <div class="op-kanban-wrap">
+                  <div id="kanbanBoard" class="kanban-board" role="region" aria-label="Quadro Kanban de tarefas operacionais">
+                    <!-- Gerado via JS -->
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
       </section>
@@ -737,6 +804,7 @@
             <option value="">Selecione a região</option>
             <option value="Goval">Goval</option>
             <option value="Vale do Aço">Vale do Aço</option>
+            <option value="Caratinga">Caratinga</option>
           </select>
         </div>
       </div>

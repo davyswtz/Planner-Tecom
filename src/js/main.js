@@ -233,6 +233,9 @@ const Store = (() => {
   let dashboardFilter = 'all';
   let dashboardSearch = '';
   let opSearch = '';
+  let opRegionSearch = '';
+  let opTecnicoSearch = '';
+  let opTaskIdSearch = '';
   let editingTaskId = null;
   let editingOpTaskId = null;
   let sidebarOpen = true;
@@ -411,6 +414,12 @@ const Store = (() => {
     set dashboardSearch(v)  { dashboardSearch = v; },
     get opSearch()          { return opSearch; },
     set opSearch(v)         { opSearch = v; },
+    get opRegionSearch()   { return opRegionSearch; },
+    set opRegionSearch(v)  { opRegionSearch = v; },
+    get opTecnicoSearch()   { return opTecnicoSearch; },
+    set opTecnicoSearch(v)  { opTecnicoSearch = v; },
+    get opTaskIdSearch()   { return opTaskIdSearch; },
+    set opTaskIdSearch(v)  { opTaskIdSearch = v; },
     get editingTaskId()     { return editingTaskId; },
     set editingTaskId(v)    { editingTaskId = v; },
     get editingOpTaskId()   { return editingOpTaskId; },
@@ -631,7 +640,7 @@ const WebhookService = {
     // Google Chat threading (tópicos): cria no "andamento" e responde no mesmo thread nas demais.
     const threadKey = this._resolveThreadKey(event, task);
     if (threadKey) {
-      this._persistThreadKeyIfNeeded(event, task, threadKey);
+      this._persistThreadKeyIfNeeded(task, threadKey);
       const url = this._buildThreadedWebhookUrl(config.url, threadKey);
       const payload = { ...message, thread: { threadKey } };
       await this._post(url, payload);
@@ -641,12 +650,9 @@ const WebhookService = {
     await this._post(config.url, message);
   },
 
-  _resolveThreadKey(event, task) {
+  _resolveThreadKey(_event, task) {
     const existing = String(task?.chatThreadKey ?? '').trim();
     if (existing) return existing;
-
-    // Regra atual: só cria tópico no "andamento".
-    if (event !== 'andamento') return '';
 
     const stableId = this._taskStableId(task);
     return `burrinho-${stableId}`.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 120);
@@ -659,8 +665,7 @@ const WebhookService = {
     return code || (id ? `${cat}-${id}` : `${cat}-unknown`);
   },
 
-  _persistThreadKeyIfNeeded(event, task, threadKey) {
-    if (event !== 'andamento') return;
+  _persistThreadKeyIfNeeded(task, threadKey) {
     const current = String(task?.chatThreadKey ?? '').trim();
     if (current) return;
 
@@ -669,11 +674,8 @@ const WebhookService = {
 
     try {
       // Compatível com o shape atual: dashboard → updateTask; operacional → updateOpTask
-      if (task?.source === 'dashboard') {
-        Store.updateTask(idNum, { chatThreadKey: threadKey });
-      } else {
-        Store.updateOpTask(idNum, { chatThreadKey: threadKey });
-      }
+      if (task?.source === 'dashboard') Store.updateTask(idNum, { chatThreadKey: threadKey });
+      else Store.updateOpTask(idNum, { chatThreadKey: threadKey });
     } catch {
       // não quebra o envio ao Chat se persistência falhar
     }
@@ -846,6 +848,7 @@ const TaskService = {
     'rompimentos': 'Rompimentos',
     'troca-poste': 'Troca de Poste',
     'atendimento-cliente': 'Atendimento ao Cliente',
+    'otimizacao-rede': 'Otimização de Rede',
   },
 
   _isDoneStatus(status) {
@@ -955,6 +958,7 @@ const OpTaskService = {
     'rompimentos': 'Rompimentos',
     'troca-poste': 'Troca de Poste',
     'atendimento-cliente': 'Atendimento ao Cliente',
+    'otimizacao-rede': 'Otimização de Rede',
   },
 
   /**
@@ -975,13 +979,31 @@ const OpTaskService = {
 
   /** Retorna tarefas operacionais filtradas por categoria e busca */
   getFilteredByCategory(category) {
-    const query = Store.opSearch.toLowerCase();
-    return Store.getOpTasksByCategory(category).filter(t =>
-      !query ||
-      t.titulo.toLowerCase().includes(query) ||
-      t.responsavel.toLowerCase().includes(query) ||
-      t.descricao.toLowerCase().includes(query)
-    );
+    const query = (Store.opSearch || '').toLowerCase();
+    const regionQuery = (Store.opRegionSearch || '').toLowerCase();
+    const techQuery = (Store.opTecnicoSearch || '').toLowerCase();
+    const taskIdRaw = String(Store.opTaskIdSearch || '').trim();
+    const taskIdNum = taskIdRaw && /^\d+$/.test(taskIdRaw) ? Number(taskIdRaw) : null;
+
+    return Store.getOpTasksByCategory(category).filter(t => {
+      const matchSearch =
+        !query ||
+        String(t.titulo || '').toLowerCase().includes(query) ||
+        String(t.responsavel || '').toLowerCase().includes(query) ||
+        String(t.descricao || '').toLowerCase().includes(query);
+
+      const matchRegion = !regionQuery || String(t.regiao || '').toLowerCase() === regionQuery;
+
+      const matchTech = !techQuery || String(t.responsavel || '').toLowerCase().includes(techQuery);
+
+      const matchTaskId =
+        !taskIdRaw ||
+        (taskIdNum !== null ? Number(t.id) === taskIdNum : false) ||
+        String(t.taskCode || '').includes(taskIdRaw) ||
+        String(t.id).includes(taskIdRaw);
+
+      return matchSearch && matchRegion && matchTech && matchTaskId;
+    });
   },
 
   /** Retorna contagens por status para estatísticas */
@@ -1293,12 +1315,15 @@ const UI = {
     const rompimentosCount = allOpTasks.filter(t => t.categoria === 'rompimentos').length;
     const trocaPosteCount = allOpTasks.filter(t => t.categoria === 'troca-poste').length;
     const atendimentoCount = allOpTasks.filter(t => t.categoria === 'atendimento-cliente').length;
+    const otimizacaoCount = allOpTasks.filter(t => t.categoria === 'otimizacao-rede').length;
     const tabRompimentos = document.getElementById('tab-count-rompimentos');
     const tabTrocaPoste = document.getElementById('tab-count-troca-poste');
     const tabAtendimento = document.getElementById('tab-count-atendimento-cliente');
+    const tabOtim = document.getElementById('tab-count-otimizacao-rede');
     if (tabRompimentos) tabRompimentos.textContent = String(rompimentosCount);
     if (tabTrocaPoste) tabTrocaPoste.textContent = String(trocaPosteCount);
     if (tabAtendimento) tabAtendimento.textContent = String(atendimentoCount);
+    if (tabOtim) tabOtim.textContent = String(otimizacaoCount);
   },
 
   /* ── Kanban Board ───────────────────────────────────────── */
@@ -1306,7 +1331,7 @@ const UI = {
     const category = Store.currentOpCategory;
     const tasks    = OpTaskService.getFilteredByCategory(category);
     const tod      = Utils.todayIso();
-    const isAtendimento = category === 'atendimento-cliente';
+    const isAtendimento = category === 'atendimento-cliente' || category === 'otimizacao-rede';
     const board = document.getElementById('kanbanBoard');
     if (isAtendimento) {
       board?.classList.add('atd-mode');
@@ -1488,6 +1513,10 @@ const UI = {
 
   renderAtendimentoList(tasks) {
     const board = document.getElementById('kanbanBoard');
+    const currentCategory = Store.currentOpCategory;
+    const currentLabel = currentCategory === 'otimizacao-rede'
+      ? 'Otimização de Rede'
+      : 'Atendimento ao Cliente';
     const statusLabel = (status) => status === 'Concluída' ? 'Concluído' : status;
     const statusBadgeAtd = (status) => this.statusBadge(status).replace(status, statusLabel(status));
     const normalized = tasks.map(t => {
@@ -1597,7 +1626,7 @@ const UI = {
     board.innerHTML = `
       <div class="atd-list-wrap">
         <div class="atd-list-toolbar">
-          <span class="panel-title">Atendimento ao Cliente · Listas e Subtarefas</span>
+          <span class="panel-title">${currentLabel} · Listas e Subtarefas</span>
           <div class="atd-toolbar-right">
             <div class="atd-kpi-group" aria-label="Indicadores de atendimento">
               <span class="atd-kpi">Listas: <strong>${totals.listas}</strong></span>
@@ -1618,7 +1647,7 @@ const UI = {
     `;
 
     document.getElementById('addAtdParentBtn')?.addEventListener('click', () => {
-      Controllers.opTask.openNewModal({ kind: 'parent', category: 'atendimento-cliente', status: 'Backlog' });
+      Controllers.opTask.openNewModal({ kind: 'parent', category: Store.currentOpCategory, status: 'Backlog' });
     });
 
     board.querySelectorAll('[data-toggle-group]').forEach(btn => {
@@ -1680,7 +1709,7 @@ const UI = {
     board.querySelectorAll('[data-add-child]').forEach(btn => {
       btn.addEventListener('click', e => {
         const parentId = Number(e.currentTarget.dataset.addChild);
-        Controllers.opTask.openNewModal({ kind: 'child', parentTaskId: parentId, category: 'atendimento-cliente' });
+        Controllers.opTask.openNewModal({ kind: 'child', parentTaskId: parentId, category: Store.currentOpCategory });
       });
     });
 
@@ -2453,7 +2482,7 @@ const Controllers = {
     _coordsLookupTimer: null,
     _setorCtoLookupTimer: null,
     _isAtendimentoCategory(category = Store.currentOpCategory) {
-      return category === 'atendimento-cliente';
+      return category === 'atendimento-cliente' || category === 'otimizacao-rede';
     },
     _isRompimentoCategory(category = Store.currentOpCategory) {
       return category === 'rompimentos';
@@ -2610,7 +2639,7 @@ const Controllers = {
 
     _parentTaskOptions(currentTaskId = null) {
       return Store.getOpTasks().filter(t =>
-        t.categoria === 'atendimento-cliente' &&
+        t.categoria === Store.currentOpCategory &&
         t.isParentTask === true &&
         t.id !== currentTaskId
       );
@@ -2662,6 +2691,7 @@ const Controllers = {
         'rompimentos': 'ROM',
         'troca-poste': 'POS',
         'atendimento-cliente': 'ATD',
+        'otimizacao-rede': 'NET',
       };
       const prefix = prefixMap[category] || 'ROM';
       const count = Store.getOpTasks().filter(t => t.categoria === category).length + 1;
@@ -2673,6 +2703,7 @@ const Controllers = {
         'rompimentos': 'ROM',
         'troca-poste': 'POS',
         'atendimento-cliente': 'ATD',
+        'otimizacao-rede': 'NET',
       };
       const prefix = prefixMap[task.categoria] || 'ROM';
       return `${prefix}-${String(task.id).padStart(4, '0')}`;
@@ -2940,6 +2971,21 @@ const Controllers = {
         Store.opSearch = e.target.value.trim().toLowerCase();
         UI.renderKanban();
       });
+
+      document.getElementById('opRegionSelectFilter')?.addEventListener('change', e => {
+        Store.opRegionSearch = e.target.value.trim().toLowerCase();
+        UI.renderKanban();
+      });
+
+      document.getElementById('opTecnicoInput')?.addEventListener('input', e => {
+        Store.opTecnicoSearch = e.target.value.trim().toLowerCase();
+        UI.renderKanban();
+      });
+
+      document.getElementById('opTaskIdInput')?.addEventListener('input', e => {
+        Store.opTaskIdSearch = e.target.value;
+        UI.renderKanban();
+      });
     },
   },
 
@@ -2959,6 +3005,46 @@ const Controllers = {
           UI.renderKanban();
         });
       });
+    },
+  },
+
+  /* ── Pastas (Projetos de Rede / Manutenção) ───────────────── */
+  opFolders: {
+    init() {
+      const panel = document.getElementById('opPanelContent');
+      if (!panel) return;
+
+      const folders = Array.from(document.querySelectorAll('#page-tarefas details.tasks-folder'));
+      const activateActiveTabInFolder = (detailsEl) => {
+        const activeTab = detailsEl?.querySelector('.tasks-tab.active');
+        const tabToActivate = activeTab ?? detailsEl?.querySelector('.tasks-tab');
+        if (!tabToActivate) return;
+        // Usa o handler já existente de tabs para manter o comportamento/ARIA.
+        tabToActivate.click();
+      };
+
+      const syncVisibility = () => {
+        const openFolders = folders.filter(f => f.open);
+        if (!openFolders.length) {
+          panel.classList.add('hidden');
+          return;
+        }
+        panel.classList.remove('hidden');
+        // Quando abre, garante que cai na primeira categoria da pasta.
+        // (Evita tela vazia caso o estado anterior não combine com a pasta aberta.)
+        const activeFolder = openFolders[openFolders.length - 1];
+        activateActiveTabInFolder(activeFolder);
+      };
+
+      folders.forEach(f => {
+        f.addEventListener('toggle', () => {
+          // toggle dispara tanto ao abrir quanto ao fechar
+          syncVisibility();
+        });
+      });
+
+      // Estado inicial: se nenhuma pasta estiver aberta, esconde.
+      syncVisibility();
     },
   },
 
@@ -3206,6 +3292,7 @@ async function initApp() {
   Controllers.opTask.init();
   Controllers.filters.init();
   Controllers.categoryTabs.init();
+  Controllers.opFolders.init();
   Controllers.reports.init();
   Controllers.calendar.init();
   Controllers.webhook.init();

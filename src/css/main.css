@@ -417,6 +417,30 @@ body.auth-locked .login-screen { display: flex; }
 
 /* ═══ STAT CARDS ════════════════════════════════════════════ */
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+
+/* Deixa os cards de estatística mais “organizados” sem esticar demais */
+#page-tarefas .stats {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Cards de status: mesma altura + números bem legíveis */
+#page-tarefas .stat-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 120px;
+}
+#page-tarefas .stat-value {
+  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+}
+#page-tarefas .stat-sub { margin-top: 0; }
+
+@media (max-width: 480px) {
+  #page-tarefas .stat-card { min-height: 108px; }
+}
 .stat-card {
   background: var(--black3); border: 1px solid var(--border);
   border-radius: var(--radius-lg); padding: 18px 20px;
@@ -469,6 +493,36 @@ body.auth-locked .login-screen { display: flex; }
 .search-box:focus-within { border-color: var(--green-dim); }
 .search-box input { border: none; background: none; color: var(--white); font-size: 13px; font-family: var(--font-display); outline: none; flex: 1; }
 .search-box input::placeholder { color: var(--white4); }
+.search-box select {
+  border: none;
+  background: transparent;
+  color: var(--white);
+  font-size: 13px;
+  font-family: var(--font-display);
+  outline: none;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  cursor: pointer;
+
+  /* Remove o estilo padrão do browser */
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+
+  /* Seta de dropdown custom (compatível sem precisar alterar HTML) */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23A7B7A7' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  background-size: 14px 14px;
+
+  /* Espaço para a seta */
+  padding-right: 18px;
+}
+
+.search-box select:focus {
+  outline: none;
+}
 .primary-btn {
   display: flex; align-items: center; gap: 8px; padding: 8px 16px;
   border-radius: var(--radius); background: var(--green); border: none; cursor: pointer;
@@ -766,12 +820,141 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
   display: flex; background: var(--black3); border: 1px solid var(--border);
   border-radius: var(--radius-lg); padding: 4px; gap: 4px;
 }
+.tasks-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Pastas com largura controlada para manter consistência visual */
+#page-tarefas .tasks-sessions {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+}
+
+/* Layout responsivo (mobile-first) da seção Tarefas */
+#page-tarefas .tasks-layout-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+#page-tarefas .tasks-folders-col,
+#page-tarefas .tasks-content-col {
+  min-width: 0;
+}
+
+@media (min-width: 900px) {
+  #page-tarefas .tasks-layout-grid {
+    grid-template-columns: 360px 1fr;
+    gap: 18px;
+  }
+}
+
+/* Painel do conteúdo (toolbar + kanban) */
+#page-tarefas .op-content-panel {
+  background: var(--black3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* Container do Kanban para evitar overflow feio */
+#page-tarefas .op-kanban-wrap {
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: min(62vh, 640px);
+  padding-right: 4px;
+}
+
+@media (max-width: 768px) {
+  #page-tarefas .op-kanban-wrap { max-height: none; }
+}
+.tasks-folder {
+  background: var(--black3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 6px 8px 10px;
+  overflow: hidden;
+  transition: transform var(--transition), border-color var(--transition), box-shadow var(--transition);
+}
+.tasks-folder:hover {
+  border-color: var(--border3);
+  transform: translateY(-1px);
+}
+.tasks-folder[open] {
+  border-color: var(--border3);
+  box-shadow: 0 18px 50px rgba(0,0,0,.35);
+}
+.tasks-folder-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  width: 100%;
+  padding: 10px 12px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  font-size: 10.5px;
+  color: var(--white);
+  user-select: none;
+  transition: transform var(--transition), color var(--transition);
+}
+.tasks-folder-summary::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--white3);
+  border-bottom: 2px solid var(--white3);
+  transform: rotate(45deg);
+  transition: transform var(--transition), border-color var(--transition);
+  margin-left: 10px;
+  flex-shrink: 0;
+}
+.tasks-folder[open] .tasks-folder-summary::after {
+  transform: rotate(-135deg);
+  border-color: var(--green);
+}
+.tasks-folder[open] .tasks-folder-summary { transform: translateY(-1px); }
+.tasks-folder-summary-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.tasks-folder summary { list-style: none; }
+.tasks-folder summary::-webkit-details-marker { display: none; }
+.tasks-folder[open] .tasks-tabs { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 10px; animation: fadeIn .18s ease both; }
+.tasks-folder .tasks-tabs { margin-top: 10px; }
+
+/* Painel da página Tarefas: fica oculto enquanto nenhuma "pasta" estiver aberta */
+.op-panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.op-panel-content.hidden { display: none; }
+
+/* Animação leve ao mostrar o conteúdo interno (filtros/kanban) */
+.op-panel-content:not(.hidden) { animation: fadeIn .22s ease both; }
 .tasks-tab {
   flex: 1; padding: 10px 16px; border-radius: var(--radius); border: none; cursor: pointer;
   font-size: 13px; font-family: var(--font-display); font-weight: 600;
   background: none; color: var(--white3);
   transition: background var(--transition), color var(--transition);
   display: flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px;
 }
 .tasks-tab.active { background: var(--black5); color: var(--green); border: 1px solid var(--border2); }
 .tasks-tab:hover:not(.active) { color: var(--white); background: var(--black4); }
