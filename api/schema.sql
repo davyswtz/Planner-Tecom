@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS op_tasks (
   clientesAfetados VARCHAR(32) NOT NULL DEFAULT '',
   coordenadas VARCHAR(120) NOT NULL DEFAULT '',
   localizacao_texto VARCHAR(512) NOT NULL DEFAULT '',
-  descricao TEXT,
+  descricao MEDIUMTEXT,
   categoria VARCHAR(48) NOT NULL,
   prazo DATE NULL,
   prioridade VARCHAR(24) NOT NULL DEFAULT 'Média',
@@ -47,6 +47,18 @@ CREATE TABLE IF NOT EXISTS op_tasks (
   KEY idx_op_tasks_categoria (categoria),
   KEY idx_op_tasks_status (status),
   KEY idx_op_tasks_parent (parent_task_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─── Imagens embutidas na descrição (op_tasks) ─────────────────────────────
+CREATE TABLE IF NOT EXISTS op_task_image (
+  id INT NOT NULL AUTO_INCREMENT,
+  op_task_id INT NOT NULL,
+  mime_type VARCHAR(80) NOT NULL DEFAULT 'image/png',
+  image_data LONGBLOB NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_op_task_image_task (op_task_id),
+  CONSTRAINT fk_op_task_image_op_task FOREIGN KEY (op_task_id) REFERENCES op_tasks (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ─── Notas do calendário ───────────────────────────────────────────────────

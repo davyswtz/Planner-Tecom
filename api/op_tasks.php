@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/db.php';
+require __DIR__ . '/op_desc_images.inc.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     jsonResponse(['ok' => true]);
@@ -20,6 +21,7 @@ try {
             $stmt = $pdo->prepare('DELETE FROM op_tasks WHERE id = :id OR parent_task_id = :id');
             $stmt->execute([':id' => $id]);
         } else {
+            $pdo->prepare('DELETE FROM op_task_image WHERE op_task_id = :id')->execute([':id' => $id]);
             $stmt = $pdo->prepare('DELETE FROM op_tasks WHERE id = :id');
             $stmt->execute([':id' => $id]);
         }
@@ -39,6 +41,7 @@ try {
     $pdo = db();
     $coord = (string) ($data['coordenadas'] ?? '');
     $locText = (string) ($data['localizacaoTexto'] ?? '');
+    $descricaoRaw = (string) ($data['descricao'] ?? '');
     $sql = 'INSERT INTO op_tasks (
               id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
               coordenadas, localizacao_texto, descricao, categoria, prazo, prioridade, status,
@@ -79,7 +82,7 @@ try {
         ':clientesAfetados' => (string) ($data['clientesAfetados'] ?? ''),
         ':coordenadas' => $coord,
         ':localizacao_texto' => $locText,
-        ':descricao' => (string) ($data['descricao'] ?? ''),
+        ':descricao' => $descricaoRaw,
         ':categoria' => (string) ($data['categoria'] ?? 'rompimentos'),
         ':prazo' => (string) ($data['prazo'] ?? ''),
         ':prioridade' => (string) ($data['prioridade'] ?? 'Média'),
@@ -91,7 +94,14 @@ try {
         ':chat_thread_key' => (string) ($data['chatThreadKey'] ?? ''),
     ]);
 
-    jsonResponse(['ok' => true]);
+    $finalDesc = processOpTaskDescricaoImages($descricaoRaw, $id, $pdo);
+    pruneOpTaskImagesNotInHtml($pdo, $id, $finalDesc);
+    if ($finalDesc !== $descricaoRaw) {
+        $u = $pdo->prepare('UPDATE op_tasks SET descricao = :d WHERE id = :id');
+        $u->execute([':d' => $finalDesc, ':id' => $id]);
+    }
+
+    jsonResponse(['ok' => true, 'descricao' => $finalDesc]);
 } catch (Throwable $e) {
     jsonResponse(['ok' => false, 'error' => $e->getMessage()], 500);
 }

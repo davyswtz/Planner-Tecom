@@ -16,7 +16,7 @@
 /**
  * Modelo de tarefa operacional (Rompimentos / Troca de Poste)
  * @typedef {{ id: number, titulo: string, responsavel: string, responsavelChatId?: string, categoria: string, prazo: string, prioridade: string, descricao: string, status: OpStatus, historico: HistoryEntry[], criadaEm: string, assinadaPor?: string, assinadaEm?: string, protocolo?: string, dataEntrada?: string, subProcesso?: string, dataInstalacao?: string, ordemServico?: string }} OpTask
- * @typedef {'Criada'|'Backlog'|'A iniciar'|'Em andamento'|'Concluída'|'Finalizada'|'Cancelada'} OpStatus
+ * @typedef {'Criada'|'Backlog'|'A iniciar'|'Em andamento'|'Concluída'|'Finalizada'|'Cancelada'|'Agendado'|'Validação'|'Envio pendente'|'Necessário adequação'|'Finalizado'} OpStatus
  * @typedef {{ status: OpStatus, timestamp: string, autor: string }} HistoryEntry
  */
 
@@ -301,7 +301,18 @@ const Store = (() => {
     writeLocal(STORAGE_KEYS.note, plannerConfig.note || '');
   };
   const syncUpTask = (task) => { ApiService.saveTask(task); };
-  const syncUpOpTask = (task) => { ApiService.saveOpTask(task); };
+  const syncUpOpTask = (task) => {
+    if (!ApiService.enabled()) return;
+    void ApiService.saveOpTask(task).then((resp) => {
+      if (resp && resp.ok && typeof resp.descricao === 'string' && task && task.id) {
+        const t = opTasks.find(x => Number(x.id) === Number(task.id));
+        if (t) {
+          t.descricao = resp.descricao;
+          persistSnapshot();
+        }
+      }
+    });
+  };
   const syncDeleteOpTask = (id, cascade = false) => { ApiService.deleteOpTask(id, cascade); };
   const syncConfig = () =>
     ApiService.saveConfig({ webhookConfig: { ...webhookConfig }, plannerConfig: { ...plannerConfig } });
@@ -398,7 +409,7 @@ const Store = (() => {
         criadaEm: nowIso,
         assinadaPor: signedBy,
         assinadaEm: nowIso,
-        historico: [{ status: 'Criada', timestamp: nowIso, autor: signedBy }],
+        historico: [{ status: data.status || 'Criada', timestamp: nowIso, autor: signedBy }],
       };
       opTasks.push(t);
       persistSnapshot();
@@ -687,9 +698,212 @@ const WebhookService = {
       .join('\n');
   },
 
+  /** Remove tags HTML para trechos de descrição no Chat (ex.: rich editor). */
+  _stripHtmlLite(raw) {
+    return String(raw || '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  },
+
+  /** Linha 📝 Cemig: logradouro e bairro (sem região/município). */
+  _formatCemigEnderecoLine(task) {
+    const loc = String(task.localizacaoTexto || '').trim();
+
+    if (loc && loc.includes(' - ')) {
+      const idx = loc.indexOf(' - ');
+      const rua = loc.slice(0, idx).trim();
+      const bairro = loc.slice(idx + 3).trim();
+      return `logradouro ${rua}, bairro ${bairro}`;
+    }
+    if (loc) {
+      return `logradouro ${loc}`;
+    }
+    return 'logradouro —, bairro —';
+  },
+
+  /** Linha 🔔 protocolo / título / trecho da descrição (CRM, ER/EE, etc.). */
+  _formatCemigNotificacaoLine(task) {
+    const proto = String(task.protocolo || '').trim();
+    let titulo = String(task.titulo || '').trim().replace(/^Cemig\s*[—–-]\s*/i, '').trim();
+    const desc = this._stripHtmlLite(task.descricao || '').replace(/\s+/g, ' ').trim();
+    const bits = [];
+    if (proto) bits.push(proto);
+    if (titulo && titulo !== proto) bits.push(titulo);
+    let core = bits.join(' — ') || '—';
+    if (
+      desc.length > 0 &&
+      !core.includes(desc.slice(0, Math.min(28, desc.length)))
+    ) {
+      const d = desc.length > 220 ? `${desc.slice(0, 217)}…` : desc;
+      core = `${core} — ${d}`;
+    }
+    return `CEMIG - NOTIFICAÇÃO ${core}`;
+  },
+
   /**
-   * Se o título for só coordenadas (lat, lon), devolve texto normalizado em uma linha para copiar.
+   * Google Chat — Certificação Cemig (layout tipo notificação ER/EE + endereço).
+   * @param {'andamento'|'concluida'|'finalizada'} event
    */
+  _buildCemigMessage(event, task) {
+    const B = (lines) => this._rompimentoBoldLines(lines);
+    const s = (x) => this._chatSafe(String(x ?? '').trim());
+    const tecnico = this._resolveTechnicianDisplay(task);
+    const enviado = s(String(task?.assinadaPor || '').trim() || '—');
+    const taskId = s(String(task.taskCode || `CEM-${String(task.id || '').padStart(4, '0')}`).trim());
+    const addrLine = this._formatCemigEnderecoLine(task);
+    const notifLine = this._formatCemigNotificacaoLine(task);
+    const coords = s(String(task.coordenadas || '').trim() || '—');
+
+    if (event === 'andamento') {
+      return {
+        text: B([
+          '⚡ Certificação de Rede - CEMIG',
+          '',
+          `📝 ${s(addrLine)}`,
+          '',
+          `🔔 ${s(notifLine)}`,
+          '',
+          `🗺️ Coordenadas: ${coords}`,
+          '',
+          `🔧 Técnico: ${tecnico}`,
+          `👤 Enviado por: ${enviado}`,
+          `🆔 ID: ${taskId}`,
+        ]),
+      };
+    }
+    const sep = '▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬';
+    const proto = String(task.protocolo || '').trim();
+    const tituloC = String(task.titulo || '').trim().replace(/^Cemig\s*[—–-]\s*/i, '').trim();
+    const ref = proto || tituloC || 'Certificação Cemig';
+    const elapsed =
+      event === 'concluida' || event === 'finalizada'
+        ? this._formatDurationFromStart(task)
+        : '';
+    const elapsedLine =
+      elapsed && elapsed !== 'Não foi possível calcular'
+        ? [`⏱️ TEMPO NO SERVIÇO · ${s(elapsed)}`]
+        : [];
+    const head =
+      event === 'concluida'
+        ? '✅ CERTIFICAÇÃO CEMIG — CONCLUÍDA'
+        : '🏁 CERTIFICAÇÃO CEMIG — FINALIZADA';
+
+    const enderecoC = s(String(task.localizacaoTexto || '').trim() || '—');
+
+    return {
+      text: B([
+        head,
+        sep,
+        `🆔 ID · ${taskId}`,
+        `📋 REFERÊNCIA · ${s(ref)}`,
+        `🗺️ COORDENADAS · ${coords}`,
+        `🏠 ENDEREÇO · ${enderecoC}`,
+        ...elapsedLine,
+      ]),
+    };
+  },
+
+  /**
+   * Google Chat — Otimização de Rede: mensagem “pai” em andamento; demais eventos como resposta no tópico.
+   * Layout em blocos, linhas em negrito (sintaxe do Chat), separadores visuais e texto seguro.
+   * @param {'andamento'|'concluida'|'finalizada'} event
+   */
+  _buildOtimRedeMessage(event, task) {
+    const B = (lines) => this._rompimentoBoldLines(lines);
+    const tecnico = this._resolveTechnicianDisplay(task);
+    const enviadoPor = String(task?.assinadaPor || '').trim() || '—';
+    const taskId = String(task.taskCode || `NET-${String(task.id || '').padStart(4, '0')}`).trim();
+    const coords = String(task.coordenadas || '').trim() || '—';
+    const endereco = String(task.localizacaoTexto || '').trim() || '—';
+    const regiao = String(task.regiao || '').trim() || '—';
+    const titulo = String(task.titulo || '').trim();
+    const proto = String(task.protocolo || '').trim();
+    const os = String(task.ordemServico || '').trim();
+    const protoOs = [proto, os].filter(Boolean).join(' · ');
+    const descPlain = this._stripHtmlLite(task.descricao || '');
+    const principal = titulo || protoOs || '—';
+    const descExtra =
+      descPlain && descPlain !== titulo ? descPlain.slice(0, 560) : '';
+
+    const wrapChatLines = (text, maxLen = 56) => {
+      const words = String(text || '').split(/\s+/).filter(Boolean);
+      const lines = [];
+      let cur = '';
+      for (const w of words) {
+        const next = cur ? `${cur} ${w}` : w;
+        if (next.length > maxLen && cur) {
+          lines.push(cur);
+          cur = w;
+        } else {
+          cur = next;
+        }
+      }
+      if (cur) lines.push(cur);
+      return lines.slice(0, 14);
+    };
+
+    const sep = '▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬';
+
+    if (event === 'andamento') {
+      const header = B([
+        '🌐 OTIMIZAÇÃO DE REDE',
+        sep,
+        '⚠️ NOVA TAREFA',
+        '',
+        '📝 RESUMO',
+        principal,
+      ]);
+
+      const descLines = descExtra ? ['', '📄 DESCRIÇÃO / OBSERVAÇÕES', ...wrapChatLines(descExtra)] : [];
+      const descBlock = descLines.length ? B(descLines) : '';
+
+      const meta = B([
+        '',
+        sep,
+        '📌 IDENTIFICAÇÃO',
+        `🆔 ID DA TAREFA · ${this._chatSafe(taskId)}`,
+        `🌎 REGIÃO · ${this._chatSafe(regiao)}`,
+        '',
+        '👷 RESPONSÁVEIS',
+        `🔧 TÉCNICO · ${tecnico}`,
+        `👤 ENVIADO POR · ${this._chatSafe(enviadoPor)}`,
+        '',
+        '📍 LOCALIZAÇÃO',
+        `🗺️ COORDENADAS · ${this._chatSafe(coords)}`,
+        `🏠 ENDEREÇO · ${this._chatSafe(endereco)}`,
+      ]);
+
+      const parts = [header, descBlock, meta].filter(Boolean);
+      return { text: parts.join('\n\n') };
+    }
+
+    const head =
+      event === 'concluida'
+        ? '✅ OTIMIZAÇÃO DE REDE — CONCLUÍDA'
+        : '🏁 OTIMIZAÇÃO DE REDE — FINALIZADA';
+    const ref = titulo || protoOs || 'Otimização de rede';
+    const elapsed = event === 'concluida' || event === 'finalizada' ? this._formatDurationFromStart(task) : '';
+    const elapsedLine =
+      elapsed && elapsed !== 'Não foi possível calcular'
+        ? [`⏱️ TEMPO NO SERVIÇO · ${this._chatSafe(elapsed)}`]
+        : [];
+
+    return {
+      text: B([
+        head,
+        sep,
+        `🆔 ID · ${this._chatSafe(taskId)}`,
+        `📋 REFERÊNCIA · ${this._chatSafe(ref)}`,
+        `🗺️ COORDENADAS · ${this._chatSafe(coords)}`,
+        `🏠 ENDEREÇO · ${this._chatSafe(endereco)}`,
+        ...elapsedLine,
+      ]),
+    };
+  },
+
   _trocaPosteTitleAsLocation(tituloRaw) {
     const t = String(tituloRaw || '').trim();
     if (!t) return { mode: 'empty', line: 'Não informado' };
@@ -715,7 +929,8 @@ const WebhookService = {
     const assinatura = String(task?.assinadaPor || '').trim();
     const titulo = (task.titulo || '').trim();
     const descExtra = (task.descricao || '').trim();
-    const loc = this._trocaPosteTitleAsLocation(titulo);
+    const coordsSaved = String(task.coordenadas || '').trim();
+    const enderecoSaved = String(task.localizacaoTexto || '').trim();
     const taskId = task.taskCode || `POS-${String(task.id || '').padStart(4, '0')}`;
 
     const statusLine = {
@@ -734,8 +949,18 @@ const WebhookService = {
       assinatura ? `🖊️ ASSINATURA: ${assinatura}` : '',
     ]);
 
-    const coordLabel = loc.mode === 'coords' ? '📍 COORDENADAS' : '📍 LOCAL / DESCRIÇÃO';
-    const locationBlock = `*${this._chatSafe(coordLabel)}*\n${this._chatSafe(loc.line)}`;
+    let locationBlock;
+    if (coordsSaved || enderecoSaved) {
+      const cLine = coordsSaved || '—';
+      const eLine = enderecoSaved || '—';
+      locationBlock =
+        `*${this._chatSafe('📍 COORDENADAS')}*\n${this._chatSafe(cLine)}\n\n` +
+        `*${this._chatSafe('🏠 RUA / BAIRRO')}*\n${this._chatSafe(eLine)}`;
+    } else {
+      const loc = this._trocaPosteTitleAsLocation(titulo);
+      const coordLabel = loc.mode === 'coords' ? '📍 COORDENADAS' : '📍 LOCAL / DESCRIÇÃO';
+      locationBlock = `*${this._chatSafe(coordLabel)}*\n${this._chatSafe(loc.line)}`;
+    }
 
     const sections = [
       head,
@@ -906,6 +1131,14 @@ const WebhookService = {
   /** Monta o payload formatado */
   _buildMessage(event, task, category) {
     const opCat = String(task?.categoria ?? '').trim();
+
+    if (opCat === 'otimizacao-rede') {
+      return this._buildOtimRedeMessage(event, task);
+    }
+
+    if (opCat === 'certificacao-cemig') {
+      return this._buildCemigMessage(event, task);
+    }
 
     if (opCat === 'troca-poste') {
       return this._buildTrocaPosteMessage(event, task);
@@ -1118,18 +1351,19 @@ const TaskService = {
     'troca-poste': 'Troca de Poste',
     'atendimento-cliente': 'Atendimento ao Cliente',
     'otimizacao-rede': 'Otimização de Rede',
+    'certificacao-cemig': 'Certificação Cemig',
   },
 
   _isDoneStatus(status) {
-    return status === 'Concluída' || status === 'Finalizada';
+    return status === 'Concluída' || status === 'Finalizada' || status === 'Finalizado';
   },
 
   _isPendingStatus(status) {
-    return status === 'Pendente' || status === 'Criada' || status === 'Backlog';
+    return status === 'Pendente' || status === 'Criada' || status === 'Backlog' || status === 'Agendado';
   },
 
   _isProgressStatus(status) {
-    return status === 'Em andamento';
+    return status === 'Em andamento' || status === 'Validação' || status === 'Envio pendente' || status === 'Necessário adequação';
   },
 
   _isLateTask(task) {
@@ -1220,6 +1454,7 @@ const OpTaskService = {
     'Em andamento': 'andamento',
     'Concluída':    'concluida',
     'Finalizada':   'finalizada',
+    'Finalizado':   'finalizada',
   },
 
   /** Mapeia categoria → label legível */
@@ -1228,6 +1463,35 @@ const OpTaskService = {
     'troca-poste': 'Troca de Poste',
     'atendimento-cliente': 'Atendimento ao Cliente',
     'otimizacao-rede': 'Otimização de Rede',
+    'certificacao-cemig': 'Certificação Cemig',
+  },
+
+  /** Kanban Certificação Cemig — ordem do fluxo */
+  _cemigColumns: [
+    { status: 'Backlog', key: 'col-cemig-backlog', label: 'Backlog' },
+    { status: 'Agendado', key: 'col-cemig-agendado', label: 'Agendado' },
+    { status: 'Em andamento', key: 'col-cemig-andamento', label: 'Em andamento' },
+    { status: 'Validação', key: 'col-cemig-validacao', label: 'Validação' },
+    { status: 'Envio pendente', key: 'col-cemig-envio', label: 'Envio pendente' },
+    { status: 'Necessário adequação', key: 'col-cemig-adequacao', label: 'Necessário adequação' },
+    { status: 'Finalizado', key: 'col-cemig-final', label: 'Finalizado' },
+  ],
+  _cemigNext: {
+    'Backlog': ['Agendado'],
+    'Agendado': ['Em andamento'],
+    'Em andamento': ['Validação'],
+    'Validação': ['Envio pendente'],
+    'Envio pendente': ['Necessário adequação'],
+    'Necessário adequação': ['Finalizado'],
+    'Finalizado': [],
+  },
+  _cemigActionLabels: {
+    'Agendado': 'Agendar',
+    'Em andamento': 'Iniciar',
+    'Validação': 'Em validação',
+    'Envio pendente': 'Envio pendente',
+    'Necessário adequação': 'Adequação',
+    'Finalizado': 'Finalizar',
   },
 
   /**
@@ -1294,6 +1558,13 @@ const OpTaskService = {
   getStatusCounts() {
     const counts = { Criada: 0, 'Em andamento': 0, Concluída: 0, Finalizada: 0, Backlog: 0 };
     Store.getOpTasks().forEach(t => {
+      if (t.categoria === 'certificacao-cemig') {
+        const s = t.status;
+        if (s === 'Backlog' || s === 'Agendado') counts.Criada++;
+        else if (['Em andamento', 'Validação', 'Envio pendente', 'Necessário adequação'].includes(s)) counts['Em andamento']++;
+        else if (s === 'Finalizado') counts.Finalizada++;
+        return;
+      }
       if (t.status === 'Backlog' || t.status === 'Criada' || t.status === 'A iniciar') {
         counts.Criada++;
         counts.Backlog++;
@@ -1346,6 +1617,7 @@ const CalendarService = {
       description: task.descricao || '',
       status: task.effectiveStatus || task.status,
       priority: task.prioridade,
+      regiao: task.regiao || '',
       removable: false,
     };
   },
@@ -1402,7 +1674,7 @@ const ReportsService = {
 
   _normalize(task) {
     const status = task.effectiveStatus || task.status;
-    const isDone = ['Concluída', 'Finalizada'].includes(status);
+    const isDone = ['Concluída', 'Finalizada', 'Finalizado'].includes(status);
     const isLate = status === 'Atrasada' || (!!task.prazo && task.prazo < Utils.todayIso() && !isDone && status !== 'Cancelada');
     return {
       ...task,
@@ -1436,7 +1708,8 @@ const ReportsService = {
           (category === 'rompimentos' && t.categoria === 'rompimentos') ||
           (category === 'troca-poste' && t.categoria === 'troca-poste') ||
           (category === 'atendimento-cliente' && t.categoria === 'atendimento-cliente') ||
-          (category === 'otimizacao-rede' && t.categoria === 'otimizacao-rede');
+          (category === 'otimizacao-rede' && t.categoria === 'otimizacao-rede') ||
+          (category === 'certificacao-cemig' && t.categoria === 'certificacao-cemig');
         const matchRegion = regionFilter === 'all' || String(t.regiao || '').trim().toLowerCase() === regionFilter;
         const matchTech = techFilter === 'all' || String(t.responsavel || '').trim().toLowerCase().includes(techFilter);
         return matchPeriod && matchCategory && matchRegion && matchTech;
@@ -1446,14 +1719,19 @@ const ReportsService = {
   getMetrics(tasks) {
     const total = tasks.length;
     const done = tasks.filter(t => t.isDone).length;
-    const progress = tasks.filter(t => t.status === 'Em andamento').length;
+    const progress = tasks.filter(t =>
+      t.status === 'Em andamento' ||
+      t.status === 'Validação' ||
+      t.status === 'Envio pendente' ||
+      t.status === 'Necessário adequação'
+    ).length;
     const late = tasks.filter(t => t.isLate).length;
     const doneRate = total ? Math.round((done / total) * 100) : 0;
     return { total, done, progress, late, doneRate };
   },
 
   getStatusDistribution(tasks) {
-    const statuses = ['Pendente', 'Criada', 'Backlog', 'Em andamento', 'Concluída', 'Finalizada', 'Atrasada'];
+    const statuses = ['Pendente', 'Criada', 'Backlog', 'A iniciar', 'Em andamento', 'Concluída', 'Finalizada', 'Atrasada', 'Cancelada'];
     const counts = statuses.map(status => ({
       status,
       count: tasks.filter(t => t.status === status).length,
@@ -1542,17 +1820,48 @@ const UI = {
   },
   /* ── Helpers de badge ───────────────────────────────────── */
   _statusBadgeMap: {
-    'Backlog':      's-pendente',
+    'Backlog':      's-backlog',
     'A iniciar':    's-pendente',
     'Pendente':     's-pendente',
     'Em andamento': 's-andamento',
     'Concluída':    's-concluida',
     'Finalizada':   's-finalizada',
+    'Finalizado':   's-finalizado',
+    'Agendado':     's-agendado',
+    'Validação':    's-validacao',
+    'Envio pendente': 's-envio-pendente',
+    'Necessário adequação': 's-adequacao',
     'Atrasada':     's-atrasada',
     'Cancelada':    's-cancelada',
-    'Criada':       's-pendente',
+    'Criada':       's-criada',
+    'Anotado':      's-note',
   },
   _priorityBadgeMap: { Alta: 'p-high', Média: 'p-med', Baixa: 'p-low' },
+
+  _regionBadgeClass(regiao) {
+    const key = WebhookService._normalizeRegionKey(regiao);
+    if (key === 'GOVAL') return 'reg-goval';
+    if (key === 'VALE_DO_ACO') return 'reg-vale';
+    if (key === 'CARATINGA') return 'reg-caratinga';
+    return '';
+  },
+
+  /** Badge de região (Goval / Vale do Aço / Caratinga) com cores do tema. */
+  regionBadge(regiao) {
+    const label = String(regiao || '').trim();
+    if (!label) return '';
+    const cls = this._regionBadgeClass(regiao) || 'reg-unknown';
+    return `<span class="badge ${cls}">${label}</span>`;
+  },
+
+  /** Classe da barra de relatório “rompimentos por região”. */
+  _regionReportBarClass(label) {
+    const key = WebhookService._normalizeRegionKey(label);
+    if (key === 'GOVAL') return 'reg-bar-goval';
+    if (key === 'VALE_DO_ACO') return 'reg-bar-vale';
+    if (key === 'CARATINGA') return 'reg-bar-caratinga';
+    return 'reg-bar-unknown';
+  },
 
   statusBadge(status) {
     const cls = this._statusBadgeMap[status] || 's-pendente';
@@ -1597,8 +1906,8 @@ const UI = {
     }
 
     tbody.innerHTML = list.map(t => {
-      const isLate = t.effectiveStatus === 'Atrasada' || (t.prazo && t.prazo < tod && !['Concluída','Finalizada'].includes(t.status));
-      const isDone = ['Concluída','Finalizada'].includes(t.effectiveStatus);
+      const isLate = t.effectiveStatus === 'Atrasada' || (t.prazo && t.prazo < tod && !['Concluída','Finalizada','Finalizado'].includes(t.status));
+      const isDone = ['Concluída','Finalizada','Finalizado'].includes(t.effectiveStatus);
       const color  = Utils.getAvatarColor(t.responsavel);
       const titleStyle = isDone ? 'text-decoration:line-through;opacity:.45' : '';
       const assinatura = String(t.assinadaPor || '').trim();
@@ -1624,7 +1933,7 @@ const UI = {
           </td>
           <td class="date-cell ${isLate ? 'date-late' : ''}">${Utils.formatDate(t.prazo)}</td>
           <td>${this.statusBadge(t.effectiveStatus)}</td>
-          <td>${this.priorityBadge(t.prioridade)} <span style="margin-left:6px;color:var(--white4);font-size:10px;font-family:var(--font-mono)">· ${t.sourceLabel}</span></td>
+          <td><span class="dashboard-badges-cell">${[this.regionBadge(t.regiao), this.priorityBadge(t.prioridade || 'Média')].filter(Boolean).join('')}</span> <span style="margin-left:6px;color:var(--white4);font-size:10px;font-family:var(--font-mono)">· ${t.sourceLabel}</span></td>
         </tr>
       `;
     }).join('');
@@ -1643,14 +1952,17 @@ const UI = {
     const trocaPosteCount = allOpTasks.filter(t => t.categoria === 'troca-poste').length;
     const atendimentoCount = allOpTasks.filter(t => t.categoria === 'atendimento-cliente').length;
     const otimizacaoCount = allOpTasks.filter(t => t.categoria === 'otimizacao-rede').length;
+    const certCemigCount = allOpTasks.filter(t => t.categoria === 'certificacao-cemig').length;
     const tabRompimentos = document.getElementById('tab-count-rompimentos');
     const tabTrocaPoste = document.getElementById('tab-count-troca-poste');
     const tabAtendimento = document.getElementById('tab-count-atendimento-cliente');
     const tabOtim = document.getElementById('tab-count-otimizacao-rede');
+    const tabCertCemig = document.getElementById('tab-count-certificacao-cemig');
     if (tabRompimentos) tabRompimentos.textContent = String(rompimentosCount);
     if (tabTrocaPoste) tabTrocaPoste.textContent = String(trocaPosteCount);
     if (tabAtendimento) tabAtendimento.textContent = String(atendimentoCount);
     if (tabOtim) tabOtim.textContent = String(otimizacaoCount);
+    if (tabCertCemig) tabCertCemig.textContent = String(certCemigCount);
   },
 
   /* ── Kanban Board ───────────────────────────────────────── */
@@ -1658,49 +1970,78 @@ const UI = {
     const category = Store.currentOpCategory;
     const tasks    = OpTaskService.getFilteredByCategory(category);
     const tod      = Utils.todayIso();
-    const isAtendimento = category === 'atendimento-cliente' || category === 'otimizacao-rede';
+    const isAtendimento = category === 'atendimento-cliente';
     const board = document.getElementById('kanbanBoard');
     if (isAtendimento) {
       board?.classList.add('atd-mode');
+      board?.classList.remove('kanban-board--cemig');
       this.renderAtendimentoList(tasks);
       return;
     }
     board?.classList.remove('atd-mode');
 
-    const columns = [
-      { status: 'Criada',       key: 'col-criada',     label: 'Criada'       },
-      { status: 'Em andamento', key: 'col-andamento',  label: 'Em andamento' },
-      { status: 'Concluída',    key: 'col-concluida',  label: 'Concluída'    },
-      { status: 'Finalizada',   key: 'col-finalizada', label: 'Finalizada'   },
-    ];
+    const isCemig = category === 'certificacao-cemig';
+    if (isCemig) board?.classList.add('kanban-board--cemig');
+    else board?.classList.remove('kanban-board--cemig');
 
-    const nextStatusMap = {
-      'Criada':       ['Em andamento'],
-      'Em andamento': ['Concluída'],
-      'Concluída':    ['Finalizada'],
-      'Finalizada':   [],
-    };
+    const columns = isCemig
+      ? OpTaskService._cemigColumns
+      : [
+        { status: 'Criada',       key: 'col-criada',     label: 'Criada'       },
+        { status: 'Em andamento', key: 'col-andamento',  label: 'Em andamento' },
+        { status: 'Concluída',    key: 'col-concluida',  label: 'Concluída'    },
+        { status: 'Finalizada',   key: 'col-finalizada', label: 'Finalizada'   },
+      ];
 
-    const statusLabels = {
-      'Em andamento': 'Iniciar',
-      'Concluída':    'Concluir',
-      'Finalizada':   'Finalizar',
-    };
+    const nextStatusMap = isCemig
+      ? OpTaskService._cemigNext
+      : {
+        'Backlog':      ['Em andamento'],
+        'A iniciar':    ['Em andamento'],
+        'Criada':       ['Em andamento'],
+        'Em andamento': ['Concluída'],
+        'Concluída':    ['Finalizada'],
+        'Finalizada':   [],
+      };
 
-    const statusActionClass = {
-      'Em andamento': 'to-andamento',
-      'Concluída':    'to-concluida',
-      'Finalizada':   'to-finalizada',
+    const statusLabels = isCemig
+      ? OpTaskService._cemigActionLabels
+      : {
+        'Em andamento': 'Iniciar',
+        'Concluída':    'Concluir',
+        'Finalizada':   'Finalizar',
+      };
+
+    const statusActionClass = isCemig
+      ? {
+        'Agendado': 'cemig-advance',
+        'Em andamento': 'cemig-advance',
+        'Validação': 'cemig-advance',
+        'Envio pendente': 'cemig-advance',
+        'Necessário adequação': 'cemig-advance',
+        'Finalizado': 'cemig-advance',
+      }
+      : {
+        'Em andamento': 'to-andamento',
+        'Concluída':    'to-concluida',
+        'Finalizada':   'to-finalizada',
+      };
+
+    const doneForLate = isCemig ? ['Finalizado'] : ['Concluída', 'Finalizada'];
+
+    const kanbanColKey = (t) => {
+      if (category === 'otimizacao-rede' && ['Backlog', 'A iniciar'].includes(t.status)) return 'Criada';
+      return t.status;
     };
 
     board.innerHTML = columns.map(col => {
-      const colTasks = tasks.filter(t => t.status === col.status);
+      const colTasks = tasks.filter(t => kanbanColKey(t) === col.status);
 
       const cards = colTasks.length
         ? colTasks
           .filter(t => !(isAtendimento && t.parentTaskId))
           .map(t => {
-            const isLate = t.prazo && t.prazo < tod && !['Concluída','Finalizada'].includes(t.status);
+            const isLate = t.prazo && t.prazo < tod && !doneForLate.includes(t.status);
             const childTasks = isAtendimento
               ? tasks.filter(c => Number(c.parentTaskId) === Number(t.id))
               : [];
@@ -1709,10 +2050,12 @@ const UI = {
               : '';
             const nextStatuses = nextStatusMap[t.status] || [];
             const actionBtns = nextStatuses.map(ns =>
-              `<button class="status-action-btn ${statusActionClass[ns]}" data-op-id="${t.id}" data-to-status="${ns}">${statusLabels[ns]}</button>`
+              `<button class="status-action-btn ${statusActionClass[ns] || 'cemig-advance'}" data-op-id="${t.id}" data-to-status="${ns}">${statusLabels[ns]}</button>`
             ).join('');
             const assinatura = String(t.assinadaPor || '').trim();
             const sigHtml = assinatura ? `<div class="kanban-card-signature">✍ ${assinatura}</div>` : '';
+            const badgeParts = [this.regionBadge(t.regiao), this.priorityBadge(t.prioridade || 'Média')].filter(Boolean);
+            const badgesRow = badgeParts.length ? `<div class="kanban-card-badges">${badgeParts.join('')}</div>` : '';
             const childHtml = childTasks.length
               ? `<div class="subtask-list">${childTasks.map(c => `
                    <div class="subtask-item">
@@ -1725,6 +2068,7 @@ const UI = {
             return `
               <article class="kanban-card ${this._lastMovedOpTask && this._lastMovedOpTask.id === t.id && this._lastMovedOpTask.status === t.status ? 'just-moved' : ''}" data-op-id="${t.id}" data-op-status="${t.status}" draggable="true" aria-label="${t.titulo}">
                 ${parentTag}
+                ${badgesRow}
                 <div class="kanban-card-title">${t.titulo}</div>
                 <div class="kanban-card-date">${t.taskCode || ''}</div>
                 <div class="kanban-card-meta">
@@ -1749,7 +2093,7 @@ const UI = {
             <span class="kanban-col-count">${colTasks.length}</span>
           </div>
           <div class="kanban-cards" data-col-status="${col.status}">${cards}</div>
-          <button class="kanban-col-add" data-add-col="${col.status}" aria-label="Adicionar tarefa na coluna ${col.label}">
+          <button class="kanban-col-add" type="button" data-add-col="${col.status}" aria-label="Adicionar tarefa na coluna ${col.label}">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Adicionar
           </button>
@@ -1836,7 +2180,8 @@ const UI = {
 
     board.querySelectorAll('.kanban-col-add').forEach(btn => {
       btn.addEventListener('click', () => {
-        Controllers.opTask.openNewModal();
+        const colStatus = btn.getAttribute('data-add-col');
+        Controllers.opTask.openNewModal(colStatus ? { status: colStatus } : {});
       });
     });
   },
@@ -1844,9 +2189,7 @@ const UI = {
   renderAtendimentoList(tasks) {
     const board = document.getElementById('kanbanBoard');
     const currentCategory = Store.currentOpCategory;
-    const currentLabel = currentCategory === 'otimizacao-rede'
-      ? 'Otimização de Rede'
-      : 'Atendimento ao Cliente';
+    const currentLabel = 'Atendimento ao Cliente';
     const statusLabel = (status) => status === 'Concluída' ? 'Concluído' : status;
     const statusBadgeAtd = (status) => this.statusBadge(status).replace(status, statusLabel(status));
     const normalized = tasks.map(t => {
@@ -1876,7 +2219,10 @@ const UI = {
 
     const renderSubtaskItem = (child, parentStatus) => `
       <div class="atd-subtask-row ${this._atdLastMoved?.id === child.id ? 'just-moved' : ''}" data-task-row-id="${child.id}" data-open-subtask="${child.id}" draggable="true" data-drag-subtask="${child.id}">
-        <span class="atd-subtask-title">${child.titulo}</span>
+        <div class="atd-subtask-title-stack">
+          <span class="atd-subtask-title">${child.titulo}</span>
+          <span class="atd-badge-row">${[this.regionBadge(child.regiao), this.priorityBadge(child.prioridade || 'Média')].filter(Boolean).join('')}</span>
+        </div>
         <span class="atd-parent-meta">${child.taskCode || ''}</span>
         <span class="atd-parent-meta">${child.responsavel}</span>
         <span class="atd-parent-meta">${Utils.formatDate(child.prazo)}</span>
@@ -1901,7 +2247,10 @@ const UI = {
         <section class="atd-parent-card" data-parent-id="${parent.id}">
           <div class="atd-parent-row ${this._atdLastMoved?.id === parent.id ? 'just-moved' : ''}" data-task-row-id="${parent.id}" data-toggle-parent="${parent.id}" role="button" tabindex="0" aria-expanded="${expanded ? 'true' : 'false'}">
             <span class="atd-chevron ${expanded ? 'open' : ''}">▾</span>
-            <span class="atd-parent-title">${parent.titulo}</span>
+            <div class="atd-title-stack">
+              <span class="atd-parent-title">${parent.titulo}</span>
+              <span class="atd-badge-row">${[this.regionBadge(parent.regiao), this.priorityBadge(parent.prioridade || 'Média')].filter(Boolean).join('')}</span>
+            </div>
             <span class="atd-parent-meta">${parent.taskCode || ''}</span>
             <span class="atd-parent-meta">${parent.responsavel}</span>
             <span class="atd-parent-meta">${Utils.formatDate(parent.prazo)}</span>
@@ -2222,16 +2571,22 @@ const UI = {
       return;
     }
 
-    list.innerHTML = items.map(item => `
+    list.innerHTML = items.map(item => {
+      const badges = [this.regionBadge(item.regiao), this.statusBadge(item.status), this.priorityBadge(item.priority || 'Média')]
+        .filter(Boolean)
+        .join('');
+      return `
       <article class="calendar-item">
         <div class="calendar-item-top">
           <span class="calendar-item-title">${item.title}</span>
           ${item.removable ? `<button class="calendar-remove-btn" data-remove-note="${item.id}" title="Remover anotação" aria-label="Remover anotação">Remover</button>` : ''}
         </div>
-        <div class="calendar-item-meta">${item.sourceLabel} · ${item.status} · Prioridade ${item.priority || 'Média'}</div>
+        <div class="calendar-item-meta">${item.sourceLabel}</div>
+        ${badges ? `<div class="calendar-item-badges">${badges}</div>` : ''}
         ${item.description ? `<div class="calendar-item-desc">${item.description}</div>` : ''}
       </article>
-    `).join('');
+    `;
+    }).join('');
   },
 
   /* ── Reports ────────────────────────────────────────────── */
@@ -2258,11 +2613,14 @@ const UI = {
     const rompByTec = ReportsService.getRompimentosByTecnicoDone(tasks);
     const statusClassMap = {
       'Pendente': 's-pendente',
-      'Criada': 's-pendente',
+      'Criada': 's-criada',
+      'Backlog': 's-backlog',
+      'A iniciar': 's-pendente',
       'Em andamento': 's-andamento',
       'Concluída': 's-concluida',
       'Finalizada': 's-finalizada',
       'Atrasada': 's-atrasada',
+      'Cancelada': 's-cancelada',
     };
 
     document.getElementById('r-total').textContent = metrics.total;
@@ -2293,7 +2651,7 @@ const UI = {
             <div class="report-bar-row">
               <div class="report-bar-head"><span>${item.label}</span><span>${item.count}</span></div>
               <div class="report-bar-track">
-                <div class="report-bar-fill s-andamento" style="width:${item.pct}%"></div>
+                <div class="report-bar-fill ${this._regionReportBarClass(item.label)}" style="width:${item.pct}%"></div>
               </div>
             </div>
           `).join('')
@@ -2887,13 +3245,56 @@ const Controllers = {
     _coordsLookupTimer: null,
     _setorCtoLookupTimer: null,
     _isAtendimentoCategory(category = Store.currentOpCategory) {
-      return category === 'atendimento-cliente' || category === 'otimizacao-rede';
+      return category === 'atendimento-cliente';
+    },
+    _isOtimizacaoRedeCategory(category = Store.currentOpCategory) {
+      return category === 'otimizacao-rede';
+    },
+    /** Ajusta src das imagens salvas no servidor para URL absoluta da API ao editar. */
+    _normalizeOtimDescricaoImgSrcForEdit(html) {
+      if (!html || typeof html !== 'string') return '';
+      const base = String(ApiService.baseUrl || '').replace(/\/$/, '');
+      if (!base) return html;
+      let h = html;
+      h = h.replace(/src=(["'])api\/op_task_image\.php/gi, `src=$1${base}/op_task_image.php`);
+      h = h.replace(/src=(["'])op_task_image\.php/gi, `src=$1${base}/op_task_image.php`);
+      return h;
+    },
+    /** Bloco imagem + botão remover no editor de descrição Otimização de Rede. */
+    _buildOtimDescImageWrap(src) {
+      const wrap = document.createElement('span');
+      wrap.className = 'op-editor-img-wrap';
+      wrap.contentEditable = 'false';
+      const img = document.createElement('img');
+      img.src = src;
+      img.alt = '';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'op-editor-img-remove';
+      btn.setAttribute('aria-label', 'Remover imagem');
+      btn.title = 'Remover imagem';
+      btn.textContent = '×';
+      wrap.appendChild(img);
+      wrap.appendChild(btn);
+      return wrap;
+    },
+    /** Envolve <img> soltas com o bloco que tem botão de excluir (após carregar HTML do servidor). */
+    _wrapBareOtimDescricaoImages(container) {
+      if (!container) return;
+      const list = [...container.querySelectorAll('img')].filter(im => !im.closest('.op-editor-img-wrap'));
+      list.forEach((img) => {
+        const wrap = this._buildOtimDescImageWrap(img.getAttribute('src') || img.src);
+        img.replaceWith(wrap);
+      });
     },
     _isAtendimentoClienteCategory(category = Store.currentOpCategory) {
       return category === 'atendimento-cliente';
     },
     _isRompimentoCategory(category = Store.currentOpCategory) {
       return category === 'rompimentos';
+    },
+    _isTrocaPosteCategory(category = Store.currentOpCategory) {
+      return category === 'troca-poste';
     },
     _toggleGroup(groupId, visible) {
       const el = document.getElementById(groupId);
@@ -2911,10 +3312,20 @@ const Controllers = {
       if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
       return { lat, lon };
     },
-    async _resolveCoordsToAddress(rawCoords) {
+    /**
+     * @param {string} rawCoords
+     * @param {'rompimento'|'otim'|'cemig'} ctx — alvo dos campos de endereço (padrão: rompimento / troca de poste).
+     */
+    async _resolveCoordsToAddress(rawCoords, ctx = 'rompimento') {
       const coords = this._parseCoords(rawCoords);
-      const addressInput = document.getElementById('op-address-readonly');
-      const hint = document.getElementById('op-address-hint');
+      const ids =
+        ctx === 'otim'
+          ? { address: 'op-otim-address', hint: 'op-otim-address-hint' }
+          : ctx === 'cemig'
+            ? { address: 'op-cemig-address', hint: 'op-cemig-address-hint' }
+            : { address: 'op-address-readonly', hint: 'op-address-hint' };
+      const addressInput = document.getElementById(ids.address);
+      const hint = document.getElementById(ids.hint);
       if (!addressInput || !hint) return;
 
       if (!coords) {
@@ -2977,36 +3388,165 @@ const Controllers = {
         this._resolveCoordsToAddress(coordsInput.value);
       });
     },
+    /**
+     * Recoloca Prioridade/Região na linha padrão (evita ficarem presos nos slots do ATD ou no modo rompimento).
+     */
+    _restoreOpModalLayout() {
+      const body = document.getElementById('opTaskModalBody');
+      const priorityRow = document.getElementById('opPriorityRegionRow');
+      const prioridade = document.getElementById('opPrioridadeGroup');
+      const regiao = document.getElementById('opRegiaoGroup');
+      const atdChild = document.getElementById('opAtdChildOnlyWrap');
+      if (!body || !priorityRow || !prioridade || !regiao) return;
+      priorityRow.appendChild(prioridade);
+      priorityRow.appendChild(regiao);
+      if (atdChild && atdChild.parentNode === body) atdChild.after(priorityRow);
+      else body.appendChild(priorityRow);
+      this._restoreOtimRedeLayout();
+    },
+    /** Recoloca Região e Técnico após o modo Otimização de Rede. */
+    _restoreOtimRedeLayout() {
+      const priorityRow = document.getElementById('opPriorityRegionRow');
+      const prioridade = document.getElementById('opPrioridadeGroup');
+      const regiao = document.getElementById('opRegiaoGroup');
+      const mainRow = document.getElementById('opMainRow');
+      const responsavel = document.getElementById('opResponsavelGroup');
+      const prazo = document.getElementById('opPrazoGroup');
+      if (priorityRow && prioridade && regiao && regiao.parentElement !== priorityRow) {
+        priorityRow.appendChild(prioridade);
+        priorityRow.appendChild(regiao);
+      }
+      if (mainRow && responsavel && prazo) {
+        mainRow.appendChild(responsavel);
+        mainRow.appendChild(prazo);
+      }
+    },
     _syncRompimentoRegiaoPlacement(isRompimento) {
       const regiao = document.getElementById('opRegiaoGroup');
       const prioridade = document.getElementById('opPrioridadeGroup');
       const extraRow = document.getElementById('opRompimentoExtraRow');
-      if (!regiao || !prioridade || !extraRow) return;
+      const mainRow = document.getElementById('opMainRow');
+      if (!regiao || !prioridade || !extraRow || !mainRow) return;
       if (isRompimento) {
-        extraRow.after(regiao);
+        mainRow.before(regiao);
       } else {
         prioridade.after(regiao);
       }
     },
+    _syncCoordsBlockUi(isRompimento, isTrocaPoste) {
+      const block = document.getElementById('opRompimentoCoordsRow');
+      const coordsInput = document.getElementById('op-coords');
+      const hint = document.getElementById('op-address-hint');
+      if (!block) return;
+      const cLab = block.querySelector('label[for="op-coords"]');
+      const aLab = block.querySelector('label[for="op-address-readonly"]');
+      if (isTrocaPoste) {
+        if (cLab) cLab.textContent = 'Coordenadas';
+        if (aLab) aLab.textContent = 'Endereço (rua e bairro)';
+        if (coordsInput) {
+          coordsInput.placeholder = 'Latitude e longitude (ex.: -19.85, -42.95)';
+          coordsInput.removeAttribute('readonly');
+        }
+        if (hint && !document.getElementById('op-address-readonly')?.value) {
+          hint.textContent = 'Digite as coordenadas; rua e bairro serão preenchidos automaticamente.';
+        }
+      } else if (isRompimento) {
+        if (cLab) cLab.textContent = 'Coordenadas';
+        if (aLab) aLab.textContent = 'Endereço (rua / bairro)';
+        if (coordsInput) coordsInput.placeholder = 'Preenchidas pela CTO ou edite manualmente';
+      } else {
+        if (cLab) cLab.textContent = 'Coordenadas';
+        if (aLab) aLab.textContent = 'Endereço (rua / bairro)';
+        if (coordsInput) coordsInput.placeholder = 'Preenchidas pela CTO ou edite manualmente';
+      }
+    },
     _syncCategorySpecificFields(category = Store.currentOpCategory) {
       const isAtendimento = this._isAtendimentoCategory(category);
+      const isOtimRede = this._isOtimizacaoRedeCategory(category);
+      const isCemig = category === 'certificacao-cemig';
       const isRompimento = this._isRompimentoCategory(category);
+      const isTrocaPoste = this._isTrocaPosteCategory(category);
       const modalTitle = document.getElementById('opTaskModalTitle');
       const modalWrap = document.getElementById('opTaskModal');
 
+      this._restoreOpModalLayout();
       this._syncRompimentoRegiaoPlacement(isRompimento);
-      if (modalWrap) modalWrap.classList.toggle('rompimento-mode', isRompimento);
+      if (modalWrap) {
+        modalWrap.classList.toggle('rompimento-mode', isRompimento);
+        modalWrap.classList.toggle('troca-poste-mode', isTrocaPoste);
+        modalWrap.classList.toggle('otim-rede-mode', isOtimRede);
+        modalWrap.classList.toggle('cemig-mode', isCemig);
+      }
 
-      this._toggleGroup('opTituloGroup', !isRompimento);
-      this._toggleGroup('opPrazoGroup', !isRompimento);
-      this._toggleGroup('opPriorityRegionRow', !isRompimento);
+      this._toggleGroup('opTituloGroup', !isRompimento && !isTrocaPoste && !isCemig);
+      this._toggleGroup('opPrazoGroup', !isRompimento && !isOtimRede);
+      this._toggleGroup('opPriorityRegionRow', !isRompimento && !isOtimRede && !isCemig);
 
       this._toggleGroup('opParentConfig', isAtendimento);
-      this._toggleGroup('opRompimentoCoordsRow', isRompimento);
+      this._toggleGroup('opRompimentoCoordsRow', isRompimento || isTrocaPoste);
       this._toggleGroup('opRompimentoExtraRow', isRompimento);
       this._toggleGroup('opRompimentoSetorGroup', isRompimento);
+
+      this._syncCoordsBlockUi(isRompimento, isTrocaPoste);
+
+      // Troca de poste: região + prioridade acima do técnico; região à esquerda (primeira).
+      if (isTrocaPoste) {
+        const priorityRow = document.getElementById('opPriorityRegionRow');
+        const prioridade = document.getElementById('opPrioridadeGroup');
+        const regiao = document.getElementById('opRegiaoGroup');
+        const mainRow = document.getElementById('opMainRow');
+        if (priorityRow && prioridade && regiao) {
+          priorityRow.appendChild(regiao);
+          priorityRow.appendChild(prioridade);
+        }
+        if (mainRow && priorityRow) mainRow.before(priorityRow);
+      }
+
+      const tituloLab = document.querySelector('label[for="op-titulo"]');
+      const tecRespLab = document.querySelector('label[for="op-responsavel"]');
+      const prazoLab = document.querySelector('label[for="op-prazo"]');
+      if (isOtimRede) {
+        this._toggleGroup('opMainRow', false);
+        this._toggleGroup('opOtimRedeWrap', true);
+        this._toggleGroup('opCemigWrap', false);
+        if (tituloLab) tituloLab.textContent = 'Nome';
+        if (tecRespLab) tecRespLab.textContent = 'Técnico';
+        const regSlot = document.getElementById('opOtimRegiaoSlot');
+        const tecSlot = document.getElementById('opOtimTecSlot');
+        const regiao = document.getElementById('opRegiaoGroup');
+        const respG = document.getElementById('opResponsavelGroup');
+        if (regSlot && regiao) regSlot.appendChild(regiao);
+        if (tecSlot && respG) tecSlot.appendChild(respG);
+      } else if (isCemig) {
+        this._toggleGroup('opMainRow', false);
+        this._toggleGroup('opOtimRedeWrap', false);
+        this._toggleGroup('opCemigWrap', true);
+        if (tecRespLab) tecRespLab.textContent = 'Técnico';
+        if (prazoLab) prazoLab.textContent = 'Data final para conclusão';
+        const regSlot = document.getElementById('opCemigRegiaoSlot');
+        const tecSlot = document.getElementById('opCemigTecSlot');
+        const prazoSlot = document.getElementById('opCemigPrazoSlot');
+        const regiao = document.getElementById('opRegiaoGroup');
+        const respG = document.getElementById('opResponsavelGroup');
+        const prazoG = document.getElementById('opPrazoGroup');
+        if (regSlot && regiao) regSlot.appendChild(regiao);
+        if (tecSlot && respG) tecSlot.appendChild(respG);
+        if (prazoSlot && prazoG) prazoSlot.appendChild(prazoG);
+      } else {
+        this._toggleGroup('opOtimRedeWrap', false);
+        this._toggleGroup('opCemigWrap', false);
+        this._toggleGroup('opMainRow', true);
+        if (tituloLab) tituloLab.textContent = 'Nome da tarefa';
+        if (tecRespLab) tecRespLab.textContent = 'Técnico responsável';
+        if (prazoLab) prazoLab.textContent = 'Data de vencimento';
+      }
+
       if (modalTitle && !Store.editingOpTaskId) {
-        modalTitle.textContent = isRompimento ? 'Nova tarefa de rompimento' : 'Nova tarefa';
+        if (isRompimento) modalTitle.textContent = 'Nova tarefa de rompimento';
+        else if (isTrocaPoste) modalTitle.textContent = 'Nova troca de poste';
+        else if (category === 'certificacao-cemig') modalTitle.textContent = 'Nova certificação Cemig';
+        else if (isOtimRede) modalTitle.textContent = 'Nova otimização de rede';
+        else modalTitle.textContent = 'Nova tarefa';
       }
 
       if (isRompimento) {
@@ -3015,6 +3555,56 @@ const Controllers = {
       }
     },
     _syncAtendimentoKindFields() {
+      const modalCat = Store.editingOpTaskId
+        ? (Store.findOpTask(Store.editingOpTaskId)?.categoria || Store.currentOpCategory)
+        : Store.currentOpCategory;
+      if (modalCat === 'otimizacao-rede') {
+        const atdWrap = document.getElementById('opAtdParentOnlyWrap');
+        const atdChildWrap = document.getElementById('opAtdChildOnlyWrap');
+        const mainRow = document.getElementById('opMainRow');
+        const priorityRow = document.getElementById('opPriorityRegionRow');
+        const prazoInput = document.getElementById('op-prazo');
+        const prazoGroup = prazoInput?.closest('.form-group');
+        const responsavelInput = document.getElementById('op-responsavel');
+        const regiaoSelect = document.getElementById('op-regiao');
+        if (atdWrap) atdWrap.style.display = 'none';
+        if (atdChildWrap) atdChildWrap.style.display = 'none';
+        if (mainRow) mainRow.style.display = 'none';
+        if (priorityRow) priorityRow.style.display = 'none';
+        if (prazoGroup) prazoGroup.style.display = 'none';
+        if (responsavelInput) responsavelInput.disabled = false;
+        if (regiaoSelect) regiaoSelect.disabled = false;
+        this._syncTecnicosDatalist();
+        this._syncSelectedTecnicoChatId();
+        return;
+      }
+
+      if (modalCat === 'certificacao-cemig') {
+        const atdWrap = document.getElementById('opAtdParentOnlyWrap');
+        const atdChildWrap = document.getElementById('opAtdChildOnlyWrap');
+        const mainRow = document.getElementById('opMainRow');
+        const priorityRow = document.getElementById('opPriorityRegionRow');
+        const responsavelInput = document.getElementById('op-responsavel');
+        const regiaoSelect = document.getElementById('op-regiao');
+        const prazoInput = document.getElementById('op-prazo');
+        const prazoGroup = prazoInput?.closest('.form-group');
+        const regiaoGroup = regiaoSelect?.closest('.form-group');
+        const responsavelGroup = responsavelInput?.closest('.form-group');
+        if (atdWrap) atdWrap.style.display = 'none';
+        if (atdChildWrap) atdChildWrap.style.display = 'none';
+        if (mainRow) mainRow.style.display = 'none';
+        if (priorityRow) priorityRow.style.display = 'none';
+        [responsavelGroup, prazoGroup, regiaoGroup].forEach((g) => {
+          if (g) g.style.display = '';
+        });
+        if (responsavelInput) responsavelInput.disabled = false;
+        if (regiaoSelect) regiaoSelect.disabled = false;
+        if (prazoInput) prazoInput.disabled = false;
+        this._syncTecnicosDatalist();
+        this._syncSelectedTecnicoChatId();
+        return;
+      }
+
       const hiddenParent = document.getElementById('op-parent-task-id');
       const isParent = !String(hiddenParent?.value || '').trim();
       const responsavelInput = document.getElementById('op-responsavel');
@@ -3024,6 +3614,7 @@ const Controllers = {
       const prazoGroup = prazoInput?.closest('.form-group');
       const regiaoGroup = regiaoSelect?.closest('.form-group');
       const isRompimento = this._isRompimentoCategory();
+      const isTrocaPoste = this._isTrocaPosteCategory();
       const isAtdCliente = this._isAtendimentoClienteCategory();
       const atdWrap = document.getElementById('opAtdParentOnlyWrap');
       const atdChildWrap = document.getElementById('opAtdChildOnlyWrap');
@@ -3036,15 +3627,15 @@ const Controllers = {
 
       [responsavelGroup, prazoGroup, regiaoGroup].forEach(group => {
         if (!group) return;
-        if (isRompimento) {
+        if (isRompimento || isTrocaPoste) {
           group.style.display = '';
           return;
         }
         group.style.display = isParent ? '' : 'none';
       });
 
-      const atdParentOnly = isAtdCliente && isParent && !isRompimento;
-      const atdChildOnly = isAtdCliente && !isParent && !isRompimento;
+      const atdParentOnly = isAtdCliente && isParent && !isRompimento && !isTrocaPoste;
+      const atdChildOnly = isAtdCliente && !isParent && !isRompimento && !isTrocaPoste;
 
       // Atendimento ao Cliente (pai): deixa apenas os campos essenciais do formulário.
       if (atdWrap) atdWrap.style.display = atdParentOnly ? '' : 'none';
@@ -3084,15 +3675,29 @@ const Controllers = {
         // Pai (ATD): responsável vem da assinatura; Filha (ATD): precisa escolher técnico.
         if (atdParentOnly) responsavelInput.disabled = true;
         else if (atdChildOnly) responsavelInput.disabled = false;
-        else responsavelInput.disabled = isRompimento ? false : !isParent;
+        else if (isRompimento || isTrocaPoste) {
+          const hasRegion = Boolean(String(regiaoSelect?.value || '').trim());
+          responsavelInput.disabled = !hasRegion;
+          if (!hasRegion) {
+            responsavelInput.value = '';
+            const hiddenChat = document.getElementById('op-responsavel-chatid');
+            if (hiddenChat) hiddenChat.value = '';
+          }
+        } else {
+          responsavelInput.disabled = !isParent;
+        }
       }
       if (prazoInput) {
         prazoInput.disabled = atdParentOnly ? true : (isRompimento ? true : !isParent);
       }
       if (regiaoSelect) {
         if (atdChildOnly) regiaoSelect.disabled = false;
-        else regiaoSelect.disabled = isRompimento ? false : !isParent;
+        else if (isTrocaPoste || isRompimento) regiaoSelect.disabled = false;
+        else regiaoSelect.disabled = !isParent;
       }
+
+      this._syncTecnicosDatalist();
+      this._syncSelectedTecnicoChatId();
     },
 
     _syncParentHidden(currentTask = null) {
@@ -3102,16 +3707,26 @@ const Controllers = {
       else if (this._newTaskPreset?.parentTaskId) hidden.value = String(this._newTaskPreset.parentTaskId);
       else hidden.value = '';
     },
-    _nextTaskCode(category = Store.currentOpCategory) {
+    _regionTaskPrefix(regionRaw = '') {
+      const norm = WebhookService._normalizeRegionKey(regionRaw);
+      if (norm === 'GOVAL') return 'GV';
+      if (norm === 'VALE_DO_ACO') return 'VL';
+      if (norm === 'CARATINGA') return 'CA';
+      return '';
+    },
+    _nextTaskCode(category = Store.currentOpCategory, regionRaw = '') {
       const prefixMap = {
         'rompimentos': 'ROM',
         'troca-poste': 'POS',
         'atendimento-cliente': 'ATD',
         'otimizacao-rede': 'NET',
+        'certificacao-cemig': 'CEM',
       };
       const prefix = prefixMap[category] || 'ROM';
       const count = Store.getOpTasks().filter(t => t.categoria === category).length + 1;
-      return `${prefix}-${String(count).padStart(4, '0')}`;
+      const regionPrefix = this._regionTaskPrefix(regionRaw);
+      const base = `${prefix}-${String(count).padStart(4, '0')}`;
+      return regionPrefix ? `${regionPrefix}-${base}` : base;
     },
 
     _fallbackTaskCode(task) {
@@ -3120,9 +3735,12 @@ const Controllers = {
         'troca-poste': 'POS',
         'atendimento-cliente': 'ATD',
         'otimizacao-rede': 'NET',
+        'certificacao-cemig': 'CEM',
       };
       const prefix = prefixMap[task.categoria] || 'ROM';
-      return `${prefix}-${String(task.id).padStart(4, '0')}`;
+      const regionPrefix = this._regionTaskPrefix(task?.regiao);
+      const base = `${prefix}-${String(task.id).padStart(4, '0')}`;
+      return regionPrefix ? `${regionPrefix}-${base}` : base;
     },
 
     _clearForm(preset = {}) {
@@ -3143,6 +3761,16 @@ const Controllers = {
       if (dataInst) dataInst.value = '';
       if (os) os.value = '';
       if (desc) desc.value = '';
+      const opOtimProto = document.getElementById('op-otim-protocolo');
+      const opOtimOs = document.getElementById('op-otim-ordem-servico');
+      if (opOtimProto) opOtimProto.value = '';
+      if (opOtimOs) opOtimOs.value = '';
+      const otimDescClear = document.getElementById('op-otim-descricao');
+      if (otimDescClear) otimDescClear.innerHTML = '';
+      const cemigProtoClear = document.getElementById('op-cemig-protocolo');
+      if (cemigProtoClear) cemigProtoClear.value = '';
+      const cemigDescClear = document.getElementById('op-cemig-descricao');
+      if (cemigDescClear) cemigDescClear.innerHTML = '';
       document.getElementById('op-prazo').value       = '';
       document.getElementById('op-prioridade').value  = 'Alta';
       document.getElementById('op-regiao').value      = '';
@@ -3152,6 +3780,18 @@ const Controllers = {
       if (coordsInput) coordsInput.value = '';
       if (addressInput) addressInput.value = '';
       if (addressHint) addressHint.textContent = 'Aguardando CTO ou coordenadas.';
+      const otimGeoC = document.getElementById('op-otim-coords');
+      const otimGeoA = document.getElementById('op-otim-address');
+      const otimGeoH = document.getElementById('op-otim-address-hint');
+      if (otimGeoC) otimGeoC.value = '';
+      if (otimGeoA) otimGeoA.value = '';
+      if (otimGeoH) otimGeoH.textContent = 'Opcional. Informe lat, long — o endereço é buscado automaticamente.';
+      const cemigGeoC = document.getElementById('op-cemig-coords');
+      const cemigGeoA = document.getElementById('op-cemig-address');
+      const cemigGeoH = document.getElementById('op-cemig-address-hint');
+      if (cemigGeoC) cemigGeoC.value = '';
+      if (cemigGeoA) cemigGeoA.value = '';
+      if (cemigGeoH) cemigGeoH.textContent = 'Opcional. Informe lat, long — o endereço é buscado automaticamente.';
       const setorCtoInput = document.getElementById('op-setor-cto');
       if (setorCtoInput) setorCtoInput.value = '';
       const setorHint = document.getElementById('op-setor-cto-hint');
@@ -3186,27 +3826,38 @@ const Controllers = {
       const dataInstalacaoRaw = document.getElementById('op-atd-data-instalacao')?.value || '';
       const ordemServicoRaw = document.getElementById('op-atd-ordem-servico')?.value?.trim() || '';
       const descAtdRaw = document.getElementById('op-atd-descricao')?.value?.trim() || '';
-      const taskCode = existing?.taskCode || this._nextTaskCode(category);
       const selectedParent = parentTaskId ? Store.findOpTask(parentTaskId) : null;
+      const codeRegion = isParentTask ? regiao : (selectedParent?.regiao || regiao);
+      const taskCode = existing?.taskCode || this._nextTaskCode(category, codeRegion);
       const coordsRaw = document.getElementById('op-coords')?.value.trim() || '';
       const autoAddress = document.getElementById('op-address-readonly')?.value.trim() || '';
+      const otimGeoCoords = document.getElementById('op-otim-coords')?.value.trim() || '';
+      const otimGeoAddress = document.getElementById('op-otim-address')?.value.trim() || '';
+      const cemigGeoCoords = document.getElementById('op-cemig-coords')?.value.trim() || '';
+      const cemigGeoAddress = document.getElementById('op-cemig-address')?.value.trim() || '';
       const clientesAfetadosRaw = document.getElementById('op-clientes-afetados')?.value.trim() || '';
       const setorCto = document.getElementById('op-setor-cto')?.value.trim() || '';
       const isRompimento = this._isRompimentoCategory(category);
+      const isTrocaPoste = this._isTrocaPosteCategory(category);
+      const isOtimRede = category === 'otimizacao-rede';
+      const isCemig = category === 'certificacao-cemig';
+      const otimProto = document.getElementById('op-otim-protocolo')?.value?.trim() || '';
+      const otimOs = document.getElementById('op-otim-ordem-servico')?.value?.trim() || '';
+      const cemigProto = document.getElementById('op-cemig-protocolo')?.value?.trim() || '';
       const isAtdParentOnly = this._isAtendimentoClienteCategory(category) && isParentTask && !isRompimento;
       const isAtdChildOnly = this._isAtendimentoClienteCategory(category) && !isParentTask && !isRompimento;
 
-      if (!isRompimento && !titulo)      { ToastService.show('Informe o título da tarefa', 'danger');       return null; }
-      if (!isAtdParentOnly && isParentTask && !responsavel) { ToastService.show('Informe o responsável pela tarefa', 'danger'); return null; }
-      if (!isAtdParentOnly && !isRompimento && isParentTask && !prazo)       { ToastService.show('Informe a data de vencimento', 'danger');      return null; }
-      if (!isRompimento && !document.getElementById('op-prioridade').value) { ToastService.show('Informe a prioridade', 'danger'); return null; }
-      if (isParentTask && !regiao)      { ToastService.show('Informe a região', 'danger');                   return null; }
+      if (!isRompimento && !isTrocaPoste && !isCemig && !isOtimRede && !titulo) { ToastService.show('Informe o título da tarefa', 'danger'); return null; }
+      if (!isAtdParentOnly && isParentTask && !responsavel && !isOtimRede && !isCemig) { ToastService.show('Informe o responsável pela tarefa', 'danger'); return null; }
+      if (!isAtdParentOnly && !isRompimento && !isOtimRede && !isCemig && isParentTask && !prazo) { ToastService.show('Informe a data de vencimento', 'danger'); return null; }
+      if (!isRompimento && !isOtimRede && !isCemig && !document.getElementById('op-prioridade').value) { ToastService.show('Informe a prioridade', 'danger'); return null; }
+      if (isParentTask && !regiao && !isOtimRede && !isCemig) { ToastService.show('Informe a região', 'danger'); return null; }
       if (isRompimento && !setorCto) {
         ToastService.show('Informe o nome da CTO ou setor', 'danger');
         return null;
       }
-      if (isRompimento && !coordsRaw)   { ToastService.show('Informe as coordenadas da localização', 'danger'); return null; }
-      if (isRompimento && !autoAddress) { ToastService.show('A localização automática (rua/bairro) é obrigatória', 'danger'); return null; }
+      if ((isRompimento || isTrocaPoste) && !coordsRaw)   { ToastService.show('Informe as coordenadas da localização', 'danger'); return null; }
+      if ((isRompimento || isTrocaPoste) && !autoAddress) { ToastService.show('Aguarde identificar rua e bairro ou verifique as coordenadas', 'danger'); return null; }
       if (isRompimento && (!clientesAfetadosRaw || !/^\d+$/.test(clientesAfetadosRaw) || Number(clientesAfetadosRaw) <= 0)) {
         ToastService.show('Informe uma quantidade de clientes afetados válida', 'danger');
         return null;
@@ -3226,24 +3877,38 @@ const Controllers = {
         if (!regiao) { ToastService.show('Informe a região', 'danger'); return null; }
         if (!descAtdRaw) { ToastService.show('Informe a descrição da tarefa', 'danger'); return null; }
       }
+
       const presetStatus = this._newTaskPreset?.status || null;
-      const defaultStatus = this._isAtendimentoCategory(category)
-        ? (isParentTask ? (presetStatus || 'Backlog') : 'A iniciar')
-        : 'Criada';
+      const defaultStatus = category === 'certificacao-cemig'
+        ? (presetStatus || 'Backlog')
+        : this._isAtendimentoCategory(category)
+          ? (isParentTask ? (presetStatus || 'Backlog') : 'A iniciar')
+          : 'Criada';
       const currentStatus = existing?.status || defaultStatus;
       const normalizedStatus = (!isParentTask && this._isAtendimentoCategory(category) && (currentStatus === 'Backlog' || currentStatus === 'Criada'))
         ? 'A iniciar'
         : currentStatus;
       const finalTitulo = isRompimento
         ? `Rompimento - ${autoAddress}`
-        : titulo;
+        : (isTrocaPoste ? `Troca de poste - ${autoAddress}`
+          : (isCemig
+            ? (cemigProto ? `Cemig — ${cemigProto}` : (existing?.titulo || 'Certificação Cemig'))
+            : (isOtimRede
+              ? (titulo.trim() || (otimProto && otimOs ? `${otimProto} · ${otimOs}` : (otimProto || otimOs || existing?.titulo || 'Otimização de rede')))
+              : titulo)));
       const finalPrazo = isRompimento
         ? Utils.todayIso()
-        : (isAtdParentOnly
-          ? (dataEntradaRaw || Utils.todayIso())
-          : (isParentTask ? prazo : (selectedParent?.prazo || existing?.prazo || '')));
-      const finalPrioridade = isRompimento ? 'Alta' : document.getElementById('op-prioridade').value;
-      const finalDescricao = isRompimento ? `Coordenadas: ${coordsRaw} | Local: ${autoAddress}` : '';
+        : isOtimRede
+          ? (prazo || Utils.todayIso())
+          : isCemig
+            ? (prazo || existing?.prazo || Utils.todayIso())
+            : (isAtdParentOnly
+              ? (dataEntradaRaw || Utils.todayIso())
+              : (isParentTask ? prazo : (selectedParent?.prazo || existing?.prazo || '')));
+      const finalPrioridade = isRompimento ? 'Alta' : (isOtimRede || isCemig ? 'Média' : document.getElementById('op-prioridade').value);
+      const finalDescricaoMeta = isRompimento
+        ? `Coordenadas: ${coordsRaw} | Local: ${autoAddress}`
+        : (isTrocaPoste ? '' : '');
       const setorField = isRompimento
         ? setorCto
         : (isParentTask ? regiao : (selectedParent?.setor || selectedParent?.regiao || existing?.setor || ''));
@@ -3253,9 +3918,13 @@ const Controllers = {
       const finalResponsavelChatId = isParentTask
         ? responsavelChatId
         : (selectedParent?.responsavelChatId || existing?.responsavelChatId || '');
-      const finalProtocolo = (this._isAtendimentoClienteCategory(category) && isParentTask)
-        ? protocoloRaw
-        : (selectedParent?.protocolo || existing?.protocolo || '');
+      const finalProtocolo = isOtimRede
+        ? otimProto
+        : isCemig
+          ? cemigProto
+          : (this._isAtendimentoClienteCategory(category) && isParentTask)
+            ? protocoloRaw
+            : (selectedParent?.protocolo || existing?.protocolo || '');
       const finalDataEntrada = (this._isAtendimentoClienteCategory(category) && isParentTask)
         ? dataEntradaRaw
         : (selectedParent?.dataEntrada || existing?.dataEntrada || '');
@@ -3265,17 +3934,29 @@ const Controllers = {
       const finalDataInstalacao = (this._isAtendimentoClienteCategory(category) && isParentTask)
         ? dataInstalacaoRaw
         : (selectedParent?.dataInstalacao || existing?.dataInstalacao || '');
-      const finalOrdemServico = (this._isAtendimentoClienteCategory(category) && !isParentTask)
-        ? ordemServicoRaw
-        : (selectedParent?.ordemServico || existing?.ordemServico || '');
+      const finalOrdemServico = isOtimRede
+        ? otimOs
+        : (this._isAtendimentoClienteCategory(category) && !isParentTask)
+          ? ordemServicoRaw
+          : (selectedParent?.ordemServico || existing?.ordemServico || '');
       const finalResponsavel = isAtdParentOnly
         ? getSignedUserName()
-        : (isParentTask
-          ? responsavel
-          : (responsavel || selectedParent?.responsavel || existing?.responsavel || getSignedUserName()));
-      const finalDescricaoAtd = (this._isAtendimentoClienteCategory(category) && !isParentTask)
-        ? descAtdRaw
-        : finalDescricao;
+        : (isOtimRede || isCemig
+          ? (responsavel || existing?.responsavel || '')
+          : (isParentTask
+            ? responsavel
+            : (responsavel || selectedParent?.responsavel || existing?.responsavel || getSignedUserName())));
+      const otimDescEl = document.getElementById('op-otim-descricao');
+      const otimDescHtml = isOtimRede && otimDescEl ? String(otimDescEl.innerHTML || '').trim() : '';
+      const cemigDescEl = document.getElementById('op-cemig-descricao');
+      const cemigDescHtml = isCemig && cemigDescEl ? String(cemigDescEl.innerHTML || '').trim() : '';
+      const finalDescricaoAtd = isOtimRede
+        ? otimDescHtml
+        : isCemig
+          ? cemigDescHtml
+          : (this._isAtendimentoClienteCategory(category) && !isParentTask)
+            ? descAtdRaw
+            : finalDescricaoMeta;
       return {
         taskCode,
         titulo: finalTitulo,
@@ -3289,8 +3970,8 @@ const Controllers = {
         dataInstalacao: finalDataInstalacao,
         ordemServico: finalOrdemServico,
         clientesAfetados: isRompimento ? clientesAfetadosRaw : '',
-        coordenadas: isRompimento ? coordsRaw : '',
-        localizacaoTexto: isRompimento ? autoAddress : '',
+        coordenadas: (isRompimento || isTrocaPoste) ? coordsRaw : (isOtimRede ? otimGeoCoords : (isCemig ? cemigGeoCoords : '')),
+        localizacaoTexto: (isRompimento || isTrocaPoste) ? autoAddress : (isOtimRede ? otimGeoAddress : (isCemig ? cemigGeoAddress : '')),
         categoria:  category,
         prazo: finalPrazo,
         prioridade: finalPrioridade,
@@ -3318,8 +3999,13 @@ const Controllers = {
       const task = Store.findOpTask(id);
       if (!task) return;
       Store.editingOpTaskId = id;
-      document.getElementById('opTaskModalTitle').textContent = 'Editar tarefa';
-      document.getElementById('op-titulo').value      = task.titulo;
+      document.getElementById('opTaskModalTitle').textContent =
+        task.categoria === 'troca-poste' ? 'Editar troca de poste'
+          : task.categoria === 'certificacao-cemig' ? 'Editar certificação Cemig'
+            : task.categoria === 'otimizacao-rede' ? 'Editar otimização de rede'
+              : 'Editar tarefa';
+      document.getElementById('op-titulo').value =
+        task.categoria === 'troca-poste' || task.categoria === 'certificacao-cemig' ? '' : task.titulo;
       document.getElementById('op-responsavel').value = task.responsavel;
       const chatIdHidden = document.getElementById('op-responsavel-chatid');
       if (chatIdHidden) chatIdHidden.value = String(task.responsavelChatId || '').trim();
@@ -3329,12 +4015,63 @@ const Controllers = {
       const dataInst = document.getElementById('op-atd-data-instalacao');
       const os = document.getElementById('op-atd-ordem-servico');
       const desc = document.getElementById('op-atd-descricao');
-      if (proto) proto.value = String(task.protocolo || '').trim();
-      if (dataEnt) dataEnt.value = String(task.dataEntrada || '').trim();
-      if (subp) subp.value = String(task.subProcesso || '').trim();
-      if (dataInst) dataInst.value = String(task.dataInstalacao || '').trim();
-      if (os) os.value = String(task.ordemServico || '').trim();
-      if (desc) desc.value = String(task.descricao || '').trim();
+      const opOtimProto = document.getElementById('op-otim-protocolo');
+      const opOtimOs = document.getElementById('op-otim-ordem-servico');
+      const opCemigProto = document.getElementById('op-cemig-protocolo');
+      if (task.categoria === 'otimizacao-rede') {
+        if (opOtimProto) opOtimProto.value = String(task.protocolo || '').trim();
+        if (opOtimOs) opOtimOs.value = String(task.ordemServico || '').trim();
+        const otimDescEdit = document.getElementById('op-otim-descricao');
+        if (otimDescEdit) {
+          otimDescEdit.innerHTML = this._normalizeOtimDescricaoImgSrcForEdit(String(task.descricao || ''));
+          this._wrapBareOtimDescricaoImages(otimDescEdit);
+        }
+        if (proto) proto.value = '';
+        if (os) os.value = '';
+        if (dataEnt) dataEnt.value = '';
+        if (subp) subp.value = '';
+        if (dataInst) dataInst.value = '';
+        if (desc) desc.value = '';
+        if (opCemigProto) opCemigProto.value = '';
+        const cemigDescOtim = document.getElementById('op-cemig-descricao');
+        if (cemigDescOtim) cemigDescOtim.innerHTML = '';
+      } else if (task.categoria === 'certificacao-cemig') {
+        let p = String(task.protocolo || '').trim();
+        if (!p && task.titulo) {
+          const m = String(task.titulo).match(/^Cemig\s*[—-]\s*(.+)$/);
+          if (m) p = m[1].trim();
+        }
+        if (opCemigProto) opCemigProto.value = p;
+        if (proto) proto.value = '';
+        if (os) os.value = '';
+        if (dataEnt) dataEnt.value = '';
+        if (subp) subp.value = '';
+        if (dataInst) dataInst.value = '';
+        if (desc) desc.value = '';
+        if (opOtimProto) opOtimProto.value = '';
+        if (opOtimOs) opOtimOs.value = '';
+        const otimDescC = document.getElementById('op-otim-descricao');
+        if (otimDescC) otimDescC.innerHTML = '';
+        const cemigDescEdit = document.getElementById('op-cemig-descricao');
+        if (cemigDescEdit) {
+          cemigDescEdit.innerHTML = this._normalizeOtimDescricaoImgSrcForEdit(String(task.descricao || ''));
+          this._wrapBareOtimDescricaoImages(cemigDescEdit);
+        }
+      } else {
+        if (proto) proto.value = String(task.protocolo || '').trim();
+        if (dataEnt) dataEnt.value = String(task.dataEntrada || '').trim();
+        if (subp) subp.value = String(task.subProcesso || '').trim();
+        if (dataInst) dataInst.value = String(task.dataInstalacao || '').trim();
+        if (os) os.value = String(task.ordemServico || '').trim();
+        if (desc) desc.value = String(task.descricao || '').trim();
+        if (opOtimProto) opOtimProto.value = '';
+        if (opOtimOs) opOtimOs.value = '';
+        if (opCemigProto) opCemigProto.value = '';
+        const otimDescOther = document.getElementById('op-otim-descricao');
+        if (otimDescOther) otimDescOther.innerHTML = '';
+        const cemigDescOther = document.getElementById('op-cemig-descricao');
+        if (cemigDescOther) cemigDescOther.innerHTML = '';
+      }
       document.getElementById('op-prazo').value       = task.prazo || '';
       document.getElementById('op-prioridade').value  = task.prioridade;
       document.getElementById('op-regiao').value      = task.regiao || '';
@@ -3348,9 +4085,62 @@ const Controllers = {
       const addressInput = document.getElementById('op-address-readonly');
       const addressHint = document.getElementById('op-address-hint');
       const clientesInput = document.getElementById('op-clientes-afetados');
-      if (coordsInput) coordsInput.value = task.coordenadas || '';
-      if (addressInput) addressInput.value = task.localizacaoTexto || '';
-      if (addressHint) addressHint.textContent = task.localizacaoTexto ? 'Localização carregada.' : 'Aguardando CTO ou coordenadas.';
+      const isRompOuTrocaCoord = task.categoria === 'rompimentos' || task.categoria === 'troca-poste';
+      if (coordsInput) coordsInput.value = isRompOuTrocaCoord ? (task.coordenadas || '') : '';
+      if (addressInput) addressInput.value = isRompOuTrocaCoord ? (task.localizacaoTexto || '') : '';
+      const geoHintOpcional = 'Opcional. Informe lat, long — o endereço é buscado automaticamente.';
+      const otimGC = document.getElementById('op-otim-coords');
+      const otimGA = document.getElementById('op-otim-address');
+      const otimGH = document.getElementById('op-otim-address-hint');
+      const cemigGC = document.getElementById('op-cemig-coords');
+      const cemigGA = document.getElementById('op-cemig-address');
+      const cemigGH = document.getElementById('op-cemig-address-hint');
+      if (task.categoria === 'otimizacao-rede') {
+        if (otimGC) otimGC.value = String(task.coordenadas || '').trim();
+        if (otimGA) otimGA.value = String(task.localizacaoTexto || '').trim();
+        if (otimGH) otimGH.textContent = task.coordenadas ? 'Localização salva na tarefa.' : geoHintOpcional;
+        if (cemigGC) cemigGC.value = '';
+        if (cemigGA) cemigGA.value = '';
+        if (cemigGH) cemigGH.textContent = geoHintOpcional;
+      } else if (task.categoria === 'certificacao-cemig') {
+        if (cemigGC) cemigGC.value = String(task.coordenadas || '').trim();
+        if (cemigGA) cemigGA.value = String(task.localizacaoTexto || '').trim();
+        if (cemigGH) cemigGH.textContent = task.coordenadas ? 'Localização salva na tarefa.' : geoHintOpcional;
+        if (otimGC) otimGC.value = '';
+        if (otimGA) otimGA.value = '';
+        if (otimGH) otimGH.textContent = geoHintOpcional;
+      } else {
+        if (otimGC) otimGC.value = '';
+        if (otimGA) otimGA.value = '';
+        if (otimGH) otimGH.textContent = geoHintOpcional;
+        if (cemigGC) cemigGC.value = '';
+        if (cemigGA) cemigGA.value = '';
+        if (cemigGH) cemigGH.textContent = geoHintOpcional;
+      }
+      if (task.categoria === 'troca-poste' && coordsInput && !String(task.coordenadas || '').trim()) {
+        const descStr = String(task.descricao || '');
+        const m = descStr.match(/Coordenadas:\s*([^|]+)\s*\|\s*Local:\s*(.+)/);
+        if (m) {
+          coordsInput.value = m[1].trim();
+          if (addressInput) addressInput.value = m[2].trim();
+        } else {
+          const p = this._parseCoords(String(task.titulo || '').trim());
+          if (p) coordsInput.value = `${p.lat}, ${p.lon}`;
+        }
+      }
+      if (task.categoria === 'troca-poste' && coordsInput?.value && addressInput && !addressInput.value.trim()) {
+        this._resolveCoordsToAddress(coordsInput.value);
+      }
+      if (addressHint) {
+        if (task.categoria === 'troca-poste') {
+          const ok = Boolean(String(addressInput?.value || '').trim());
+          addressHint.textContent = ok ? 'Localização carregada.' : 'Informe coordenadas para preencher rua e bairro.';
+        } else {
+          addressHint.textContent = String(addressInput?.value || '').trim()
+            ? 'Localização carregada.'
+            : 'Aguardando CTO ou coordenadas.';
+        }
+      }
       if (clientesInput) clientesInput.value = task.clientesAfetados || '';
       const deleteBtn = document.getElementById('deleteOpTaskBtn');
       if (deleteBtn) deleteBtn.style.display = 'inline-flex';
@@ -3359,6 +4149,12 @@ const Controllers = {
       this._syncAtendimentoKindFields();
       this._syncParentHidden(task);
       ModalService.open('opTaskModal');
+      if (task.categoria === 'otimizacao-rede' && otimGC?.value?.trim() && !otimGA?.value?.trim()) {
+        void this._resolveCoordsToAddress(otimGC.value, 'otim');
+      }
+      if (task.categoria === 'certificacao-cemig' && cemigGC?.value?.trim() && !cemigGA?.value?.trim()) {
+        void this._resolveCoordsToAddress(cemigGC.value, 'cemig');
+      }
     },
 
     deleteTask(id = Store.editingOpTaskId, options = {}) {
@@ -3423,6 +4219,48 @@ const Controllers = {
       document.getElementById('op-regiao')?.addEventListener('change', () => {
         this._syncTecnicosDatalist();
         this._syncSelectedTecnicoChatId();
+        this._syncAtendimentoKindFields();
+      });
+
+      ['op-otim-descricao', 'op-cemig-descricao'].forEach((richId) => {
+        const box = document.getElementById(richId);
+        if (!box) return;
+        box.addEventListener('click', (e) => {
+          const rm = e.target.closest('.op-editor-img-remove');
+          if (!rm || !box.contains(rm)) return;
+          e.preventDefault();
+          e.stopPropagation();
+          rm.closest('.op-editor-img-wrap')?.remove();
+        });
+        box.addEventListener('paste', (e) => {
+          const items = e.clipboardData?.items;
+          if (!items) return;
+          for (const it of items) {
+            if (it.kind === 'file' && it.type.startsWith('image/')) {
+              e.preventDefault();
+              const file = it.getAsFile();
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = () => {
+                const wrap = this._buildOtimDescImageWrap(reader.result);
+                const sel = window.getSelection();
+                if (sel && sel.rangeCount > 0 && box.contains(sel.anchorNode)) {
+                  const rng = sel.getRangeAt(0);
+                  rng.deleteContents();
+                  rng.insertNode(wrap);
+                  rng.setStartAfter(wrap);
+                  rng.collapse(true);
+                  sel.removeAllRanges();
+                  sel.addRange(rng);
+                } else {
+                  box.appendChild(wrap);
+                }
+              };
+              reader.readAsDataURL(file);
+              return;
+            }
+          }
+        });
       });
 
       document.getElementById('openOpTaskModalBtn').addEventListener('click', () => this.openNewModal());
@@ -3437,6 +4275,22 @@ const Controllers = {
       });
       document.getElementById('op-coords')?.addEventListener('blur', e => {
         this._resolveCoordsToAddress(e.target.value);
+      });
+      document.getElementById('op-otim-coords')?.addEventListener('input', e => {
+        const value = e.target.value;
+        clearTimeout(this._otimCoordsLookupTimer);
+        this._otimCoordsLookupTimer = setTimeout(() => this._resolveCoordsToAddress(value, 'otim'), 500);
+      });
+      document.getElementById('op-otim-coords')?.addEventListener('blur', e => {
+        this._resolveCoordsToAddress(e.target.value, 'otim');
+      });
+      document.getElementById('op-cemig-coords')?.addEventListener('input', e => {
+        const value = e.target.value;
+        clearTimeout(this._cemigCoordsLookupTimer);
+        this._cemigCoordsLookupTimer = setTimeout(() => this._resolveCoordsToAddress(value, 'cemig'), 500);
+      });
+      document.getElementById('op-cemig-coords')?.addEventListener('blur', e => {
+        this._resolveCoordsToAddress(e.target.value, 'cemig');
       });
       document.getElementById('op-setor-cto')?.addEventListener('input', e => {
         const el = e.target;
@@ -3505,63 +4359,32 @@ const Controllers = {
 
   /* ── Tasks Category Tabs ──────────────────────────────── */
   categoryTabs: {
+    _activateCategory(cat) {
+      document.querySelectorAll('.tasks-tab').forEach(t => {
+        const on = t.dataset.category === cat;
+        t.classList.toggle('active', on);
+        t.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      Store.currentOpCategory = cat;
+      const hidden = document.getElementById('op-parent-task-id');
+      if (hidden) hidden.value = '';
+      Controllers.opTask._syncAtendimentoKindFields?.();
+      UI.renderKanban();
+    },
     init() {
       document.querySelectorAll('.tasks-tab').forEach(tab => {
         tab.addEventListener('click', () => {
-          document.querySelectorAll('.tasks-tab').forEach(t => {
-            t.classList.remove('active');
-            t.setAttribute('aria-selected', 'false');
-          });
-          tab.classList.add('active');
-          tab.setAttribute('aria-selected', 'true');
-          Store.currentOpCategory = tab.dataset.category;
-          // Garante estado "pai" ao trocar de categoria (filhas só via botão da lista pai)
-          const hidden = document.getElementById('op-parent-task-id');
-          if (hidden) hidden.value = '';
-          Controllers.opTask._syncAtendimentoKindFields?.();
-          UI.renderKanban();
+          this._activateCategory(tab.dataset.category);
         });
       });
     },
   },
 
-  /* ── Pastas (Projetos de Rede / Manutenção) ───────────────── */
+  /* ── Painel operacional (categorias só no topo; painel sempre visível) ───── */
   opFolders: {
     init() {
       const panel = document.getElementById('opPanelContent');
-      if (!panel) return;
-
-      const folders = Array.from(document.querySelectorAll('#page-tarefas details.tasks-folder'));
-      const activateActiveTabInFolder = (detailsEl) => {
-        const activeTab = detailsEl?.querySelector('.tasks-tab.active');
-        const tabToActivate = activeTab ?? detailsEl?.querySelector('.tasks-tab');
-        if (!tabToActivate) return;
-        // Usa o handler já existente de tabs para manter o comportamento/ARIA.
-        tabToActivate.click();
-      };
-
-      const syncVisibility = () => {
-        const openFolders = folders.filter(f => f.open);
-        if (!openFolders.length) {
-          panel.classList.add('hidden');
-          return;
-        }
-        panel.classList.remove('hidden');
-        // Quando abre, garante que cai na primeira categoria da pasta.
-        // (Evita tela vazia caso o estado anterior não combine com a pasta aberta.)
-        const activeFolder = openFolders[openFolders.length - 1];
-        activateActiveTabInFolder(activeFolder);
-      };
-
-      folders.forEach(f => {
-        f.addEventListener('toggle', () => {
-          // toggle dispara tanto ao abrir quanto ao fechar
-          syncVisibility();
-        });
-      });
-
-      // Estado inicial: se nenhuma pasta estiver aberta, esconde.
-      syncVisibility();
+      if (panel) panel.classList.remove('hidden');
     },
   },
 

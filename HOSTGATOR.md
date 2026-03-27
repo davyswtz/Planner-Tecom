@@ -15,6 +15,8 @@ Se você já tinha uma versão antiga só com parte das colunas de `op_tasks`, r
 
 **Login lento no painel?** Se a tabela `usuario` foi criada com PBKDF2 em **200 mil iterações**, o `login.php` fica pesado em hospedagem compartilhada. Rode **`api/migrations/002_usuario_pbkdf2_60k.sql`** no mesmo banco (atualiza hashes e `pass_iterations`; **mesmas senhas** dos usuários).
 
+**Imagens na descrição (Otimização de Rede)?** Rode **`api/migrations/004_op_task_image.sql`** (tabela `op_task_image` + amplia `descricao` para `MEDIUMTEXT`). Instalações novas já recebem isso pelo `schema.sql` atualizado.
+
 ## 2. Credenciais da API
 
 1. Na pasta **`api/`**, copie o arquivo:

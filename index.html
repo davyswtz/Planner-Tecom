@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+  <meta name="theme-color" content="#0a0c0a"/>
+  <meta name="color-scheme" content="dark"/>
   <meta name="description" content="Painel interno de tarefas, rompimentos e integração Google Chat — Burrinho Projetos"/>
   <title>Burrinho Projetos</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
@@ -183,10 +185,11 @@
     <!-- Content area -->
     <div class="content">
 
-      <!-- Webhook banner (compartilhado entre páginas) -->
-      <div class="webhook-banner" id="webhookBanner" role="status" aria-live="polite">
-        <div class="wh-dot" aria-hidden="true"></div>
-        <span class="wh-label">Google Chat conectado</span>
+      <div class="content-webhook-wrap">
+        <div class="webhook-banner" id="webhookBanner" role="status" aria-live="polite">
+          <div class="wh-dot" aria-hidden="true"></div>
+          <span class="wh-label">Google Chat conectado</span>
+        </div>
       </div>
 
       <!-- ═══ PAGE: DASHBOARD ═══ -->
@@ -314,6 +317,77 @@
       <!-- ═══ PAGE: TAREFAS ═══ -->
       <section class="page" id="page-tarefas" aria-label="Tarefas operacionais">
 
+        <div class="tasks-top-categories" aria-label="Categorias operacionais">
+          <details class="tasks-top-details" id="tasks-top-projetos" open>
+            <summary class="tasks-top-summary">
+              <span class="tasks-top-group-icon" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4 12a8 8 0 0 1 16 0"/>
+                  <path d="M7 12a5 5 0 0 1 10 0"/>
+                  <circle cx="12" cy="12" r="1.5"/>
+                </svg>
+              </span>
+              <span class="tasks-top-group-title">Projetos de Rede</span>
+              <span class="tasks-top-chevron" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"/></svg>
+              </span>
+            </summary>
+            <div class="tasks-top-details-body">
+              <div class="tasks-tabs tasks-tabs--top" role="tablist" aria-label="Projetos de Rede">
+                <button type="button" class="tasks-tab" role="tab" aria-selected="false" data-category="atendimento-cliente" id="tab-atendimento-cliente" aria-controls="panel-atendimento-cliente">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z"/></svg>
+                  Atendimento ao Cliente
+                  <span class="tasks-tab-count" id="tab-count-atendimento-cliente">0</span>
+                </button>
+                <button type="button" class="tasks-tab" role="tab" aria-selected="false" data-category="otimizacao-rede" id="tab-otimizacao-rede" aria-controls="panel-otimizacao-rede">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path d="M4 12a8 8 0 0 1 16 0"/>
+                    <path d="M7 12a5 5 0 0 1 10 0"/>
+                    <circle cx="12" cy="12" r="1.5"/>
+                  </svg>
+                  Otimização de Rede
+                  <span class="tasks-tab-count" id="tab-count-otimizacao-rede">0</span>
+                </button>
+                <button type="button" class="tasks-tab" role="tab" aria-selected="false" data-category="certificacao-cemig" id="tab-certificacao-cemig" aria-controls="panel-certificacao-cemig">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path d="M12 2L4 6v6c0 5 4 9 8 10 4-1 8-5 8-10V6l-8-4z"/>
+                    <path d="M9 12l2 2 4-4"/>
+                  </svg>
+                  Certificação Cemig
+                  <span class="tasks-tab-count" id="tab-count-certificacao-cemig">0</span>
+                </button>
+              </div>
+            </div>
+          </details>
+          <details class="tasks-top-details" id="tasks-top-manutencao" open>
+            <summary class="tasks-top-summary">
+              <span class="tasks-top-group-icon" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                </svg>
+              </span>
+              <span class="tasks-top-group-title">Atividade de Manutenção</span>
+              <span class="tasks-top-chevron" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"/></svg>
+              </span>
+            </summary>
+            <div class="tasks-top-details-body">
+              <div class="tasks-tabs tasks-tabs--top" role="tablist" aria-label="Atividade de Manutenção">
+                <button type="button" class="tasks-tab active" role="tab" aria-selected="true" data-category="rompimentos" id="tab-rompimentos" aria-controls="panel-rompimentos">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                  Rompimentos
+                  <span class="tasks-tab-count" id="tab-count-rompimentos">0</span>
+                </button>
+                <button type="button" class="tasks-tab" role="tab" aria-selected="false" data-category="troca-poste" id="tab-troca-poste" aria-controls="panel-troca-poste">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
+                  Troca de Poste
+                  <span class="tasks-tab-count" id="tab-count-troca-poste">0</span>
+                </button>
+              </div>
+            </div>
+          </details>
+        </div>
+
         <!-- Resumo de tarefas operacionais -->
         <div class="stats" role="list" aria-label="Resumo de tarefas operacionais">
           <div class="stat-card s-warning" role="listitem">
@@ -358,65 +432,8 @@
           </div>
         </div>
 
-        <div class="tasks-layout-grid" aria-label="Organização das tarefas">
-          <div class="tasks-folders-col" aria-label="Categorias de tarefas">
-            <div class="tasks-sessions" aria-label="Pastas de tarefas">
-              <details class="tasks-folder">
-                <summary class="tasks-folder-summary" aria-label="Projetos de Rede">
-                  <span class="tasks-folder-summary-left">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                      <path d="M4 12a8 8 0 0 1 16 0"/>
-                      <path d="M7 12a5 5 0 0 1 10 0"/>
-                      <circle cx="12" cy="12" r="1.5"/>
-                    </svg>
-                    Projetos de Rede
-                  </span>
-                </summary>
-                <div class="tasks-tabs" role="tablist" aria-label="Projetos de Rede">
-                  <button class="tasks-tab" role="tab" aria-selected="false" data-category="atendimento-cliente" id="tab-atendimento-cliente" aria-controls="panel-atendimento-cliente">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z"/></svg>
-                    Atendimento ao Cliente
-                    <span class="tasks-tab-count" id="tab-count-atendimento-cliente">0</span>
-                  </button>
-                  <button class="tasks-tab" role="tab" aria-selected="false" data-category="otimizacao-rede" id="tab-otimizacao-rede" aria-controls="panel-otimizacao-rede">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                      <path d="M4 12a8 8 0 0 1 16 0"/>
-                      <path d="M7 12a5 5 0 0 1 10 0"/>
-                      <circle cx="12" cy="12" r="1.5"/>
-                    </svg>
-                    Otimização de Rede
-                    <span class="tasks-tab-count" id="tab-count-otimizacao-rede">0</span>
-                  </button>
-                </div>
-              </details>
-
-              <details class="tasks-folder">
-                <summary class="tasks-folder-summary" aria-label="Atividade de Manutenção">
-                  <span class="tasks-folder-summary-left">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-                    </svg>
-                    Atividade de Manutenção
-                  </span>
-                </summary>
-                <div class="tasks-tabs" role="tablist" aria-label="Atividade de Manutenção">
-                  <button class="tasks-tab active" role="tab" aria-selected="true" data-category="rompimentos" id="tab-rompimentos" aria-controls="panel-rompimentos">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                    Rompimentos
-                    <span class="tasks-tab-count" id="tab-count-rompimentos">0</span>
-                  </button>
-                  <button class="tasks-tab" role="tab" aria-selected="false" data-category="troca-poste" id="tab-troca-poste" aria-controls="panel-troca-poste">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
-                    Troca de Poste
-                    <span class="tasks-tab-count" id="tab-count-troca-poste">0</span>
-                  </button>
-                </div>
-              </details>
-            </div>
-          </div>
-
-          <div class="tasks-content-col" aria-label="Painel de visualização">
-            <div id="opPanelContent" class="op-panel-content hidden">
+        <div class="tasks-main-panel" aria-label="Painel de tarefas operacionais">
+            <div id="opPanelContent" class="op-panel-content">
               <div class="op-content-panel">
                 <!-- Toolbar das tarefas operacionais -->
                 <div class="toolbar" role="toolbar" aria-label="Controles de tarefas operacionais">
@@ -470,7 +487,6 @@
                 </div>
               </div>
             </div>
-          </div>
         </div>
 
       </section>
@@ -533,6 +549,7 @@
                 <option value="troca-poste">Troca de Poste</option>
                 <option value="atendimento-cliente">Atendimento ao Cliente</option>
                 <option value="otimizacao-rede">Otimização de Rede</option>
+                <option value="certificacao-cemig">Certificação Cemig</option>
               </select>
               <select id="reportRegionFilter" aria-label="Filtro de região">
                 <option value="all">Todas as regiões</option>
@@ -877,6 +894,85 @@
         </div>
       </div>
       <input type="hidden" id="op-parent-task-id" value=""/>
+
+      <!-- Otimização de Rede — campos dedicados -->
+      <div id="opOtimRedeWrap" class="op-otim-rede-wrap" style="display:none">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="op-otim-protocolo">Protocolo</label>
+            <input type="text" id="op-otim-protocolo" placeholder="Ex.: 2026-000123" autocomplete="off"/>
+          </div>
+          <div class="form-group">
+            <label for="op-otim-ordem-servico">Ordem de serviço</label>
+            <input type="text" id="op-otim-ordem-servico" placeholder="Ex.: OS-000123" autocomplete="off"/>
+          </div>
+        </div>
+        <div class="form-row" id="opOtimRegiaoTecRow">
+          <div class="form-group" id="opOtimRegiaoSlot"></div>
+          <div class="form-group" id="opOtimTecSlot"></div>
+        </div>
+        <div class="rompimento-location-block op-geo-optionais">
+          <div class="form-group">
+            <label for="op-otim-coords">Coordenadas (opcional)</label>
+            <input type="text" id="op-otim-coords" placeholder="Ex.: -19.85, -42.95" autocomplete="off"/>
+          </div>
+          <div class="form-group">
+            <label for="op-otim-address">Rua e bairro</label>
+            <input type="text" id="op-otim-address" readonly placeholder="Preenchido ao informar coordenadas válidas"/>
+            <div class="hint" id="op-otim-address-hint" style="margin-top:6px">Opcional. Informe lat, long — o endereço é buscado automaticamente.</div>
+          </div>
+        </div>
+        <div class="form-group op-otim-desc-group">
+          <label for="op-otim-descricao">Descrição</label>
+          <div
+            id="op-otim-descricao"
+            class="op-rich-editor"
+            contenteditable="true"
+            role="textbox"
+            aria-multiline="true"
+            tabindex="0"
+            data-placeholder="Texto, observações e imagens (Ctrl+V para colar captura de tela)…"
+          ></div>
+          <p class="hint">Imagens podem ser coladas direto no campo (Ctrl+V); use o botão × no canto da imagem para removê-la. Com MySQL, as imagens são gravadas na tabela <code>op_task_image</code>.</p>
+        </div>
+      </div>
+
+      <!-- Certificação Cemig — protocolo, região, técnico, data final -->
+      <div id="opCemigWrap" class="op-cemig-wrap" style="display:none">
+        <div class="form-group">
+          <label for="op-cemig-protocolo">Protocolo</label>
+          <input type="text" id="op-cemig-protocolo" placeholder="Ex.: 2026-000123" autocomplete="off"/>
+        </div>
+        <div class="form-row" id="opCemigRegiaoTecRow">
+          <div class="form-group" id="opCemigRegiaoSlot"></div>
+          <div class="form-group" id="opCemigTecSlot"></div>
+        </div>
+        <div class="form-group" id="opCemigPrazoSlot"></div>
+        <div class="rompimento-location-block op-geo-optionais">
+          <div class="form-group">
+            <label for="op-cemig-coords">Coordenadas (opcional)</label>
+            <input type="text" id="op-cemig-coords" placeholder="Ex.: -19.85, -42.95" autocomplete="off"/>
+          </div>
+          <div class="form-group">
+            <label for="op-cemig-address">Rua e bairro</label>
+            <input type="text" id="op-cemig-address" readonly placeholder="Preenchido ao informar coordenadas válidas"/>
+            <div class="hint" id="op-cemig-address-hint" style="margin-top:6px">Opcional. Informe lat, long — o endereço é buscado automaticamente.</div>
+          </div>
+        </div>
+        <div class="form-group op-cemig-desc-group">
+          <label for="op-cemig-descricao">Descrição</label>
+          <div
+            id="op-cemig-descricao"
+            class="op-rich-editor"
+            contenteditable="true"
+            role="textbox"
+            aria-multiline="true"
+            tabindex="0"
+            data-placeholder="Texto, observações e imagens (Ctrl+V para colar captura de tela)…"
+          ></div>
+          <p class="hint">Imagens podem ser coladas direto no campo (Ctrl+V); use o botão × no canto da imagem para removê-la. Com MySQL, as imagens são gravadas na tabela <code>op_task_image</code>.</p>
+        </div>
+      </div>
 
       <!-- Atendimento ao Cliente (Tarefa Pai) — mostra só o essencial -->
       <div id="opAtdParentOnlyWrap" style="display:none">
