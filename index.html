@@ -433,6 +433,16 @@
                         <option value="Goval">Goval</option>
                         <option value="Vale do Aço">Vale do Aço</option>
                         <option value="Caratinga">Caratinga</option>
+                        <option value="Backup">Backup</option>
+                      </select>
+                    </div>
+
+                    <div class="search-box" role="group" aria-label="Ordenar por data">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h10"/><path d="M8 18h7"/><path d="M3 6l1-1 1 1"/><path d="M4 5v14"/><path d="M3 18l1 1 1-1"/></svg>
+                      <select id="opDateSortFilter" aria-label="Ordenar por data">
+                        <option value="all">Todas as datas</option>
+                        <option value="oldest">Mais antigos</option>
+                        <option value="newest">Mais novos</option>
                       </select>
                     </div>
 
@@ -522,6 +532,17 @@
                 <option value="rompimentos">Rompimentos</option>
                 <option value="troca-poste">Troca de Poste</option>
                 <option value="atendimento-cliente">Atendimento ao Cliente</option>
+                <option value="otimizacao-rede">Otimização de Rede</option>
+              </select>
+              <select id="reportRegionFilter" aria-label="Filtro de região">
+                <option value="all">Todas as regiões</option>
+                <option value="Goval">Goval</option>
+                <option value="Vale do Aço">Vale do Aço</option>
+                <option value="Caratinga">Caratinga</option>
+                <option value="Backup">Backup</option>
+              </select>
+              <select id="reportTechFilter" aria-label="Filtro de técnico">
+                <option value="all">Todos os técnicos</option>
               </select>
               <button class="icon-btn" id="reportRefreshBtn" title="Atualizar relatório" aria-label="Atualizar relatório">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
@@ -576,18 +597,25 @@
               </div>
             </div>
 
-            <div class="report-grid">
-              <div class="panel report-chart-panel">
+            <div class="report-layout-grid" id="reportLayoutGrid" aria-label="Layout do relatório (arraste para reorganizar)">
+              <div class="panel report-widget report-chart-panel" draggable="true" data-report-widget="statusDist">
                 <div class="panel-header">
                   <span class="panel-title">Distribuição por Status</span>
+                  <button type="button" class="drag-handle" draggable="true" title="Arrastar card" aria-label="Arrastar card">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="7" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="17" r="1"/><circle cx="15" cy="7" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="17" r="1"/></svg>
+                  </button>
                 </div>
                 <div class="report-bars" id="reportBars"></div>
               </div>
-              <div class="panel">
+
+              <div class="panel report-widget" draggable="true" data-report-widget="lateTable">
                 <div class="panel-header">
                   <span class="panel-title">Tarefas Atrasadas</span>
+                  <button type="button" class="drag-handle" draggable="true" title="Arrastar card" aria-label="Arrastar card">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="7" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="17" r="1"/><circle cx="15" cy="7" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="17" r="1"/></svg>
+                  </button>
                 </div>
-                <div class="table-wrap">
+                <div class="table-wrap report-table-scroll">
                   <table aria-label="Tabela de tarefas atrasadas">
                     <thead>
                       <tr>
@@ -599,6 +627,48 @@
                       </tr>
                     </thead>
                     <tbody id="reportLateTableBody"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="panel report-widget report-chart-panel" draggable="true" data-report-widget="rompRegion">
+                <div class="panel-header">
+                  <span class="panel-title">Rompimentos por Região</span>
+                  <button type="button" class="drag-handle" draggable="true" title="Arrastar card" aria-label="Arrastar card">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="7" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="17" r="1"/><circle cx="15" cy="7" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="17" r="1"/></svg>
+                  </button>
+                </div>
+                <div class="report-bars" id="reportRompimentoRegionBars"></div>
+              </div>
+
+              <div class="panel report-widget report-chart-panel" draggable="true" data-report-widget="rompTec">
+                <div class="panel-header">
+                  <span class="panel-title">Rompimentos Resolvidos por Técnico</span>
+                  <button type="button" class="drag-handle" draggable="true" title="Arrastar card" aria-label="Arrastar card">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="7" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="17" r="1"/><circle cx="15" cy="7" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="17" r="1"/></svg>
+                  </button>
+                </div>
+                <div class="report-bars" id="reportRompimentoTecBars"></div>
+              </div>
+
+              <div class="panel report-widget" draggable="true" data-report-widget="rompTecTable">
+                <div class="panel-header">
+                  <span class="panel-title">Resumo de Rompimentos por Técnico</span>
+                  <button type="button" class="drag-handle" draggable="true" title="Arrastar card" aria-label="Arrastar card">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="7" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="17" r="1"/><circle cx="15" cy="7" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="17" r="1"/></svg>
+                  </button>
+                </div>
+                <div class="table-wrap report-table-scroll">
+                  <table aria-label="Tabela de rompimentos por técnico">
+                    <thead>
+                      <tr>
+                        <th scope="col">Técnico</th>
+                        <th scope="col">Concluídas</th>
+                        <th scope="col">Finalizadas</th>
+                        <th scope="col">Total Resolvidas</th>
+                      </tr>
+                    </thead>
+                    <tbody id="reportRompimentoTecTableBody"></tbody>
                   </table>
                 </div>
               </div>
@@ -635,6 +705,20 @@
                 <button type="button" class="ghost-btn" id="disconnectWebhook" style="border-color:rgba(255,69,69,.35);color:var(--danger)">
                   Desconectar
                 </button>
+              </div>
+            </div>
+
+            <div class="config-avatar-card">
+              <div class="config-avatar-head">
+                <div>
+                  <div class="config-avatar-title">Perfil</div>
+                  <div class="config-avatar-subtitle">Escolha um avatar e salve no seu usuário.</div>
+                </div>
+                <div class="avatar-picker-current" id="avatarPickerCurrent"></div>
+              </div>
+              <div class="avatar-picker-grid" id="avatarPickerGrid"></div>
+              <div class="config-avatar-actions">
+                <button type="button" class="ghost-btn" id="removeAvatarBtn">Remover avatar</button>
               </div>
             </div>
           </div>
@@ -778,6 +862,7 @@
         <div class="form-group" id="opResponsavelGroup">
           <label for="op-responsavel">Técnico responsável</label>
           <input type="text" id="op-responsavel" placeholder="Selecione ou digite o técnico" autocomplete="off" list="op-tecnicos-list"/>
+          <input type="hidden" id="op-responsavel-chatid" value=""/>
           <datalist id="op-tecnicos-list"></datalist>
         </div>
         <div class="form-group" id="opPrazoGroup">
@@ -791,17 +876,62 @@
           <input type="number" id="op-clientes-afetados" min="1" step="1" placeholder="Ex.: 120" autocomplete="off"/>
         </div>
       </div>
-      <div class="form-group op-parent-config" id="opParentConfig">
-        <label for="op-task-kind">Tipo de item (estilo ClickUp)</label>
-        <select id="op-task-kind">
-          <option value="parent">Lista (tarefa pai)</option>
-          <option value="child">Subtarefa (tarefa filha)</option>
-        </select>
-        <label for="op-parent-task" style="margin-top:8px">Selecionar lista pai</label>
-        <select id="op-parent-task">
-          <option value="">Selecione uma tarefa pai</option>
-        </select>
+      <input type="hidden" id="op-parent-task-id" value=""/>
+
+      <!-- Atendimento ao Cliente (Tarefa Pai) — mostra só o essencial -->
+      <div id="opAtdParentOnlyWrap" style="display:none">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="op-atd-protocolo">Protocolo</label>
+            <input type="text" id="op-atd-protocolo" placeholder="Ex.: 2026-000123" autocomplete="off"/>
+          </div>
+          <div class="form-group">
+            <label for="op-atd-data-entrada">Data de Entrada</label>
+            <input type="date" id="op-atd-data-entrada"/>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="op-atd-subprocesso">SubProcesso</label>
+            <input type="text" id="op-atd-subprocesso" placeholder="Ex.: Vistoria / Reparo / Retorno" autocomplete="off"/>
+          </div>
+          <div class="form-group">
+            <label for="op-atd-data-instalacao">Data da Instalação</label>
+            <input type="date" id="op-atd-data-instalacao"/>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" id="opAtdPrioridadeSlot">
+            <!-- Prioridade será reposicionada aqui automaticamente -->
+          </div>
+          <div class="form-group" id="opAtdRegiaoSlot">
+            <!-- Região será reposicionada aqui automaticamente -->
+          </div>
+        </div>
       </div>
+
+      <!-- Atendimento ao Cliente (Tarefa Filha) — mostra só o essencial -->
+      <div id="opAtdChildOnlyWrap" style="display:none">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="op-atd-ordem-servico">Ordem de serviço</label>
+            <input type="text" id="op-atd-ordem-servico" placeholder="Ex.: OS-000123" autocomplete="off"/>
+          </div>
+          <div class="form-group" id="opAtdChildTecnicoSlot">
+            <!-- Técnico responsável será reposicionado aqui automaticamente -->
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" id="opAtdChildRegiaoSlot">
+            <!-- Região será reposicionada aqui automaticamente -->
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="op-atd-descricao">Descrição da tarefa</label>
+          <textarea id="op-atd-descricao" placeholder="Detalhes do atendimento..." style="min-height:92px;resize:vertical"></textarea>
+        </div>
+      </div>
+
       <div class="form-row" id="opPriorityRegionRow">
         <div class="form-group" id="opPrioridadeGroup">
           <label for="op-prioridade">Prioridade</label>
@@ -818,6 +948,7 @@
             <option value="Goval">Goval</option>
             <option value="Vale do Aço">Vale do Aço</option>
             <option value="Caratinga">Caratinga</option>
+            <option value="Backup">Backup</option>
           </select>
         </div>
       </div>
@@ -844,11 +975,25 @@
     </div>
     <div class="modal-body">
       <div class="form-group">
-        <label for="f-webhookUrl">URL do Webhook</label>
-        <div class="wh-input-row">
-          <input type="text" id="f-webhookUrl" placeholder="https://chat.googleapis.com/v1/spaces/…"/>
-          <button class="sm-btn" id="testWebhookBtn">Testar</button>
+        <label>URLs do Webhook (por região)</label>
+
+        <div class="wh-input-row" style="margin-bottom:8px">
+          <input type="text" id="f-webhookUrl-goval" placeholder="Goval — https://chat.googleapis.com/v1/spaces/…"/>
+          <button class="sm-btn" id="testWebhookBtn-goval">Testar</button>
         </div>
+        <div class="wh-input-row" style="margin-bottom:8px">
+          <input type="text" id="f-webhookUrl-vale" placeholder="Vale do Aço — https://chat.googleapis.com/v1/spaces/…"/>
+          <button class="sm-btn" id="testWebhookBtn-vale">Testar</button>
+        </div>
+        <div class="wh-input-row">
+          <input type="text" id="f-webhookUrl-caratinga" placeholder="Caratinga — https://chat.googleapis.com/v1/spaces/…"/>
+          <button class="sm-btn" id="testWebhookBtn-caratinga">Testar</button>
+        </div>
+        <div class="wh-input-row" style="margin-top:8px">
+          <input type="text" id="f-webhookUrl-backup" placeholder="Backup — https://chat.googleapis.com/v1/spaces/…"/>
+          <button class="sm-btn" id="testWebhookBtn-backup">Testar</button>
+        </div>
+
         <p class="hint">
           Para obter a URL: abra o espaço no Google Chat → clique nos três pontos →
           <strong style="color:var(--white2)">Apps e integrações</strong> →
@@ -878,6 +1023,7 @@
 <div class="toast-container" id="toastContainer" role="status" aria-live="polite" aria-atomic="false"></div>
 
 <!-- Opcional: copie config.example.js para config.js e carregue antes do main (URLs / credenciais). -->
+<script src="./src/js/config.js"></script>
 <script src="./src/js/main.js"></script>
 </body>
 </html>

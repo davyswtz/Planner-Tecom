@@ -10,6 +10,7 @@
  *   ctoDataBase?: string,
  *   authUsers?: AuthUser[],
  *   sidebarAvatarUrl?: string,
+ *   avatarOptions?: { label?: string, url: string }[],
  * }} AppConfig
  */
 window.APP_CONFIG = {
@@ -29,4 +30,13 @@ window.APP_CONFIG = {
 
   /** Foto na barra lateral (sobrescreve o mascote padrão em `assets/sidebar-mascote-projetos.png`). */
   // sidebarAvatarUrl: 'https://exemplo.com/foto.jpg',
+
+  /**
+   * Avatares extras para o seletor de perfil (Configurações).
+   * Ex.: mova os arquivos para `assets/avatares/` e aponte as URLs abaixo.
+   */
+  // avatarOptions: [
+  //   { label: 'Avatar 1', url: './assets/avatares/avatar1.png' },
+  //   { label: 'Avatar 2', url: './assets/avatares/avatar2.png' },
+  // ],
 };

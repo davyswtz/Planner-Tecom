@@ -10,19 +10,19 @@
 
 /**
  * Modelo de tarefa geral (Dashboard)
- * @typedef {{ id: number, titulo: string, responsavel: string, prazo: string, status: string, prioridade: string }} Task
+ * @typedef {{ id: number, titulo: string, responsavel: string, prazo: string, status: string, prioridade: string, assinadaPor?: string, assinadaEm?: string }} Task
  */
 
 /**
  * Modelo de tarefa operacional (Rompimentos / Troca de Poste)
- * @typedef {{ id: number, titulo: string, responsavel: string, categoria: string, prazo: string, prioridade: string, descricao: string, status: OpStatus, historico: HistoryEntry[], criadaEm: string }} OpTask
- * @typedef {'Criada'|'Em andamento'|'Concluída'|'Finalizada'|'Cancelada'} OpStatus
+ * @typedef {{ id: number, titulo: string, responsavel: string, responsavelChatId?: string, categoria: string, prazo: string, prioridade: string, descricao: string, status: OpStatus, historico: HistoryEntry[], criadaEm: string, assinadaPor?: string, assinadaEm?: string, protocolo?: string, dataEntrada?: string, subProcesso?: string, dataInstalacao?: string, ordemServico?: string }} OpTask
+ * @typedef {'Criada'|'Backlog'|'A iniciar'|'Em andamento'|'Concluída'|'Finalizada'|'Cancelada'} OpStatus
  * @typedef {{ status: OpStatus, timestamp: string, autor: string }} HistoryEntry
  */
 
 /**
  * Configuração do Webhook
- * @typedef {{ url: string, events: { andamento: boolean, concluida: boolean, finalizada: boolean } }} WebhookConfig
+ * @typedef {{ url: string, urlsByRegion?: Record<string,string>, events: { andamento: boolean, concluida: boolean, finalizada: boolean } }} WebhookConfig
  */
 
 /**
@@ -39,14 +39,113 @@ function resolveDefaultWebhookUrlFromConfig() {
   return typeof raw === 'string' && raw.trim() ? raw.trim() : '';
 }
 
+function resolveDefaultWebhookUrlsByRegionFromConfig() {
+  const raw = window.APP_CONFIG && window.APP_CONFIG.defaultWebhookUrlsByRegion;
+  if (!raw || typeof raw !== 'object') return {};
+  /** @type {Record<string,string>} */
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof v === 'string' && v.trim()) out[String(k)] = v.trim();
+  }
+  return out;
+}
+
+function normalizeTechName(name) {
+  return String(name || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function getTechDirectory(regionKey = '') {
+  const cfg = window.APP_CONFIG || {};
+  const byRegion = cfg.techsByRegion && typeof cfg.techsByRegion === 'object' ? cfg.techsByRegion : {};
+  const flat = Array.isArray(cfg.techs) ? cfg.techs : [];
+
+  const fromRegion =
+    regionKey && Array.isArray(byRegion[regionKey])
+      ? byRegion[regionKey]
+      : [];
+
+  const merged = [...fromRegion, ...flat];
+  return merged
+    .filter(t => t && typeof t.name === 'string' && t.name.trim() && typeof t.chatUserId === 'string' && t.chatUserId.trim())
+    .map(t => ({ name: t.name.trim(), chatUserId: t.chatUserId.trim(), key: normalizeTechName(t.name) }));
+}
+
+function getSignedUserName() {
+  try {
+    const raw = localStorage.getItem('planner.session.displayName.v1');
+    const name = String(raw || '').trim();
+    return name || 'Usuário';
+  } catch {
+    return 'Usuário';
+  }
+}
+
 /**
  * Foto na barra lateral (circular). Por padrão usa o mascote do projeto em `assets/`.
  * Substitua por URL absoluta se preferir; vazio = só iniciais do usuário.
  * Opcional: `window.APP_CONFIG.sidebarAvatarUrl` em `config.js` sobrescreve isto.
  */
 const SIDEBAR_USER_AVATAR_URL = './assets/sidebar-mascote-projetos.png';
+const SESSION_USER_KEY = 'planner.session.userKey.v1';
+const USER_AVATAR_MAP_KEY = 'planner.userAvatarByUser.v1';
+const GUEST_AVATAR_KEY = 'planner.avatar.guest.v1';
+const AVATAR_ASSET_OPTIONS = [
+  { id: 'asset-muted', label: 'Burrinho Muted', url: './assets/avatares/burrinho%20muted.png' },
+  { id: 'asset-cabecudo', label: 'Burrinho Cabeçudo', url: './assets/avatares/burrinho%20cabe%C3%A7udo.png' },
+  { id: 'asset-empresario', label: 'Burrinho Empresario', url: './assets/avatares/burrinho%20empresario.jpg' },
+  { id: 'asset-cruzeirense', label: 'Burrinha Cruzeirense', url: './assets/avatares/burrinha%20cruzeirense.png' },
+  { id: 'asset-dev', label: 'Burrinho Dev', url: './assets/avatares/burrinho%20dev.png' },
+  { id: 'asset-panguao', label: 'Burrinho Panguao', url: './assets/avatares/burrinho%20panguao.png' },
+];
+
+function isAuthenticatedSession() {
+  try {
+    return localStorage.getItem('planner.session.v1') === '1';
+  } catch {
+    return false;
+  }
+}
+
+function readGuestAvatar() {
+  try {
+    return String(localStorage.getItem(GUEST_AVATAR_KEY) || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+function getSessionUserKey() {
+  try {
+    return String(localStorage.getItem(SESSION_USER_KEY) || '').trim().toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function readUserAvatarMap() {
+  try {
+    const raw = localStorage.getItem(USER_AVATAR_MAP_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 function resolveSidebarAvatarUrl() {
+  const logged = isAuthenticatedSession();
+  const userKey = logged ? getSessionUserKey() : '';
+  if (userKey && logged) {
+    const byUser = readUserAvatarMap();
+    const userAvatar = String(byUser[userKey] || '').trim();
+    if (userAvatar) return userAvatar;
+  }
+  const guestAvatar = readGuestAvatar();
+  if (guestAvatar) return guestAvatar;
   const fromConfig = window.APP_CONFIG && window.APP_CONFIG.sidebarAvatarUrl;
   if (typeof fromConfig === 'string' && fromConfig.trim()) return fromConfig.trim();
   return typeof SIDEBAR_USER_AVATAR_URL === 'string' ? SIDEBAR_USER_AVATAR_URL.trim() : '';
@@ -170,6 +269,7 @@ const Store = (() => {
   /** @type {WebhookConfig} */
   const webhookConfig = {
     url: '',
+    urlsByRegion: {},
     events: { ...WEBHOOK_EVENTS_DEFAULT },
     ...readLocal(STORAGE_KEYS.webhook, {}),
   };
@@ -219,6 +319,22 @@ const Store = (() => {
     if (!String(webhookConfig.url || '').trim() && fallbackUrl) {
       webhookConfig.url = fallbackUrl;
     }
+
+    if (!webhookConfig.urlsByRegion || typeof webhookConfig.urlsByRegion !== 'object') {
+      webhookConfig.urlsByRegion = {};
+    }
+    const hasAnyRegionUrl =
+      Object.values(webhookConfig.urlsByRegion).some(v => typeof v === 'string' && v.trim());
+    if (!hasAnyRegionUrl) {
+      const defaultsByRegion = resolveDefaultWebhookUrlsByRegionFromConfig();
+      if (Object.keys(defaultsByRegion).length) webhookConfig.urlsByRegion = { ...defaultsByRegion };
+    }
+
+    // Compatibilidade: se não existir `url` padrão, usa a primeira URL regional como fallback.
+    if (!String(webhookConfig.url || '').trim()) {
+      const first = Object.values(webhookConfig.urlsByRegion).find(v => typeof v === 'string' && v.trim());
+      if (first) webhookConfig.url = String(first).trim();
+    }
   };
 
   applyDefaultWebhookUrlIfNeeded();
@@ -236,6 +352,7 @@ const Store = (() => {
   let opRegionSearch = '';
   let opTecnicoSearch = '';
   let opTaskIdSearch = '';
+  let opDateSort = 'all';
   let editingTaskId = null;
   let editingOpTaskId = null;
   let sidebarOpen = true;
@@ -244,7 +361,15 @@ const Store = (() => {
     // Tasks
     getTasks:        ()      => [...tasks],
     addTask:         (data)  => {
-      const t = { id: nextTaskId++, ...data };
+      const nowIso = new Date().toISOString();
+      const signedBy = getSignedUserName();
+      const t = {
+        id: nextTaskId++,
+        ...data,
+        responsavel: (data && String(data.responsavel || '').trim()) ? data.responsavel : signedBy,
+        assinadaPor: signedBy,
+        assinadaEm: nowIso,
+      };
       tasks.push(t);
       persistSnapshot();
       syncUpTask(t);
@@ -265,7 +390,16 @@ const Store = (() => {
     getOpTasks:      ()           => [...opTasks],
     getOpTasksByCategory: (cat)   => opTasks.filter(t => t.categoria === cat),
     addOpTask:       (data)       => {
-      const t = { id: nextOpTaskId++, ...data, criadaEm: new Date().toISOString(), historico: [{ status: 'Criada', timestamp: new Date().toISOString(), autor: 'Sistema' }] };
+      const nowIso = new Date().toISOString();
+      const signedBy = getSignedUserName();
+      const t = {
+        id: nextOpTaskId++,
+        ...data,
+        criadaEm: nowIso,
+        assinadaPor: signedBy,
+        assinadaEm: nowIso,
+        historico: [{ status: 'Criada', timestamp: nowIso, autor: signedBy }],
+      };
       opTasks.push(t);
       persistSnapshot();
       syncUpOpTask(t);
@@ -420,6 +554,8 @@ const Store = (() => {
     set opTecnicoSearch(v)  { opTecnicoSearch = v; },
     get opTaskIdSearch()   { return opTaskIdSearch; },
     set opTaskIdSearch(v)  { opTaskIdSearch = v; },
+    get opDateSort()       { return opDateSort; },
+    set opDateSort(v)      { opDateSort = v; },
     get editingTaskId()     { return editingTaskId; },
     set editingTaskId(v)    { editingTaskId = v; },
     get editingOpTaskId()   { return editingOpTaskId; },
@@ -520,6 +656,27 @@ const WebhookService = {
     return String(s ?? '').replace(/\*/g, '·');
   },
 
+  _formatChatMention(chatUserIdRaw) {
+    const raw = String(chatUserIdRaw || '').trim();
+    if (!raw) return '';
+    if (/^users\/\S+$/.test(raw)) return `<${raw}>`;
+    if (/^\d+$/.test(raw)) return `<users/${raw}>`;
+    // fallback: permite colar resource name completo ou outro formato suportado no futuro
+    return `<${raw}>`;
+  },
+
+  _resolveTechnicianDisplay(task) {
+    const name = String(task?.responsavel || '').trim() || 'Não informado';
+    const direct = String(task?.responsavelChatId || '').trim();
+    const mention = this._formatChatMention(direct);
+    if (mention) return mention;
+
+    const key = normalizeTechName(name);
+    const match = getTechDirectory(this._normalizeRegionKey(task?.regiao)).find(t => t.key === key);
+    const mention2 = match ? this._formatChatMention(match.chatUserId) : '';
+    return mention2 || name;
+  },
+
   /** Cada linha não vazia em negrito (*sintaxe Google Chat*); linhas vazias mantidas. */
   _rompimentoBoldLines(lines) {
     return lines
@@ -553,8 +710,9 @@ const WebhookService = {
    * @param {'andamento'|'concluida'|'finalizada'} event
    */
   _buildTrocaPosteMessage(event, task) {
-    const tecnico = task.responsavel || 'Não informado';
+    const tecnico = this._resolveTechnicianDisplay(task);
     const regiao = (task.regiao || '').trim() || 'Não informada';
+    const assinatura = String(task?.assinadaPor || '').trim();
     const titulo = (task.titulo || '').trim();
     const descExtra = (task.descricao || '').trim();
     const loc = this._trocaPosteTitleAsLocation(titulo);
@@ -573,6 +731,7 @@ const WebhookService = {
       '',
       `🌎 REGIÃO: ${regiao}`,
       `👷‍♂️ TÉCNICO RESPONSÁVEL: ${tecnico}`,
+      assinatura ? `🖊️ ASSINATURA: ${assinatura}` : '',
     ]);
 
     const coordLabel = loc.mode === 'coords' ? '📍 COORDENADAS' : '📍 LOCAL / DESCRIÇÃO';
@@ -625,6 +784,36 @@ const WebhookService = {
     return parts.join(' ');
   },
 
+  _normalizeRegionKey(regionRaw) {
+    const r = String(regionRaw || '').trim().toLowerCase();
+    if (!r) return '';
+    if (r === 'goval') return 'GOVAL';
+    if (r === 'vale do aço' || r === 'vale do aco') return 'VALE_DO_ACO';
+    if (r === 'caratinga') return 'CARATINGA';
+    return r.toUpperCase().replace(/\s+/g, '_');
+  },
+
+  _resolveWebhookUrlForTask(task, config) {
+    const isAtd = task?.categoria === 'atendimento-cliente';
+    const isChild = isAtd && task?.parentTaskId;
+    const rootTask = isChild ? Store.findOpTask(Number(task.parentTaskId)) : task;
+
+    // Se já existe URL do tópico salva na tarefa raiz (pai), sempre reutiliza.
+    const fixedThreadWebhook = String(rootTask?.chatThreadWebhookUrl || '').trim();
+    if (fixedThreadWebhook) return fixedThreadWebhook;
+
+    const byRegion = (config && config.urlsByRegion && typeof config.urlsByRegion === 'object')
+      ? config.urlsByRegion
+      : {};
+    // Atendimento (pai/filha) usa a região da tarefa pai para não dividir tópico em canais distintos.
+    let regionSource = isAtd ? (rootTask?.regiao || task?.regiao) : task?.regiao;
+
+    const key = this._normalizeRegionKey(regionSource);
+    const picked = key ? String(byRegion[key] || '').trim() : '';
+    if (picked) return picked;
+    return String(config?.url || '').trim();
+  },
+
   /**
    * Envia mensagem formatada ao canal configurado
    * @param {'andamento'|'concluida'|'finalizada'} event
@@ -633,29 +822,39 @@ const WebhookService = {
    */
   async send(event, task, category = null) {
     const config = Store.getWebhookConfig();
-    if (!config.url || !config.events[event]) return;
+    const webhookUrl = this._resolveWebhookUrlForTask(task, config);
+    if (!webhookUrl) return;
+    if (config?.events && config.events[event] === false) return;
 
     const message = this._buildMessage(event, task, category);
 
+    const isAtdChild = task?.categoria === 'atendimento-cliente' && task?.parentTaskId;
+    const threadRootTask = isAtdChild ? Store.findOpTask(Number(task.parentTaskId)) : task;
+    if (!threadRootTask) return;
+
     // Google Chat threading (tópicos): cria no "andamento" e responde no mesmo thread nas demais.
-    const threadKey = this._resolveThreadKey(event, task);
+    const threadKey = this._resolveThreadKey(event, threadRootTask);
     if (threadKey) {
-      this._persistThreadKeyIfNeeded(task, threadKey);
-      const url = this._buildThreadedWebhookUrl(config.url, threadKey);
+      this._persistThreadMetaIfNeeded(threadRootTask, threadKey, webhookUrl);
+      const url = this._buildThreadedWebhookUrl(webhookUrl, threadKey);
       const payload = { ...message, thread: { threadKey } };
       await this._post(url, payload);
       return;
     }
 
-    await this._post(config.url, message);
+    await this._post(webhookUrl, message);
   },
 
   _resolveThreadKey(_event, task) {
     const existing = String(task?.chatThreadKey ?? '').trim();
     if (existing) return existing;
 
+    // Sempre gera chave única por "instância da tarefa raiz", evitando cair em tópico antigo.
     const stableId = this._taskStableId(task);
-    return `burrinho-${stableId}`.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 120);
+    const createdAt = String(task?.criadaEm || '').trim();
+    const createdStamp = createdAt ? String(new Date(createdAt).getTime()) : '';
+    const unique = createdStamp || String(task?.id || '').trim() || String(Date.now());
+    return `burrinho-${stableId}-${unique}`.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 120);
   },
 
   _taskStableId(task) {
@@ -665,17 +864,23 @@ const WebhookService = {
     return code || (id ? `${cat}-${id}` : `${cat}-unknown`);
   },
 
-  _persistThreadKeyIfNeeded(task, threadKey) {
+  _persistThreadMetaIfNeeded(task, threadKey, webhookUrl = '') {
     const current = String(task?.chatThreadKey ?? '').trim();
-    if (current) return;
+    const currentWebhook = String(task?.chatThreadWebhookUrl ?? '').trim();
+    if (current && currentWebhook) return;
 
     const idNum = Number(task?.id);
     if (!Number.isFinite(idNum)) return;
 
+    const patch = {};
+    if (!current) patch.chatThreadKey = threadKey;
+    if (!currentWebhook && webhookUrl) patch.chatThreadWebhookUrl = webhookUrl;
+    if (!Object.keys(patch).length) return;
+
     try {
       // Compatível com o shape atual: dashboard → updateTask; operacional → updateOpTask
-      if (task?.source === 'dashboard') Store.updateTask(idNum, { chatThreadKey: threadKey });
-      else Store.updateOpTask(idNum, { chatThreadKey: threadKey });
+      if (task?.source === 'dashboard') Store.updateTask(idNum, patch);
+      else Store.updateOpTask(idNum, patch);
     } catch {
       // não quebra o envio ao Chat se persistência falhar
     }
@@ -706,10 +911,71 @@ const WebhookService = {
       return this._buildTrocaPosteMessage(event, task);
     }
 
+    // Template específico: Atendimento ao Cliente (Tarefa Pai) entrando em andamento.
+    if (opCat === 'atendimento-cliente' && event === 'andamento' && task?.isParentTask) {
+      const tecnico = String(task.responsavel || 'Não informado').trim().toUpperCase();
+      const protocolo = String(task.protocolo || '').trim();
+      const dataInstalacao = String(task.dataInstalacao || '').trim();
+      const enviadoPor = String(task.assinadaPor || '').trim();
+      const taskId = String(task.taskCode || `ATD-${String(task.id || '').padStart(4, '0')}`).trim();
+
+      const subtasks = Store.getOpTasks()
+        .filter(t => t && t.categoria === 'atendimento-cliente' && Number(t.parentTaskId) === Number(task.id))
+        .sort((a, b) => Number(a.id) - Number(b.id))
+        .map(t => String(t.titulo || '').trim())
+        .filter(Boolean);
+
+      const minLines = 4;
+      const totalLines = Math.max(minLines, subtasks.length);
+      const listLines = Array.from({ length: totalLines }, (_, idx) => {
+        const title = subtasks[idx] || '';
+        return `*${idx + 1}° -* ${this._chatSafe(title)}`;
+      }).join('\n');
+
+      return {
+        text: [
+          '*ATENDIMENTO AO CLIENTE*',
+          `*👤 TÉCNICO RESPONSÁVEL:* ${this._chatSafe(tecnico)}`,
+          `*📄 PROTOCOLO:* ${this._chatSafe(protocolo)}`,
+          `*🗓️ DATA DE INSTALAÇÃO:* ${this._chatSafe(dataInstalacao)}`,
+          '',
+          listLines,
+          '',
+          `*👤 ENVIADO POR:* ${this._chatSafe(enviadoPor)}`,
+          `*🆔 ID TAREFA:* ${this._chatSafe(taskId)}`,
+        ].join('\n'),
+      };
+    }
+
+    if (opCat === 'atendimento-cliente' && event === 'andamento' && task?.parentTaskId) {
+      const parent = Store.findOpTask(Number(task.parentTaskId));
+      const parentTitle = String(parent?.titulo || '').trim();
+      const parentCode = String(parent?.taskCode || '').trim();
+      const childCode = String(task.taskCode || `ATD-${String(task.id || '').padStart(4, '0')}`).trim();
+      const tecnico = String(task.responsavel || 'Não informado').trim();
+      const regiao = String(task.regiao || '').trim();
+      const desc = String(task.descricao || '').trim();
+
+      return {
+        text: [
+          '*ATENDIMENTO AO CLIENTE — SUBTAREFA EM ANDAMENTO*',
+          `*🆔 ID SUBTAREFA:* ${this._chatSafe(childCode)}`,
+          `*📝 TÍTULO:* ${this._chatSafe(task.titulo || 'Não informado')}`,
+          `*👤 TÉCNICO:* ${this._chatSafe(tecnico)}`,
+          regiao ? `*🌎 REGIÃO:* ${this._chatSafe(regiao)}` : '',
+          desc ? `*📄 DESCRIÇÃO:* ${this._chatSafe(desc)}` : '',
+          (parentTitle || parentCode)
+            ? `*🔗 TAREFA PAI:* ${this._chatSafe(parentCode ? `${parentCode} - ${parentTitle}` : parentTitle)}`
+            : '',
+        ].filter(Boolean).join('\n'),
+      };
+    }
+
     if (opCat === 'rompimentos' && event === 'andamento') {
       const setor = task.setor || 'Não informado';
       const regiao = task.regiao || 'Não informada';
-      const tecnico = task.responsavel || 'Não informado';
+      const tecnico = this._resolveTechnicianDisplay(task);
+      const assinatura = String(task?.assinadaPor || '').trim();
       const localizacao = task.coordenadas || 'Não informada';
       const endereco = task.localizacaoTexto || 'Não informado';
       const taskId = task.taskCode || `ROM-${String(task.id || '').padStart(4, '0')}`;
@@ -721,6 +987,7 @@ const WebhookService = {
         `📌 SETOR / CTO: ${setor}`,
         `🌎 REGIÃO: ${regiao}`,
         `👨‍🔧 TÉCNICO RESPONSÁVEL: ${tecnico}`,
+        assinatura ? `🖊️ ASSINATURA: ${assinatura}` : '',
       ]);
       const coordBlock = `*${this._chatSafe('📍 COORDENADAS')}*\n${this._chatSafe(localizacao)}`;
       const tail = this._rompimentoBoldLines([
@@ -735,7 +1002,8 @@ const WebhookService = {
     if (opCat === 'rompimentos' && (event === 'concluida' || event === 'finalizada')) {
       const setor = task.setor || 'Não informado';
       const regiao = task.regiao || 'Não informada';
-      const tecnico = task.responsavel || 'Não informado';
+      const tecnico = this._resolveTechnicianDisplay(task);
+      const assinatura = String(task?.assinadaPor || '').trim();
       const localizacao = task.coordenadas || 'Não informada';
       const endereco = task.localizacaoTexto || 'Não informado';
       const taskId = task.taskCode || `ROM-${String(task.id || '').padStart(4, '0')}`;
@@ -749,6 +1017,7 @@ const WebhookService = {
         `📌 SETOR / CTO: ${setor}`,
         `🌎 REGIÃO: ${regiao}`,
         `👨‍🔧 TÉCNICO RESPONSÁVEL: ${tecnico}`,
+        assinatura ? `🖊️ ASSINATURA: ${assinatura}` : '',
       ]);
       const coordBlock = `*${this._chatSafe('📍 COORDENADAS')}*\n${this._chatSafe(localizacao)}`;
       const tail = this._rompimentoBoldLines([
@@ -984,8 +1253,9 @@ const OpTaskService = {
     const techQuery = (Store.opTecnicoSearch || '').toLowerCase();
     const taskIdRaw = String(Store.opTaskIdSearch || '').trim();
     const taskIdNum = taskIdRaw && /^\d+$/.test(taskIdRaw) ? Number(taskIdRaw) : null;
+    const dateSort = String(Store.opDateSort || 'all');
 
-    return Store.getOpTasksByCategory(category).filter(t => {
+    const filtered = Store.getOpTasksByCategory(category).filter(t => {
       const matchSearch =
         !query ||
         String(t.titulo || '').toLowerCase().includes(query) ||
@@ -1004,13 +1274,27 @@ const OpTaskService = {
 
       return matchSearch && matchRegion && matchTech && matchTaskId;
     });
+
+    const toTime = (task) => {
+      const d = String(task.dataEntrada || task.prazo || task.criadaEm || '').trim();
+      const ts = d ? new Date(d).getTime() : Number.NaN;
+      return Number.isFinite(ts) ? ts : 0;
+    };
+
+    if (dateSort === 'oldest') {
+      return [...filtered].sort((a, b) => toTime(a) - toTime(b));
+    }
+    if (dateSort === 'newest') {
+      return [...filtered].sort((a, b) => toTime(b) - toTime(a));
+    }
+    return filtered;
   },
 
   /** Retorna contagens por status para estatísticas */
   getStatusCounts() {
     const counts = { Criada: 0, 'Em andamento': 0, Concluída: 0, Finalizada: 0, Backlog: 0 };
     Store.getOpTasks().forEach(t => {
-      if (t.status === 'Backlog' || t.status === 'Criada') {
+      if (t.status === 'Backlog' || t.status === 'Criada' || t.status === 'A iniciar') {
         counts.Criada++;
         counts.Backlog++;
         return;
@@ -1138,7 +1422,9 @@ const ReportsService = {
     return null;
   },
 
-  getFilteredTasks(period = 'week', category = 'all') {
+  getFilteredTasks(period = 'week', category = 'all', filters = {}) {
+    const regionFilter = String(filters.region || 'all').trim().toLowerCase();
+    const techFilter = String(filters.tech || 'all').trim().toLowerCase();
     const start = this._periodStart(period);
     return TaskService.getAllDashboardTasks()
       .map(t => this._normalize(t))
@@ -1149,8 +1435,11 @@ const ReportsService = {
           (category === 'dashboard' && t.source === 'dashboard') ||
           (category === 'rompimentos' && t.categoria === 'rompimentos') ||
           (category === 'troca-poste' && t.categoria === 'troca-poste') ||
-          (category === 'atendimento-cliente' && t.categoria === 'atendimento-cliente');
-        return matchPeriod && matchCategory;
+          (category === 'atendimento-cliente' && t.categoria === 'atendimento-cliente') ||
+          (category === 'otimizacao-rede' && t.categoria === 'otimizacao-rede');
+        const matchRegion = regionFilter === 'all' || String(t.regiao || '').trim().toLowerCase() === regionFilter;
+        const matchTech = techFilter === 'all' || String(t.responsavel || '').trim().toLowerCase().includes(techFilter);
+        return matchPeriod && matchCategory && matchRegion && matchTech;
       });
   },
 
@@ -1183,6 +1472,36 @@ const ReportsService = {
           : 0;
         return { ...t, diffDays };
       });
+  },
+
+  getRompimentosByRegion(tasks) {
+    const rows = tasks.filter(t => t.categoria === 'rompimentos');
+    const map = new Map();
+    rows.forEach(t => {
+      const region = String(t.regiao || 'Não informada').trim() || 'Não informada';
+      map.set(region, (map.get(region) || 0) + 1);
+    });
+    const list = [...map.entries()].map(([label, count]) => ({ label, count }));
+    const max = Math.max(...list.map(i => i.count), 1);
+    return list.sort((a, b) => b.count - a.count).map(i => ({ ...i, pct: Math.round((i.count / max) * 100) }));
+  },
+
+  getRompimentosByTecnicoDone(tasks) {
+    const rows = tasks.filter(t => t.categoria === 'rompimentos');
+    const map = new Map();
+    rows.forEach(t => {
+      const tec = String(t.responsavel || 'Não informado').trim() || 'Não informado';
+      if (!map.has(tec)) map.set(tec, { label: tec, concluida: 0, finalizada: 0, total: 0 });
+      const item = map.get(tec);
+      if (t.status === 'Concluída') item.concluida += 1;
+      if (t.status === 'Finalizada') item.finalizada += 1;
+      item.total = item.concluida + item.finalizada;
+    });
+    const list = [...map.values()]
+      .filter(i => i.total > 0)
+      .sort((a, b) => b.total - a.total || b.finalizada - a.finalizada);
+    const max = Math.max(...list.map(i => i.total), 1);
+    return list.map(i => ({ ...i, pct: Math.round((i.total / max) * 100) }));
   },
 
   toCsv(tasks) {
@@ -1218,12 +1537,13 @@ const UI = {
   },
   _atdStatusOrder: ['Backlog', 'Em andamento', 'Concluída', 'Finalizada'],
   _normalizeAtdStatus(status) {
-    if (status === 'Criada') return 'Backlog';
+    if (status === 'Criada' || status === 'A iniciar') return 'Backlog';
     return status;
   },
   /* ── Helpers de badge ───────────────────────────────────── */
   _statusBadgeMap: {
     'Backlog':      's-pendente',
+    'A iniciar':    's-pendente',
     'Pendente':     's-pendente',
     'Em andamento': 's-andamento',
     'Concluída':    's-concluida',
@@ -1281,6 +1601,10 @@ const UI = {
       const isDone = ['Concluída','Finalizada'].includes(t.effectiveStatus);
       const color  = Utils.getAvatarColor(t.responsavel);
       const titleStyle = isDone ? 'text-decoration:line-through;opacity:.45' : '';
+      const assinatura = String(t.assinadaPor || '').trim();
+      const sigHtml = assinatura
+        ? `<div class="sig-mini">✍ ${assinatura}</div>`
+        : '';
 
       return `
         <tr class="dashboard-row-readonly">
@@ -1290,9 +1614,12 @@ const UI = {
             </div>
           </td>
           <td>
-            <div class="assignee">
-              <div class="av-sm" style="background:${color};color:#0a0c0a" aria-hidden="true">${Utils.getInitials(t.responsavel)}</div>
-              ${t.responsavel}
+            <div class="assignee-wrap">
+              <div class="assignee">
+                <div class="av-sm" style="background:${color};color:#0a0c0a" aria-hidden="true">${Utils.getInitials(t.responsavel)}</div>
+                ${t.responsavel}
+              </div>
+              ${sigHtml}
             </div>
           </td>
           <td class="date-cell ${isLate ? 'date-late' : ''}">${Utils.formatDate(t.prazo)}</td>
@@ -1384,6 +1711,8 @@ const UI = {
             const actionBtns = nextStatuses.map(ns =>
               `<button class="status-action-btn ${statusActionClass[ns]}" data-op-id="${t.id}" data-to-status="${ns}">${statusLabels[ns]}</button>`
             ).join('');
+            const assinatura = String(t.assinadaPor || '').trim();
+            const sigHtml = assinatura ? `<div class="kanban-card-signature">✍ ${assinatura}</div>` : '';
             const childHtml = childTasks.length
               ? `<div class="subtask-list">${childTasks.map(c => `
                    <div class="subtask-item">
@@ -1405,6 +1734,7 @@ const UI = {
                   </div>
                   <div class="kanban-card-date ${isLate ? 'late' : ''}">${Utils.formatDate(t.prazo)}</div>
                 </div>
+                ${sigHtml}
                 <div class="kanban-card-actions">${actionBtns}</div>
                 ${childHtml}
               </article>
@@ -1520,11 +1850,8 @@ const UI = {
     const statusLabel = (status) => status === 'Concluída' ? 'Concluído' : status;
     const statusBadgeAtd = (status) => this.statusBadge(status).replace(status, statusLabel(status));
     const normalized = tasks.map(t => {
-      const normalizedStatus = this._normalizeAtdStatus(t.status);
-      if (t.parentTaskId && normalizedStatus === 'Backlog') {
-        return { ...t, status: 'Em andamento' };
-      }
-      return { ...t, status: normalizedStatus };
+      const groupStatus = this._normalizeAtdStatus(t.status);
+      return { ...t, _groupStatus: groupStatus };
     });
     const parentTasks = normalized.filter(t => t.isParentTask || !t.parentTaskId);
     const childTasksAll = normalized.filter(t => t.parentTaskId);
@@ -1549,7 +1876,6 @@ const UI = {
 
     const renderSubtaskItem = (child, parentStatus) => `
       <div class="atd-subtask-row ${this._atdLastMoved?.id === child.id ? 'just-moved' : ''}" data-task-row-id="${child.id}" data-open-subtask="${child.id}" draggable="true" data-drag-subtask="${child.id}">
-        <span class="atd-kind-badge child">Filha</span>
         <span class="atd-subtask-title">${child.titulo}</span>
         <span class="atd-parent-meta">${child.taskCode || ''}</span>
         <span class="atd-parent-meta">${child.responsavel}</span>
@@ -1557,7 +1883,7 @@ const UI = {
         <span class="atd-status-cell">${statusBadgeAtd(child.status)}</span>
         <div class="atd-subtask-actions">
           <select class="atd-status-select" data-change-status="${child.id}">
-            ${['Em andamento', 'Concluída', 'Finalizada'].map(s => `<option value="${s}" ${s === child.status ? 'selected' : ''}>${statusLabel(s)}</option>`).join('')}
+            ${['A iniciar', 'Em andamento', 'Concluída', 'Finalizada'].map(s => `<option value="${s}" ${s === child.status ? 'selected' : ''}>${statusLabel(s)}</option>`).join('')}
           </select>
           <button class="atd-action-btn" data-edit-subtask="${child.id}">Editar</button>
           <button class="atd-action-btn danger" data-delete-subtask="${child.id}">Excluir</button>
@@ -1570,17 +1896,17 @@ const UI = {
       const expanded = this._atendimentoExpanded[parent.id] !== false;
       const doneCount = children.filter(c => ['Concluída', 'Finalizada'].includes(c.status)).length;
       const allDone = children.length > 0 && doneCount === children.length;
+      const subHint = children.length ? ` · ${children.length} subtarefa${children.length === 1 ? '' : 's'}` : '';
       return `
         <section class="atd-parent-card" data-parent-id="${parent.id}">
           <div class="atd-parent-row ${this._atdLastMoved?.id === parent.id ? 'just-moved' : ''}" data-task-row-id="${parent.id}" data-toggle-parent="${parent.id}" role="button" tabindex="0" aria-expanded="${expanded ? 'true' : 'false'}">
             <span class="atd-chevron ${expanded ? 'open' : ''}">▾</span>
-            <span class="atd-kind-badge parent">Pai</span>
             <span class="atd-parent-title">${parent.titulo}</span>
             <span class="atd-parent-meta">${parent.taskCode || ''}</span>
             <span class="atd-parent-meta">${parent.responsavel}</span>
             <span class="atd-parent-meta">${Utils.formatDate(parent.prazo)}</span>
             <span class="atd-status-cell">${statusBadgeAtd(parent.status)}</span>
-            <span class="atd-parent-meta">${children.length ? `${doneCount}/${children.length} concluídas` : 'Sem subtarefas'}${allDone ? ' · OK' : ''}</span>
+            <span class="atd-parent-meta">${children.length ? `${doneCount}/${children.length} concluídas` : 'Sem subtarefas'}${allDone ? ' · OK' : ''}${subHint}</span>
             <span class="atd-row-actions">
               <select class="atd-status-select" data-change-status="${parent.id}">
                 ${this._atdStatusOrder.map(s => `<option value="${s}" ${s === parent.status ? 'selected' : ''}>${statusLabel(s)}</option>`).join('')}
@@ -1602,7 +1928,7 @@ const UI = {
 
     const renderTaskGroup = (status) => {
       const groupParents = parentTasks
-        .filter(t => t.status === status)
+        .filter(t => (t._groupStatus || this._normalizeAtdStatus(t.status)) === status)
         .sort(sortByDefault);
       const expanded = this._atendimentoGroupExpanded[status] !== false;
       return `
@@ -1616,7 +1942,7 @@ const UI = {
           </header>
           <div class="atd-group-body ${expanded ? 'open' : ''}">
             ${groupParents.length
-              ? `<div class="atd-table-head"><span></span><span>Tipo</span><span>Tarefa</span><span>ID</span><span>Responsável</span><span>Prazo</span><span>Status</span><span>Progresso</span><span>Ações</span></div>${groupParents.map(p => renderTaskItem(p, status)).join('')}`
+              ? `<div class="atd-table-head"><span></span><span>Tarefa</span><span>ID</span><span>Responsável</span><span>Prazo</span><span>Status</span><span>Progresso</span><span>Ações</span></div>${groupParents.map(p => renderTaskItem(p, status)).join('')}`
               : `<div class="calendar-empty">Nenhuma tarefa neste grupo.</div>`}
           </div>
         </section>
@@ -1912,12 +2238,24 @@ const UI = {
   renderReportsPage() {
     const periodEl = document.getElementById('reportPeriodFilter');
     const categoryEl = document.getElementById('reportCategoryFilter');
-    if (!periodEl || !categoryEl) return;
+    const regionEl = document.getElementById('reportRegionFilter');
+    const techEl = document.getElementById('reportTechFilter');
+    if (!periodEl || !categoryEl || !regionEl || !techEl) return;
 
-    const tasks = ReportsService.getFilteredTasks(periodEl.value, categoryEl.value);
+    // Popula o filtro de técnicos com base no período/categoria/região atuais.
+    const techBase = ReportsService.getFilteredTasks(periodEl.value, categoryEl.value, { region: regionEl.value, tech: 'all' });
+    const techNames = [...new Set(techBase.map(t => String(t.responsavel || '').trim()).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    const currentTech = techEl.value || 'all';
+    techEl.innerHTML = `<option value="all">Todos os técnicos</option>${techNames.map(name => `<option value="${name}">${name}</option>`).join('')}`;
+    techEl.value = techNames.includes(currentTech) ? currentTech : 'all';
+
+    const tasks = ReportsService.getFilteredTasks(periodEl.value, categoryEl.value, { region: regionEl.value, tech: techEl.value });
     const metrics = ReportsService.getMetrics(tasks);
     const statusDist = ReportsService.getStatusDistribution(tasks);
     const lateRows = ReportsService.getLateRows(tasks);
+    const rompByRegion = ReportsService.getRompimentosByRegion(tasks);
+    const rompByTec = ReportsService.getRompimentosByTecnicoDone(tasks);
     const statusClassMap = {
       'Pendente': 's-pendente',
       'Criada': 's-pendente',
@@ -1948,6 +2286,35 @@ const UI = {
         }).join('')
       : '<div class="calendar-empty">Sem dados para o filtro selecionado.</div>';
 
+    const regionBars = document.getElementById('reportRompimentoRegionBars');
+    if (regionBars) {
+      regionBars.innerHTML = rompByRegion.length
+        ? rompByRegion.map(item => `
+            <div class="report-bar-row">
+              <div class="report-bar-head"><span>${item.label}</span><span>${item.count}</span></div>
+              <div class="report-bar-track">
+                <div class="report-bar-fill s-andamento" style="width:${item.pct}%"></div>
+              </div>
+            </div>
+          `).join('')
+        : '<div class="calendar-empty">Sem rompimentos no filtro selecionado.</div>';
+    }
+
+    const tecBars = document.getElementById('reportRompimentoTecBars');
+    if (tecBars) {
+      tecBars.innerHTML = rompByTec.length
+        ? rompByTec.map(item => `
+            <div class="report-bar-row">
+              <div class="report-bar-head"><span>${item.label}</span><span>${item.total}</span></div>
+              <div class="report-bar-track">
+                <div class="report-bar-fill s-concluida" style="width:${item.pct}%"></div>
+              </div>
+              <div class="report-bar-head"><span style="font-size:10px;color:var(--white4)">Concluídas: ${item.concluida}</span><span style="font-size:10px;color:var(--white4)">Finalizadas: ${item.finalizada}</span></div>
+            </div>
+          `).join('')
+        : '<div class="calendar-empty">Nenhum técnico com rompimento resolvido no filtro.</div>';
+    }
+
     const lateTbody = document.getElementById('reportLateTableBody');
     lateTbody.innerHTML = lateRows.length
       ? lateRows.map(row => `
@@ -1960,6 +2327,20 @@ const UI = {
           </tr>
         `).join('')
       : '<tr class="empty-row"><td colspan="5">Nenhuma tarefa atrasada no período.</td></tr>';
+
+    const rompTecTbody = document.getElementById('reportRompimentoTecTableBody');
+    if (rompTecTbody) {
+      rompTecTbody.innerHTML = rompByTec.length
+        ? rompByTec.map(row => `
+            <tr>
+              <td>${row.label}</td>
+              <td>${row.concluida}</td>
+              <td>${row.finalizada}</td>
+              <td><strong>${row.total}</strong></td>
+            </tr>
+          `).join('')
+        : '<tr class="empty-row"><td colspan="4">Nenhum rompimento resolvido para os filtros selecionados.</td></tr>';
+    }
   },
 
   /* ── Clock ──────────────────────────────────────────────── */
@@ -2155,6 +2536,7 @@ const Controllers = {
   auth: {
     _sessionKey: 'planner.session.v1',
     _displayNameKey: 'planner.session.displayName.v1',
+    _sessionUserKey: SESSION_USER_KEY,
     _getAllowedUsers() {
       const list = window.APP_CONFIG && window.APP_CONFIG.authUsers;
       const base = Array.isArray(list) ? list : [];
@@ -2172,12 +2554,15 @@ const Controllers = {
     _unlock() {
       document.body.classList.remove('auth-locked');
     },
-    _finishLogin(displayName) {
+    _finishLogin(displayName, userKeyRaw = '') {
       const name = String(displayName || '').trim() || 'Usuário';
+      const userKey = String(userKeyRaw || name).trim().toLowerCase();
       localStorage.setItem(this._sessionKey, '1');
       localStorage.setItem(this._displayNameKey, name);
+      localStorage.setItem(this._sessionUserKey, userKey);
       this._unlock();
       this._syncSidebarUser();
+      Controllers.profileAvatar?.render();
     },
     _syncSidebarUser() {
       const nameEl = document.getElementById('sidebarUserName');
@@ -2230,7 +2615,7 @@ const Controllers = {
         try {
           const res = await Store.loginRemote(normalizedUser, normalizedPass);
           if (res && res.ok) {
-            this._finishLogin(user);
+            this._finishLogin(user, normalizedUser);
             return true;
           }
         } catch {
@@ -2254,16 +2639,18 @@ const Controllers = {
         return false;
       }
 
-      this._finishLogin(user);
+      this._finishLogin(user, normalizedUser);
       return true;
     },
     logout() {
       localStorage.removeItem(this._sessionKey);
       localStorage.removeItem(this._displayNameKey);
+      localStorage.removeItem(this._sessionUserKey);
       this._lock();
       const passInput = document.getElementById('loginPass');
       if (passInput) passInput.value = '';
       this._syncSidebarUser();
+      Controllers.profileAvatar?.render();
       ToastService.show('Sessão encerrada', 'info');
     },
     init() {
@@ -2480,11 +2867,30 @@ const Controllers = {
 
   /* ── Op Task Modal ────────────────────────────────────── */
   opTask: {
+    _syncTecnicosDatalist() {
+      const listEl = document.getElementById('op-tecnicos-list');
+      if (!listEl) return;
+      const regiaoRaw = document.getElementById('op-regiao')?.value || '';
+      const techs = getTechDirectory(WebhookService._normalizeRegionKey(regiaoRaw));
+      listEl.innerHTML = techs.map(t => `<option value="${t.name}"></option>`).join('');
+    },
+    _syncSelectedTecnicoChatId() {
+      const input = document.getElementById('op-responsavel');
+      const hidden = document.getElementById('op-responsavel-chatid');
+      if (!input || !hidden) return;
+      const key = normalizeTechName(input.value);
+      const regiaoRaw = document.getElementById('op-regiao')?.value || '';
+      const match = getTechDirectory(WebhookService._normalizeRegionKey(regiaoRaw)).find(t => t.key === key);
+      hidden.value = match ? match.chatUserId : '';
+    },
     _newTaskPreset: null,
     _coordsLookupTimer: null,
     _setorCtoLookupTimer: null,
     _isAtendimentoCategory(category = Store.currentOpCategory) {
       return category === 'atendimento-cliente' || category === 'otimizacao-rede';
+    },
+    _isAtendimentoClienteCategory(category = Store.currentOpCategory) {
+      return category === 'atendimento-cliente';
     },
     _isRompimentoCategory(category = Store.currentOpCategory) {
       return category === 'rompimentos';
@@ -2609,8 +3015,8 @@ const Controllers = {
       }
     },
     _syncAtendimentoKindFields() {
-      const kindEl = document.getElementById('op-task-kind');
-      const isParent = (kindEl?.value || 'parent') === 'parent';
+      const hiddenParent = document.getElementById('op-parent-task-id');
+      const isParent = !String(hiddenParent?.value || '').trim();
       const responsavelInput = document.getElementById('op-responsavel');
       const prazoInput = document.getElementById('op-prazo');
       const regiaoSelect = document.getElementById('op-regiao');
@@ -2618,6 +3024,15 @@ const Controllers = {
       const prazoGroup = prazoInput?.closest('.form-group');
       const regiaoGroup = regiaoSelect?.closest('.form-group');
       const isRompimento = this._isRompimentoCategory();
+      const isAtdCliente = this._isAtendimentoClienteCategory();
+      const atdWrap = document.getElementById('opAtdParentOnlyWrap');
+      const atdChildWrap = document.getElementById('opAtdChildOnlyWrap');
+      const regiaoSlot = document.getElementById('opAtdRegiaoSlot');
+      const prioridadeSlot = document.getElementById('opAtdPrioridadeSlot');
+      const childTecnicoSlot = document.getElementById('opAtdChildTecnicoSlot');
+      const childRegiaoSlot = document.getElementById('opAtdChildRegiaoSlot');
+      const priorityRow = document.getElementById('opPriorityRegionRow');
+      const mainRow = document.getElementById('opMainRow');
 
       [responsavelGroup, prazoGroup, regiaoGroup].forEach(group => {
         if (!group) return;
@@ -2628,65 +3043,64 @@ const Controllers = {
         group.style.display = isParent ? '' : 'none';
       });
 
+      const atdParentOnly = isAtdCliente && isParent && !isRompimento;
+      const atdChildOnly = isAtdCliente && !isParent && !isRompimento;
+
+      // Atendimento ao Cliente (pai): deixa apenas os campos essenciais do formulário.
+      if (atdWrap) atdWrap.style.display = atdParentOnly ? '' : 'none';
+      if (atdChildWrap) atdChildWrap.style.display = atdChildOnly ? '' : 'none';
+      if (mainRow) mainRow.style.display = atdParentOnly ? 'none' : '';
+      if (priorityRow) priorityRow.style.display = atdParentOnly ? 'none' : '';
+
+      if (atdParentOnly) {
+        const prioridadeGroup = document.getElementById('opPrioridadeGroup');
+        if (prioridadeSlot && prioridadeGroup && prioridadeGroup.parentElement !== prioridadeSlot) {
+          prioridadeSlot.appendChild(prioridadeGroup);
+        }
+        if (regiaoSlot && regiaoGroup && regiaoGroup.parentElement !== regiaoSlot) {
+          regiaoSlot.appendChild(regiaoGroup);
+        }
+      }
+
+      if (atdChildOnly) {
+        // Para filha: mostra técnico + região no bloco próprio e esconde prazo/prioridade
+        const tecGroup = responsavelInput?.closest('.form-group');
+        if (childTecnicoSlot && tecGroup && tecGroup.parentElement !== childTecnicoSlot) {
+          childTecnicoSlot.appendChild(tecGroup);
+        }
+        if (childRegiaoSlot && regiaoGroup && regiaoGroup.parentElement !== childRegiaoSlot) {
+          childRegiaoSlot.appendChild(regiaoGroup);
+        }
+        if (tecGroup) tecGroup.style.display = '';
+        if (regiaoGroup) regiaoGroup.style.display = '';
+        if (prazoGroup) prazoGroup.style.display = 'none';
+        if (priorityRow) priorityRow.style.display = 'none';
+      } else {
+        // Fora do modo filha, reexibe prazo se estiver aplicável (categorySpecificFields pode esconder depois)
+        if (prazoGroup && !isRompimento) prazoGroup.style.display = '';
+      }
+
       if (responsavelInput) {
-        responsavelInput.disabled = isRompimento ? false : !isParent;
+        // Pai (ATD): responsável vem da assinatura; Filha (ATD): precisa escolher técnico.
+        if (atdParentOnly) responsavelInput.disabled = true;
+        else if (atdChildOnly) responsavelInput.disabled = false;
+        else responsavelInput.disabled = isRompimento ? false : !isParent;
       }
       if (prazoInput) {
-        prazoInput.disabled = isRompimento ? true : !isParent;
+        prazoInput.disabled = atdParentOnly ? true : (isRompimento ? true : !isParent);
       }
       if (regiaoSelect) {
-        regiaoSelect.disabled = isRompimento ? false : !isParent;
+        if (atdChildOnly) regiaoSelect.disabled = false;
+        else regiaoSelect.disabled = isRompimento ? false : !isParent;
       }
     },
 
-    _parentTaskOptions(currentTaskId = null) {
-      return Store.getOpTasks().filter(t =>
-        t.categoria === Store.currentOpCategory &&
-        t.isParentTask === true &&
-        t.id !== currentTaskId
-      );
-    },
-    _syncParentTaskUi(category = Store.currentOpCategory, currentTask = null) {
-      const wrap = document.getElementById('opParentConfig');
-      const kindEl = document.getElementById('op-task-kind');
-      const parentSelect = document.getElementById('op-parent-task');
-      if (!wrap || !kindEl || !parentSelect) return;
-
-      if (!this._isAtendimentoCategory(category)) {
-        wrap.style.display = 'none';
-        kindEl.value = 'parent';
-        parentSelect.value = '';
-        const responsavelInput = document.getElementById('op-responsavel');
-        const prazoInput = document.getElementById('op-prazo');
-        const regiaoSelect = document.getElementById('op-regiao');
-        [responsavelInput, prazoInput, regiaoSelect].forEach(input => {
-          const group = input?.closest('.form-group');
-          if (group) group.style.display = '';
-          if (input) input.disabled = false;
-        });
-        this._syncCategorySpecificFields(category);
-        return;
-      }
-
-      wrap.style.display = 'flex';
-      wrap.style.flexDirection = 'column';
-      const currentId = currentTask?.id || null;
-      const options = this._parentTaskOptions(currentId);
-      parentSelect.innerHTML = `<option value="">Selecione uma tarefa pai</option>${options.map(t =>
-        `<option value="${t.id}">${t.taskCode || `ATD-${String(t.id).padStart(4, '0')}`} - ${t.titulo}</option>`
-      ).join('')}`;
-
-      if (currentTask) {
-        kindEl.value = currentTask.isParentTask ? 'parent' : 'child';
-        parentSelect.value = currentTask.parentTaskId ? String(currentTask.parentTaskId) : '';
-      } else {
-        kindEl.value = 'parent';
-        parentSelect.value = '';
-      }
-
-      parentSelect.disabled = kindEl.value === 'parent';
-      this._syncCategorySpecificFields(category);
-      this._syncAtendimentoKindFields();
+    _syncParentHidden(currentTask = null) {
+      const hidden = document.getElementById('op-parent-task-id');
+      if (!hidden) return;
+      if (currentTask && currentTask.parentTaskId) hidden.value = String(currentTask.parentTaskId);
+      else if (this._newTaskPreset?.parentTaskId) hidden.value = String(this._newTaskPreset.parentTaskId);
+      else hidden.value = '';
     },
     _nextTaskCode(category = Store.currentOpCategory) {
       const prefixMap = {
@@ -2715,6 +3129,20 @@ const Controllers = {
       const category = preset.category || Store.currentOpCategory;
       document.getElementById('op-titulo').value      = '';
       document.getElementById('op-responsavel').value = '';
+      const chatIdHidden = document.getElementById('op-responsavel-chatid');
+      if (chatIdHidden) chatIdHidden.value = '';
+      const proto = document.getElementById('op-atd-protocolo');
+      const dataEnt = document.getElementById('op-atd-data-entrada');
+      const subp = document.getElementById('op-atd-subprocesso');
+      const dataInst = document.getElementById('op-atd-data-instalacao');
+      const os = document.getElementById('op-atd-ordem-servico');
+      const desc = document.getElementById('op-atd-descricao');
+      if (proto) proto.value = '';
+      if (dataEnt) dataEnt.value = '';
+      if (subp) subp.value = '';
+      if (dataInst) dataInst.value = '';
+      if (os) os.value = '';
+      if (desc) desc.value = '';
       document.getElementById('op-prazo').value       = '';
       document.getElementById('op-prioridade').value  = 'Alta';
       document.getElementById('op-regiao').value      = '';
@@ -2728,31 +3156,36 @@ const Controllers = {
       if (setorCtoInput) setorCtoInput.value = '';
       const setorHint = document.getElementById('op-setor-cto-hint');
       if (setorHint) setorHint.textContent = '';
-      this._syncParentTaskUi(category, null);
+      const parentHidden = document.getElementById('op-parent-task-id');
+      if (parentHidden) parentHidden.value = preset.parentTaskId ? String(preset.parentTaskId) : '';
+      // Se estiver criando subtarefa, puxa a região do pai por padrão.
+      if (preset.parentTaskId) {
+        const parent = Store.findOpTask(Number(preset.parentTaskId));
+        if (parent?.regiao) document.getElementById('op-regiao').value = parent.regiao;
+      }
+      this._syncParentHidden(null);
       this._syncCategorySpecificFields(category);
       this._newTaskPreset = { ...preset };
-      if (this._isAtendimentoCategory(category)) {
-        const kindEl = document.getElementById('op-task-kind');
-        const parentSelect = document.getElementById('op-parent-task');
-        if (kindEl && preset.kind) kindEl.value = preset.kind;
-        if (parentSelect) {
-          parentSelect.disabled = (kindEl?.value || 'parent') === 'parent';
-          if (preset.parentTaskId) parentSelect.value = String(preset.parentTaskId);
-        }
-      }
+      this._syncAtendimentoKindFields();
     },
 
     _validate() {
       const titulo      = document.getElementById('op-titulo').value.trim();
       const responsavel = document.getElementById('op-responsavel').value.trim();
+      const responsavelChatId = document.getElementById('op-responsavel-chatid')?.value?.trim() || '';
       const prazo       = document.getElementById('op-prazo').value;
-      const taskKind = document.getElementById('op-task-kind')?.value || 'parent';
-      const isParentTask = taskKind === 'parent';
-      const parentTaskIdRaw = document.getElementById('op-parent-task')?.value || '';
-      const parentTaskId = parentTaskIdRaw ? Number(parentTaskIdRaw) : null;
       const existing = Store.editingOpTaskId ? Store.findOpTask(Store.editingOpTaskId) : null;
       const category = existing?.categoria || Store.currentOpCategory;
+      const parentTaskIdRaw = document.getElementById('op-parent-task-id')?.value || '';
+      const parentTaskId = parentTaskIdRaw ? Number(parentTaskIdRaw) : (existing?.parentTaskId ? Number(existing.parentTaskId) : null);
+      const isParentTask = !parentTaskId;
       const regiao = document.getElementById('op-regiao').value;
+      const protocoloRaw = document.getElementById('op-atd-protocolo')?.value?.trim() || '';
+      const dataEntradaRaw = document.getElementById('op-atd-data-entrada')?.value || '';
+      const subProcessoRaw = document.getElementById('op-atd-subprocesso')?.value?.trim() || '';
+      const dataInstalacaoRaw = document.getElementById('op-atd-data-instalacao')?.value || '';
+      const ordemServicoRaw = document.getElementById('op-atd-ordem-servico')?.value?.trim() || '';
+      const descAtdRaw = document.getElementById('op-atd-descricao')?.value?.trim() || '';
       const taskCode = existing?.taskCode || this._nextTaskCode(category);
       const selectedParent = parentTaskId ? Store.findOpTask(parentTaskId) : null;
       const coordsRaw = document.getElementById('op-coords')?.value.trim() || '';
@@ -2760,10 +3193,12 @@ const Controllers = {
       const clientesAfetadosRaw = document.getElementById('op-clientes-afetados')?.value.trim() || '';
       const setorCto = document.getElementById('op-setor-cto')?.value.trim() || '';
       const isRompimento = this._isRompimentoCategory(category);
+      const isAtdParentOnly = this._isAtendimentoClienteCategory(category) && isParentTask && !isRompimento;
+      const isAtdChildOnly = this._isAtendimentoClienteCategory(category) && !isParentTask && !isRompimento;
 
       if (!isRompimento && !titulo)      { ToastService.show('Informe o título da tarefa', 'danger');       return null; }
-      if (isParentTask && !responsavel) { ToastService.show('Informe o responsável pela tarefa', 'danger'); return null; }
-      if (!isRompimento && isParentTask && !prazo)       { ToastService.show('Informe a data de vencimento', 'danger');      return null; }
+      if (!isAtdParentOnly && isParentTask && !responsavel) { ToastService.show('Informe o responsável pela tarefa', 'danger'); return null; }
+      if (!isAtdParentOnly && !isRompimento && isParentTask && !prazo)       { ToastService.show('Informe a data de vencimento', 'danger');      return null; }
       if (!isRompimento && !document.getElementById('op-prioridade').value) { ToastService.show('Informe a prioridade', 'danger'); return null; }
       if (isParentTask && !regiao)      { ToastService.show('Informe a região', 'danger');                   return null; }
       if (isRompimento && !setorCto) {
@@ -2776,24 +3211,37 @@ const Controllers = {
         ToastService.show('Informe uma quantidade de clientes afetados válida', 'danger');
         return null;
       }
-      if (this._isAtendimentoCategory(category) && !isParentTask && !parentTaskId) {
-        ToastService.show('Selecione a tarefa pai para criar uma tarefa filha', 'danger');
+      if (this._isAtendimentoCategory(category) && !isParentTask && !selectedParent) {
+        ToastService.show('Subtarefa inválida: crie pela tarefa pai', 'danger');
         return null;
+      }
+
+      if (isAtdParentOnly) {
+        if (!protocoloRaw) { ToastService.show('Informe o protocolo', 'danger'); return null; }
+        if (!dataEntradaRaw) { ToastService.show('Informe a data de entrada', 'danger'); return null; }
+        if (!subProcessoRaw) { ToastService.show('Informe o SubProcesso', 'danger'); return null; }
+      }
+
+      if (isAtdChildOnly) {
+        if (!regiao) { ToastService.show('Informe a região', 'danger'); return null; }
+        if (!descAtdRaw) { ToastService.show('Informe a descrição da tarefa', 'danger'); return null; }
       }
       const presetStatus = this._newTaskPreset?.status || null;
       const defaultStatus = this._isAtendimentoCategory(category)
-        ? (isParentTask ? (presetStatus || 'Backlog') : 'Em andamento')
+        ? (isParentTask ? (presetStatus || 'Backlog') : 'A iniciar')
         : 'Criada';
       const currentStatus = existing?.status || defaultStatus;
       const normalizedStatus = (!isParentTask && this._isAtendimentoCategory(category) && (currentStatus === 'Backlog' || currentStatus === 'Criada'))
-        ? 'Em andamento'
+        ? 'A iniciar'
         : currentStatus;
       const finalTitulo = isRompimento
         ? `Rompimento - ${autoAddress}`
         : titulo;
       const finalPrazo = isRompimento
         ? Utils.todayIso()
-        : (isParentTask ? prazo : (selectedParent?.prazo || existing?.prazo || ''));
+        : (isAtdParentOnly
+          ? (dataEntradaRaw || Utils.todayIso())
+          : (isParentTask ? prazo : (selectedParent?.prazo || existing?.prazo || '')));
       const finalPrioridade = isRompimento ? 'Alta' : document.getElementById('op-prioridade').value;
       const finalDescricao = isRompimento ? `Coordenadas: ${coordsRaw} | Local: ${autoAddress}` : '';
       const setorField = isRompimento
@@ -2802,19 +3250,51 @@ const Controllers = {
       const regiaoField = isRompimento
         ? regiao
         : (isParentTask ? regiao : (selectedParent?.regiao || selectedParent?.setor || existing?.regiao || ''));
+      const finalResponsavelChatId = isParentTask
+        ? responsavelChatId
+        : (selectedParent?.responsavelChatId || existing?.responsavelChatId || '');
+      const finalProtocolo = (this._isAtendimentoClienteCategory(category) && isParentTask)
+        ? protocoloRaw
+        : (selectedParent?.protocolo || existing?.protocolo || '');
+      const finalDataEntrada = (this._isAtendimentoClienteCategory(category) && isParentTask)
+        ? dataEntradaRaw
+        : (selectedParent?.dataEntrada || existing?.dataEntrada || '');
+      const finalSubProcesso = (this._isAtendimentoClienteCategory(category) && isParentTask)
+        ? subProcessoRaw
+        : (selectedParent?.subProcesso || existing?.subProcesso || '');
+      const finalDataInstalacao = (this._isAtendimentoClienteCategory(category) && isParentTask)
+        ? dataInstalacaoRaw
+        : (selectedParent?.dataInstalacao || existing?.dataInstalacao || '');
+      const finalOrdemServico = (this._isAtendimentoClienteCategory(category) && !isParentTask)
+        ? ordemServicoRaw
+        : (selectedParent?.ordemServico || existing?.ordemServico || '');
+      const finalResponsavel = isAtdParentOnly
+        ? getSignedUserName()
+        : (isParentTask
+          ? responsavel
+          : (responsavel || selectedParent?.responsavel || existing?.responsavel || getSignedUserName()));
+      const finalDescricaoAtd = (this._isAtendimentoClienteCategory(category) && !isParentTask)
+        ? descAtdRaw
+        : finalDescricao;
       return {
         taskCode,
         titulo: finalTitulo,
-        responsavel: isParentTask ? responsavel : (selectedParent?.responsavel || existing?.responsavel || ''),
+        responsavel: finalResponsavel,
+        responsavelChatId: finalResponsavelChatId,
         setor: setorField,
         regiao: regiaoField,
+        protocolo: finalProtocolo,
+        dataEntrada: finalDataEntrada,
+        subProcesso: finalSubProcesso,
+        dataInstalacao: finalDataInstalacao,
+        ordemServico: finalOrdemServico,
         clientesAfetados: isRompimento ? clientesAfetadosRaw : '',
         coordenadas: isRompimento ? coordsRaw : '',
         localizacaoTexto: isRompimento ? autoAddress : '',
         categoria:  category,
         prazo: finalPrazo,
         prioridade: finalPrioridade,
-        descricao:  finalDescricao,
+        descricao:  finalDescricaoAtd,
         status:     normalizedStatus,
         isParentTask: this._isAtendimentoCategory(category) ? isParentTask : false,
         parentTaskId: this._isAtendimentoCategory(category) ? (isParentTask ? null : parentTaskId) : null,
@@ -2828,6 +3308,9 @@ const Controllers = {
       const deleteBtn = document.getElementById('deleteOpTaskBtn');
       if (deleteBtn) deleteBtn.style.display = 'none';
       this._clearForm(preset);
+      const hidden = document.getElementById('op-parent-task-id');
+      if (hidden) hidden.value = preset.parentTaskId ? String(preset.parentTaskId) : '';
+      this._syncAtendimentoKindFields();
       ModalService.open('opTaskModal');
     },
 
@@ -2838,9 +3321,25 @@ const Controllers = {
       document.getElementById('opTaskModalTitle').textContent = 'Editar tarefa';
       document.getElementById('op-titulo').value      = task.titulo;
       document.getElementById('op-responsavel').value = task.responsavel;
+      const chatIdHidden = document.getElementById('op-responsavel-chatid');
+      if (chatIdHidden) chatIdHidden.value = String(task.responsavelChatId || '').trim();
+      const proto = document.getElementById('op-atd-protocolo');
+      const dataEnt = document.getElementById('op-atd-data-entrada');
+      const subp = document.getElementById('op-atd-subprocesso');
+      const dataInst = document.getElementById('op-atd-data-instalacao');
+      const os = document.getElementById('op-atd-ordem-servico');
+      const desc = document.getElementById('op-atd-descricao');
+      if (proto) proto.value = String(task.protocolo || '').trim();
+      if (dataEnt) dataEnt.value = String(task.dataEntrada || '').trim();
+      if (subp) subp.value = String(task.subProcesso || '').trim();
+      if (dataInst) dataInst.value = String(task.dataInstalacao || '').trim();
+      if (os) os.value = String(task.ordemServico || '').trim();
+      if (desc) desc.value = String(task.descricao || '').trim();
       document.getElementById('op-prazo').value       = task.prazo || '';
       document.getElementById('op-prioridade').value  = task.prioridade;
       document.getElementById('op-regiao').value      = task.regiao || '';
+      const hidden = document.getElementById('op-parent-task-id');
+      if (hidden) hidden.value = task.parentTaskId ? String(task.parentTaskId) : '';
       const setorCtoInput = document.getElementById('op-setor-cto');
       if (setorCtoInput) setorCtoInput.value = (task.setor || '').toUpperCase();
       const setorHintEdit = document.getElementById('op-setor-cto-hint');
@@ -2856,9 +3355,9 @@ const Controllers = {
       const deleteBtn = document.getElementById('deleteOpTaskBtn');
       if (deleteBtn) deleteBtn.style.display = 'inline-flex';
       this._newTaskPreset = null;
-      this._syncParentTaskUi(task.categoria, task);
       this._syncCategorySpecificFields(task.categoria);
       this._syncAtendimentoKindFields();
+      this._syncParentHidden(task);
       ModalService.open('opTaskModal');
     },
 
@@ -2888,13 +3387,20 @@ const Controllers = {
     save() {
       const data = this._validate();
       if (!data) return;
+      let savedTask = null;
 
       if (Store.editingOpTaskId) {
-        Store.updateOpTask(Store.editingOpTaskId, data);
+        savedTask = Store.updateOpTask(Store.editingOpTaskId, data);
         ToastService.show('Tarefa atualizada com sucesso', 'success');
       } else {
-        Store.addOpTask(data);
+        savedTask = Store.addOpTask(data);
         ToastService.show('Tarefa criada com sucesso', 'success');
+        // Se já nasce em um status notificável, dispara webhook imediatamente.
+        const event = OpTaskService._statusToEvent[data.status];
+        if (event && savedTask) {
+          const categoryLabel = OpTaskService._categoryLabels[savedTask.categoria] || savedTask.categoria;
+          WebhookService.send(event, savedTask, categoryLabel);
+        }
       }
 
       // Atualiza categoria ativa para a que foi salva
@@ -2912,17 +3418,18 @@ const Controllers = {
     },
 
     init() {
+      this._syncTecnicosDatalist();
+      document.getElementById('op-responsavel')?.addEventListener('input', () => this._syncSelectedTecnicoChatId());
+      document.getElementById('op-regiao')?.addEventListener('change', () => {
+        this._syncTecnicosDatalist();
+        this._syncSelectedTecnicoChatId();
+      });
+
       document.getElementById('openOpTaskModalBtn').addEventListener('click', () => this.openNewModal());
       document.getElementById('saveOpTaskBtn').addEventListener('click', () => this.save());
       document.getElementById('deleteOpTaskBtn')?.addEventListener('click', () => this.deleteTask());
-      document.getElementById('op-task-kind')?.addEventListener('change', e => {
-        const parentSelect = document.getElementById('op-parent-task');
-        if (!parentSelect) return;
-        const isParent = e.target.value === 'parent';
-        parentSelect.disabled = isParent;
-        if (isParent) parentSelect.value = '';
-        this._syncAtendimentoKindFields();
-      });
+      // Segurança: se alguém abrir modal de subtarefa sem pai, limpa o hidden.
+      document.getElementById('op-parent-task-id')?.addEventListener('input', () => this._syncAtendimentoKindFields());
       document.getElementById('op-coords')?.addEventListener('input', e => {
         const value = e.target.value;
         clearTimeout(this._coordsLookupTimer);
@@ -2988,6 +3495,11 @@ const Controllers = {
         Store.opTaskIdSearch = e.target.value;
         UI.renderKanban();
       });
+
+      document.getElementById('opDateSortFilter')?.addEventListener('change', e => {
+        Store.opDateSort = String(e.target.value || 'all');
+        UI.renderKanban();
+      });
     },
   },
 
@@ -3003,7 +3515,10 @@ const Controllers = {
           tab.classList.add('active');
           tab.setAttribute('aria-selected', 'true');
           Store.currentOpCategory = tab.dataset.category;
-          Controllers.opTask._syncParentTaskUi(Store.currentOpCategory, null);
+          // Garante estado "pai" ao trocar de categoria (filhas só via botão da lista pai)
+          const hidden = document.getElementById('op-parent-task-id');
+          if (hidden) hidden.value = '';
+          Controllers.opTask._syncAtendimentoKindFields?.();
           UI.renderKanban();
         });
       });
@@ -3052,10 +3567,47 @@ const Controllers = {
 
   /* ── Reports ──────────────────────────────────────────── */
   reports: {
+    _layoutKey: 'planner.reports.layout.v1',
+    _applyReportLayoutOrder() {
+      const grid = document.getElementById('reportLayoutGrid');
+      if (!grid) return;
+      let order = [];
+      try {
+        const raw = localStorage.getItem(this._layoutKey);
+        if (raw) order = JSON.parse(raw);
+      } catch {
+        order = [];
+      }
+      if (!Array.isArray(order) || !order.length) return;
+      const nodes = new Map();
+      grid.querySelectorAll('[data-report-widget]').forEach(el => {
+        nodes.set(el.getAttribute('data-report-widget'), el);
+      });
+      const frag = document.createDocumentFragment();
+      order.forEach(id => {
+        const el = nodes.get(id);
+        if (el) frag.appendChild(el);
+      });
+      // Mantém os que não estavam no saved order (novos widgets)
+      nodes.forEach((el, id) => {
+        if (!order.includes(id)) frag.appendChild(el);
+      });
+      grid.appendChild(frag);
+    },
+    _persistReportLayoutOrder() {
+      const grid = document.getElementById('reportLayoutGrid');
+      if (!grid) return;
+      const order = Array.from(grid.querySelectorAll('[data-report-widget]'))
+        .map(el => el.getAttribute('data-report-widget'))
+        .filter(Boolean);
+      try { localStorage.setItem(this._layoutKey, JSON.stringify(order)); } catch {}
+    },
     _exportCsv() {
       const period = document.getElementById('reportPeriodFilter').value;
       const category = document.getElementById('reportCategoryFilter').value;
-      const tasks = ReportsService.getFilteredTasks(period, category);
+      const region = document.getElementById('reportRegionFilter')?.value || 'all';
+      const tech = document.getElementById('reportTechFilter')?.value || 'all';
+      const tasks = ReportsService.getFilteredTasks(period, category, { region, tech });
       const csv = ReportsService.toCsv(tasks);
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
@@ -3072,15 +3624,72 @@ const Controllers = {
     init() {
       const periodEl = document.getElementById('reportPeriodFilter');
       const categoryEl = document.getElementById('reportCategoryFilter');
+      const regionEl = document.getElementById('reportRegionFilter');
+      const techEl = document.getElementById('reportTechFilter');
       const refreshEl = document.getElementById('reportRefreshBtn');
       const exportEl = document.getElementById('reportExportBtn');
-      if (!periodEl || !categoryEl || !refreshEl || !exportEl) return;
+      if (!periodEl || !categoryEl || !regionEl || !techEl || !refreshEl || !exportEl) return;
 
-      [periodEl, categoryEl].forEach(el => {
+      [periodEl, categoryEl, regionEl, techEl].forEach(el => {
         el.addEventListener('change', () => UI.renderReportsPage());
       });
       refreshEl.addEventListener('click', () => UI.renderReportsPage());
       exportEl.addEventListener('click', () => this._exportCsv());
+
+      // Drag & drop do layout
+      const grid = document.getElementById('reportLayoutGrid');
+      if (grid) {
+        this._applyReportLayoutOrder();
+        let draggingEl = null;
+
+        const setDropTarget = (target, on) => {
+          if (!target) return;
+          target.classList.toggle('drop-target', Boolean(on));
+        };
+
+        grid.addEventListener('dragstart', e => {
+          const el = e.target.closest('[data-report-widget]');
+          if (!el) return;
+          draggingEl = el;
+          el.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          try { e.dataTransfer.setData('text/plain', el.getAttribute('data-report-widget') || ''); } catch {}
+        });
+
+        grid.addEventListener('dragend', () => {
+          if (draggingEl) draggingEl.classList.remove('dragging');
+          draggingEl = null;
+          grid.querySelectorAll('.drop-target').forEach(n => n.classList.remove('drop-target'));
+          this._persistReportLayoutOrder();
+        });
+
+        grid.addEventListener('dragover', e => {
+          if (!draggingEl) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          const over = e.target.closest('[data-report-widget]');
+          if (!over || over === draggingEl) return;
+          setDropTarget(over, true);
+        });
+
+        grid.addEventListener('dragleave', e => {
+          const over = e.target.closest('[data-report-widget]');
+          if (!over) return;
+          setDropTarget(over, false);
+        });
+
+        grid.addEventListener('drop', e => {
+          if (!draggingEl) return;
+          e.preventDefault();
+          const over = e.target.closest('[data-report-widget]');
+          if (!over || over === draggingEl) return;
+
+          const rect = over.getBoundingClientRect();
+          const before = (e.clientY - rect.top) < rect.height / 2;
+          if (before) grid.insertBefore(draggingEl, over);
+          else grid.insertBefore(draggingEl, over.nextSibling);
+        });
+      }
     },
   },
 
@@ -3162,13 +3771,133 @@ const Controllers = {
     },
   },
 
+  /* ── Avatar de Perfil ─────────────────────────────────── */
+  profileAvatar: {
+    _buildAvatarDataUrl(topColor, bottomColor, label) {
+      const safeLabel = String(label || 'BP').trim().slice(0, 2).toUpperCase() || 'BP';
+      const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">` +
+        `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">` +
+        `<stop offset="0%" stop-color="${topColor}"/><stop offset="100%" stop-color="${bottomColor}"/></linearGradient></defs>` +
+        `<rect width="120" height="120" rx="60" fill="url(#g)"/>` +
+        `<text x="60" y="67" text-anchor="middle" font-size="42" font-family="Arial, sans-serif" font-weight="700" fill="#ffffff">${safeLabel}</text>` +
+        `</svg>`;
+      return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+    },
+    _options() {
+      const base = [
+        { id: 'verde', label: 'Verde', url: this._buildAvatarDataUrl('#22c55e', '#16a34a', 'BP') },
+        { id: 'azul', label: 'Azul', url: this._buildAvatarDataUrl('#3b82f6', '#1d4ed8', 'BP') },
+        { id: 'roxo', label: 'Roxo', url: this._buildAvatarDataUrl('#8b5cf6', '#6d28d9', 'BP') },
+        { id: 'laranja', label: 'Laranja', url: this._buildAvatarDataUrl('#f97316', '#c2410c', 'BP') },
+        { id: 'cinza', label: 'Grafite', url: this._buildAvatarDataUrl('#64748b', '#334155', 'BP') },
+      ];
+      const extraRaw = window.APP_CONFIG && Array.isArray(window.APP_CONFIG.avatarOptions)
+        ? window.APP_CONFIG.avatarOptions
+        : [];
+      const extra = extraRaw
+        .filter(i => i && typeof i.url === 'string' && i.url.trim())
+        .map((i, idx) => ({
+          id: `ext-${idx + 1}`,
+          label: String(i.label || `Avatar ${idx + 1}`).trim(),
+          url: String(i.url).trim(),
+        }));
+      return [...AVATAR_ASSET_OPTIONS, ...base, ...extra];
+    },
+    _saveForCurrentUser(url) {
+      const finalUrl = String(url || '').trim();
+      const logged = Controllers.auth._isAuthenticated();
+      const userKey = logged ? getSessionUserKey() : '';
+      if (logged && userKey) {
+        const byUser = readUserAvatarMap();
+        byUser[userKey] = finalUrl;
+        try {
+          localStorage.setItem(USER_AVATAR_MAP_KEY, JSON.stringify(byUser));
+        } catch {}
+      } else {
+        try {
+          localStorage.setItem(GUEST_AVATAR_KEY, finalUrl);
+        } catch {}
+      }
+      Controllers.auth._syncSidebarUser();
+    },
+    _removeForCurrentUser() {
+      const logged = Controllers.auth._isAuthenticated();
+      const userKey = logged ? getSessionUserKey() : '';
+      if (logged && userKey) {
+        const byUser = readUserAvatarMap();
+        delete byUser[userKey];
+        try {
+          localStorage.setItem(USER_AVATAR_MAP_KEY, JSON.stringify(byUser));
+        } catch {}
+      } else {
+        try {
+          localStorage.removeItem(GUEST_AVATAR_KEY);
+        } catch {}
+      }
+      Controllers.auth._syncSidebarUser();
+    },
+    render() {
+      const root = document.getElementById('avatarPickerGrid');
+      const currentWrap = document.getElementById('avatarPickerCurrent');
+      const removeBtn = document.getElementById('removeAvatarBtn');
+      if (!root || !currentWrap) return;
+      const options = this._options();
+      const current = resolveSidebarAvatarUrl();
+      const logged = Controllers.auth._isAuthenticated();
+      const userKey = getSessionUserKey();
+      const byUser = readUserAvatarMap();
+      const hasUserCustom = Boolean(logged && userKey && String(byUser[userKey] || '').trim());
+      const hasGuestCustom = Boolean(!logged && readGuestAvatar());
+      const hasCustom = hasUserCustom || hasGuestCustom;
+
+      currentWrap.innerHTML = current
+        ? `<img src="${current}" alt="Avatar atual" class="avatar-picker-current-img" />`
+        : `<span class="avatar-picker-current-empty">Sem avatar</span>`;
+      if (removeBtn) removeBtn.disabled = !hasCustom;
+
+      root.innerHTML = options.map(opt => `
+        <button type="button" class="avatar-option ${current === opt.url ? 'is-selected' : ''}" data-avatar-option="${opt.id}">
+          <img src="${opt.url}" alt="${opt.label}" class="avatar-option-img" loading="lazy" decoding="async"/>
+          <span class="avatar-option-label">${opt.label}</span>
+        </button>
+      `).join('');
+    },
+    init() {
+      const root = document.getElementById('avatarPickerGrid');
+      if (!root) return;
+
+      root.addEventListener('click', e => {
+        const btn = e.target.closest('[data-avatar-option]');
+        if (!btn) return;
+        const id = String(btn.dataset.avatarOption || '');
+        const opt = this._options().find(i => i.id === id);
+        if (!opt) return;
+        this._saveForCurrentUser(opt.url);
+        this.render();
+        ToastService.show('Avatar atualizado com sucesso.', 'success');
+      });
+
+      document.getElementById('removeAvatarBtn')?.addEventListener('click', () => {
+        this._removeForCurrentUser();
+        this.render();
+        ToastService.show('Avatar removido. Voltou para o padrão.', 'info');
+      });
+
+      this.render();
+    },
+  },
+
   /* ── Webhook ──────────────────────────────────────────── */
   webhook: {
     _syncBanner() {
       const config  = Store.getWebhookConfig();
       const banner  = document.getElementById('webhookBanner');
       if (!banner) return;
-      if (config.url) {
+      const anyRegion = config?.urlsByRegion && typeof config.urlsByRegion === 'object'
+        ? Object.values(config.urlsByRegion).some(v => typeof v === 'string' && v.trim())
+        : false;
+      if (String(config?.url || '').trim() || anyRegion) {
         banner.classList.add('visible');
       } else {
         banner.classList.remove('visible');
@@ -3178,24 +3907,39 @@ const Controllers = {
     init() {
       document.getElementById('openWebhookBtn')?.addEventListener('click', () => {
         const config = Store.getWebhookConfig();
-        document.getElementById('f-webhookUrl').value    = config.url;
+        const byRegion = (config && config.urlsByRegion && typeof config.urlsByRegion === 'object') ? config.urlsByRegion : {};
+        document.getElementById('f-webhookUrl-goval').value      = String(byRegion.GOVAL || '').trim();
+        document.getElementById('f-webhookUrl-vale').value       = String(byRegion.VALE_DO_ACO || '').trim();
+        document.getElementById('f-webhookUrl-caratinga').value  = String(byRegion.CARATINGA || '').trim();
+        document.getElementById('f-webhookUrl-backup').value     = String(byRegion.BACKUP || '').trim();
         document.getElementById('ev-andamento').checked  = config.events.andamento;
         document.getElementById('ev-concluida').checked  = config.events.concluida;
         document.getElementById('ev-finalizada').checked = config.events.finalizada;
         ModalService.open('webhookModal');
       });
 
-      document.getElementById('testWebhookBtn').addEventListener('click', async () => {
-        const url = document.getElementById('f-webhookUrl').value.trim();
+      const test = async (id) => {
+        const url = document.getElementById(id)?.value?.trim();
         if (!url) { ToastService.show('Insira a URL do webhook antes de testar', 'danger'); return; }
         await WebhookService.sendTest(url);
-      });
+      };
+      document.getElementById('testWebhookBtn-goval')?.addEventListener('click', async () => test('f-webhookUrl-goval'));
+      document.getElementById('testWebhookBtn-vale')?.addEventListener('click', async () => test('f-webhookUrl-vale'));
+      document.getElementById('testWebhookBtn-caratinga')?.addEventListener('click', async () => test('f-webhookUrl-caratinga'));
+      document.getElementById('testWebhookBtn-backup')?.addEventListener('click', async () => test('f-webhookUrl-backup'));
 
       document.getElementById('saveWebhookBtn').addEventListener('click', async () => {
-        const url = document.getElementById('f-webhookUrl').value.trim();
-        if (!url) { ToastService.show('Insira a URL do webhook', 'danger'); return; }
+        const goval = document.getElementById('f-webhookUrl-goval')?.value?.trim() || '';
+        const vale  = document.getElementById('f-webhookUrl-vale')?.value?.trim() || '';
+        const cara  = document.getElementById('f-webhookUrl-caratinga')?.value?.trim() || '';
+        const backup = document.getElementById('f-webhookUrl-backup')?.value?.trim() || '';
+        if (!goval || !vale || !cara || !backup) {
+          ToastService.show('Preencha as 4 URLs (Goval, Vale do Aço, Caratinga e Backup)', 'danger');
+          return;
+        }
         const res = await Store.setWebhookConfig({
-          url,
+          url: goval,
+          urlsByRegion: { GOVAL: goval, VALE_DO_ACO: vale, CARATINGA: cara, BACKUP: backup },
           events: {
             andamento:  document.getElementById('ev-andamento').checked,
             concluida:  document.getElementById('ev-concluida').checked,
@@ -3214,7 +3958,7 @@ const Controllers = {
       });
 
       document.getElementById('disconnectWebhook')?.addEventListener('click', async () => {
-        const res = await Store.setWebhookConfig({ url: '' });
+        const res = await Store.setWebhookConfig({ url: '', urlsByRegion: {} });
         this._syncBanner();
         if (Store.isRemoteApiEnabled() && (!res || !res.ok)) {
           ToastService.show('Desconectado aqui; não atualizou no servidor.', 'warning');
@@ -3296,6 +4040,7 @@ async function initApp() {
   Controllers.opFolders.init();
   Controllers.reports.init();
   Controllers.calendar.init();
+  Controllers.profileAvatar.init();
   Controllers.webhook.init();
   Controllers.notes.init();
   Controllers.globalModal.init();
