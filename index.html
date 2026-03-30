@@ -10,7 +10,17 @@
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;500;600;700;800&display=swap"/>
-  <link rel="stylesheet" href="./src/css/main.css"/>
+  <script src="./src/js/config.js"></script>
+  <script>
+    (function () {
+      var v = window.APP_CONFIG && window.APP_CONFIG.appBuild ? String(window.APP_CONFIG.appBuild) : '';
+      var qs = v ? ('?v=' + encodeURIComponent(v)) : '';
+      var l = document.createElement('link');
+      l.rel = 'stylesheet';
+      l.href = './src/css/main.css' + qs;
+      document.head.appendChild(l);
+    })();
+  </script>
 </head>
 <body class="auth-locked">
 
@@ -107,6 +117,14 @@
         <span class="nav-label">Relatórios</span>
       </button>
 
+      <button type="button" class="nav-item" data-page="chat">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+        </svg>
+        <span class="nav-label">Chat equipe</span>
+        <span class="nav-badge" id="nav-chat-badge" style="display:none" aria-label="Novas mensagens no chat"></span>
+      </button>
+
       <button type="button" class="nav-item" data-page="config">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
           <circle cx="12" cy="12" r="3"/>
@@ -167,12 +185,16 @@
           </svg>
           <span id="topbarDate">—</span>
         </div>
-        <button class="icon-btn" title="Notificações" aria-label="Notificações">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-            <path d="M13.73 21a2 2 0 01-3.46 0"/>
-          </svg>
-        </button>
+        <div class="topbar-notif-wrap" id="topbarNotifWrap">
+          <button type="button" class="icon-btn topbar-notif-btn" id="topbarNotifBtn" title="Notificações" aria-label="Notificações" aria-expanded="false" aria-haspopup="true" aria-controls="topbarNotifPanel">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 01-3.46 0"/>
+            </svg>
+            <span class="topbar-notif-badge" id="topbarNotifBadge" hidden>0</span>
+          </button>
+          <div class="topbar-notif-panel" id="topbarNotifPanel" role="menu" aria-label="Menções no chat" hidden></div>
+        </div>
         <button class="icon-btn" title="Tela cheia" aria-label="Tela cheia" onclick="document.documentElement.requestFullscreen?.()">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
@@ -694,6 +716,38 @@
         </div>
       </section>
 
+      <!-- ═══ PAGE: CHAT EQUIPE ═══ -->
+      <section class="page" id="page-chat" aria-label="Chat da equipe">
+        <div class="team-chat-wrap">
+          <div class="panel team-chat-panel" role="region" aria-label="Mensagens">
+            <div class="panel-header">
+              <span class="panel-title">Mensagens</span>
+              <span class="panel-title-hint">Atualização automática · @menções · emojis · links · até 100 mensagens</span>
+            </div>
+            <p class="team-chat-offline" id="teamChatOffline" hidden></p>
+            <div class="team-chat-list-wrap">
+              <button type="button" class="team-chat-jump-bottom sm-btn" id="teamChatJumpBottom" hidden>Novas mensagens ↓</button>
+              <div class="team-chat-list" id="teamChatList" tabindex="0" aria-live="polite"></div>
+            </div>
+            <div class="team-chat-compose">
+              <div class="team-chat-compose-main">
+                <label class="sr-only" for="teamChatInput">Sua mensagem</label>
+                <div class="team-chat-input-row">
+                  <button type="button" class="icon-btn team-chat-emoji-btn" id="teamChatEmojiBtn" title="Emojis" aria-label="Abrir seletor de emojis" aria-expanded="false" aria-controls="teamChatEmojiPanel">😊</button>
+                  <textarea id="teamChatInput" class="team-chat-input" rows="2" maxlength="2000" placeholder="Mensagem… Use @login para mencionar alguém da equipe" autocomplete="off"></textarea>
+                </div>
+                <div class="team-chat-emoji-panel" id="teamChatEmojiPanel" role="group" aria-label="Emojis" hidden>
+                  <div class="team-chat-emoji-tabs" id="teamChatEmojiTabs" role="tablist"></div>
+                  <div class="team-chat-emoji-grid" id="teamChatEmojiGrid" role="listbox"></div>
+                </div>
+                <div class="team-chat-mention-suggest" id="teamChatMentionSuggest" role="listbox" aria-label="Mencionar usuário" hidden></div>
+              </div>
+              <button type="button" class="primary-btn" id="teamChatSend">Enviar</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- ═══ PAGE: CONFIG (placeholder) ═══ -->
       <section class="page" id="page-config" aria-label="Configurações">
         <div class="panel" style="padding:20px">
@@ -1136,8 +1190,14 @@
 <!-- Toasts -->
 <div class="toast-container" id="toastContainer" role="status" aria-live="polite" aria-atomic="false"></div>
 
-<!-- Opcional: copie config.example.js para config.js e carregue antes do main (URLs / credenciais). -->
-<script src="./src/js/config.js"></script>
-<script src="./src/js/main.js"></script>
+  <script>
+    (function () {
+      var v = window.APP_CONFIG && window.APP_CONFIG.appBuild ? String(window.APP_CONFIG.appBuild) : '';
+      var qs = v ? ('?v=' + encodeURIComponent(v)) : '';
+      var s = document.createElement('script');
+      s.src = './src/js/main.js' + qs;
+      document.body.appendChild(s);
+    })();
+  </script>
 </body>
 </html>

@@ -29,17 +29,20 @@ Ex.: public_html → tudo abaixo dentro de public_html.
     .htaccess
     credentials.php            (copie de credentials.example.php)
     db.php, bootstrap.php, login.php, config.php
-    tasks.php, op_tasks.php, op_task_image.php, calendar_notes.php, op_desc_images.inc.php
+    tasks.php, op_tasks.php, op_task_image.php, calendar_notes.php, chat.php, op_desc_images.inc.php
 
 Opcional no api/: migrations/, schema.sql (phpMyAdmin / backup).
 
-NÃO ENVIE (Vercel/Node): api/config.js, api/bootstrap.js, api/tasks.js, api/op-tasks.js,
-api/calendar-notes.js, api/_store.js, pasta lib/ se for só Vercel.
+NÃO ENVIE (não são PHP): api/config.js, api/bootstrap.js, api/tasks.js, api/op-tasks.js,
+api/calendar-notes.js, api/_store.js e pasta lib/ (artefatos opcionais fora da HostGator).
 
 Banco: importe api/schema.sql (ou migrations) no phpMyAdmin.
 
 Teste: https://SEUDOMINIO/.../api/bootstrap.php → JSON ok: true
 
 Se não estiver na raiz do domínio, em config.js: apiBaseUrl: 'https://dominio/pasta/api'
+
+A cada publicação nova: em src/js/config.js altere appBuild (ex. 2026-03-30-2). Isso limpa caches
+locais antigos e força novo main.js/main.css no navegador (via index.html).
 
 ══════════════════════════════════════════════════════════════════════════════

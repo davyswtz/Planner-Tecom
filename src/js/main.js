@@ -146,6 +146,11 @@ const ThemeService = {
  */
 const SIDEBAR_USER_AVATAR_URL = './assets/sidebar-mascote-projetos.png';
 const SESSION_USER_KEY = 'planner.session.userKey.v1';
+/** Última página do menu (sessionStorage) — após F5 ou novo login volta ao chat etc. */
+const NAV_LAST_PAGE_KEY = 'planner.nav.lastPage.v1';
+const CHAT_LAST_SEEN_ID_KEY = 'planner.chat.lastSeenId.v1';
+const CHAT_MENTION_INBOX_KEY = 'planner.chat.mentionInbox.v1';
+const CHAT_MENTION_HANDLED_IDS_KEY = 'planner.chat.mentionHandledIds.v1';
 const USER_AVATAR_MAP_KEY = 'planner.userAvatarByUser.v1';
 const GUEST_AVATAR_KEY = 'planner.avatar.guest.v1';
 const AVATAR_ASSET_OPTIONS = [
@@ -205,6 +210,47 @@ function resolveSidebarAvatarUrl() {
   if (typeof fromConfig === 'string' && fromConfig.trim()) return fromConfig.trim();
   return typeof SIDEBAR_USER_AVATAR_URL === 'string' ? SIDEBAR_USER_AVATAR_URL.trim() : '';
 }
+
+/** Sincronizado com `APP_CONFIG.appBuild` em `config.js`. A cada deploy novo, limpa caches do app. */
+const CLIENT_BUNDLE_STORAGE_KEY = 'planner.clientBundle.v1';
+const DEPLOY_CACHE_KEEP_KEYS = new Set([
+  'planner.session.v1',
+  'planner.session.displayName.v1',
+  'planner.session.userKey.v1',
+  'planner.theme.v1',
+]);
+
+function applyDeployCacheReset() {
+  const build = String((window.APP_CONFIG && window.APP_CONFIG.appBuild) || '').trim();
+  if (!build || build === '0') return;
+  try {
+    let prev = '';
+    try {
+      prev = String(localStorage.getItem(CLIENT_BUNDLE_STORAGE_KEY) || '');
+    } catch {}
+    if (prev === build) return;
+    const drop = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('planner.') && !DEPLOY_CACHE_KEEP_KEYS.has(k)) drop.push(k);
+    }
+    drop.forEach(k => {
+      try {
+        localStorage.removeItem(k);
+      } catch {}
+    });
+    try {
+      sessionStorage.clear();
+    } catch {}
+    try {
+      localStorage.setItem(CLIENT_BUNDLE_STORAGE_KEY, build);
+    } catch {}
+  } catch {
+    /* ignore */
+  }
+}
+
+applyDeployCacheReset();
 
 /* ─────────────────────────────────────────────────────────────
    STATE STORE — Fonte única da verdade
@@ -325,6 +371,7 @@ const Store = (() => {
       return this.request('/login.php', {
         method: 'POST',
         body: JSON.stringify({ username, password }),
+        timeoutMs: 12000,
       });
     },
     async saveTask(task) {
@@ -338,6 +385,16 @@ const Store = (() => {
     },
     async saveConfig(payload) {
       return this.requestAny(['/config.php', '/config'], { method: 'POST', body: JSON.stringify(payload) });
+    },
+    /** Chat interno: `since=0` → últimas 100; `since>0` → apenas mensagens novas. `_` evita cache agressivo de proxies. */
+    async getTeamChat(since = 0) {
+      const s = Math.max(0, Math.floor(Number(since) || 0));
+      const cb = `_=${Date.now()}`;
+      const q = s > 0 ? `?since=${s}&${cb}` : `?${cb}`;
+      return this.request(`/chat.php${q}`);
+    },
+    async postTeamChat(payload) {
+      return this.request('/chat.php', { method: 'POST', body: JSON.stringify(payload) });
     },
     buildUrl(path) {
       const p = String(path || '');
@@ -469,6 +526,8 @@ const Store = (() => {
   let editingTaskId = null;
   let editingOpTaskId = null;
   let sidebarOpen = true;
+  /** Usernames do painel (tabela usuario) para @menções; preenchido pelo GET chat.php quando since=0. */
+  let teamChatRosterKeys = [];
 
   return {
     // Tasks
@@ -567,6 +626,16 @@ const Store = (() => {
     },
     loginRemote: async (username, password) => ApiService.login(username, password),
     isRemoteApiEnabled: () => ApiService.enabled(),
+    /** Base `.../api` usada nas requisições (útil para mensagens de erro no chat). */
+    getApiBaseUrl: () => (ApiService.enabled() ? String(ApiService.baseUrl).replace(/\/$/, '') : ''),
+    fetchTeamChat: async (since = 0) => ApiService.getTeamChat(since),
+    sendTeamChat: async (payload) => ApiService.postTeamChat(payload),
+    getTeamChatRosterKeys: () => [...teamChatRosterKeys],
+    applyTeamChatRosterFromApi(roster) {
+      if (!Array.isArray(roster)) return;
+      const next = roster.map(x => String(x?.userKey || '').toLowerCase()).filter(Boolean);
+      teamChatRosterKeys = [...new Set(next)].sort();
+    },
 
     // Config
     getPlannerConfig: () => ({ ...plannerConfig }),
@@ -741,6 +810,123 @@ const Utils = {
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#039;');
+  },
+
+  /** Tempo relativo curto para mensagens do chat (tooltip: formatChatFullDateTime). */
+  formatChatRelative(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(String(iso).replace(' ', 'T'));
+      if (Number.isNaN(d.getTime())) return String(iso);
+      const diff = Math.floor((Date.now() - d.getTime()) / 1000);
+      if (diff < 45) return 'agora';
+      if (diff < 3600) return `${Math.floor(diff / 60)} min`;
+      if (diff < 86400) return `${Math.floor(diff / 3600)} h`;
+      if (diff < 172800) return 'ontem';
+      return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return String(iso);
+    }
+  },
+
+  formatChatFullDateTime(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(String(iso).replace(' ', 'T'));
+      if (Number.isNaN(d.getTime())) return String(iso);
+      return d.toLocaleString('pt-BR', {
+        weekday: 'long',
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return String(iso);
+    }
+  },
+
+  /**
+   * Só http(s); texto escapado; links abrem em nova aba.
+   * @param {string} raw
+   */
+  linkifyChatText(raw) {
+    const t = String(raw ?? '');
+    const re = /https?:\/\/[^\s<>"']+/gi;
+    let html = '';
+    let last = 0;
+    let m;
+    const rx = new RegExp(re.source, 'gi');
+    while ((m = rx.exec(t)) !== null) {
+      html += Utils.escapeHtml(t.slice(last, m.index));
+      let u = m[0];
+      while (u.length > 14 && /[),.;!?]$/.test(u)) u = u.slice(0, -1);
+      const href = Utils.escapeHtml(u);
+      const vis = Utils.escapeHtml(u);
+      html += `<a href="${href}" class="team-chat-link" target="_blank" rel="noopener noreferrer">${vis}</a>`;
+      last = m.index + m[0].length;
+    }
+    html += Utils.escapeHtml(t.slice(last));
+    return html;
+  },
+
+  _formatChatSegmentWithMentions(segment, rosterSet) {
+    const reMen = /@([a-z0-9._-]+)/gi;
+    let html = '';
+    let last = 0;
+    const s = String(segment);
+    let m;
+    reMen.lastIndex = 0;
+    while ((m = reMen.exec(s)) !== null) {
+      html += Utils.escapeHtml(s.slice(last, m.index));
+      const user = m[1];
+      const low = user.toLowerCase();
+      const safeU = Utils.escapeHtml(user);
+      if (rosterSet.has(low)) {
+        html += `<span class="team-chat-mention" data-user="${Utils.escapeHtml(low)}">@${safeU}</span>`;
+      } else {
+        html += Utils.escapeHtml(m[0]);
+      }
+      last = m.index + m[0].length;
+    }
+    html += Utils.escapeHtml(s.slice(last));
+    return html;
+  },
+
+  /**
+   * URLs clicáveis + @menções destacadas (usuários do roster do servidor).
+   * @param {string} raw
+   * @param {string[]} rosterKeys userKeys em minúsculas
+   */
+  formatChatBodyHtml(raw, rosterKeys) {
+    const set = new Set((rosterKeys || []).map(k => String(k).toLowerCase()));
+    const reUrl = /https?:\/\/[^\s<>"']+/gi;
+    const t = String(raw ?? '');
+    let html = '';
+    let last = 0;
+    let m;
+    const rx = new RegExp(reUrl.source, 'gi');
+    while ((m = rx.exec(t)) !== null) {
+      html += Utils._formatChatSegmentWithMentions(t.slice(last, m.index), set);
+      let u = m[0];
+      while (u.length > 14 && /[),.;!?]$/.test(u)) u = u.slice(0, -1);
+      const href = Utils.escapeHtml(u);
+      const vis = Utils.escapeHtml(u);
+      html += `<a href="${href}" class="team-chat-link" target="_blank" rel="noopener noreferrer">${vis}</a>`;
+      last = m.index + m[0].length;
+    }
+    html += Utils._formatChatSegmentWithMentions(t.slice(last), set);
+    return html;
+  },
+
+  /** True se `body` contém @userKey como menção (fim de token ou pontuação). */
+  messageMentionsUser(body, userKey) {
+    const u = String(userKey || '').toLowerCase();
+    if (!u) return false;
+    const k = u.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`@${k}(?![a-z0-9._-])`, 'i');
+    return re.test(String(body || ''));
   },
 
   /** Extrai iniciais de um nome (até 2 letras) */
@@ -2861,6 +3047,7 @@ const UI = {
       tarefas:   { title: 'Tarefas',      crumb: 'Operacionais' },
       calendario:{ title: 'Calendário',   crumb: 'Agenda' },
       relatorios:{ title: 'Relatórios',   crumb: 'Análises' },
+      chat:      { title: 'Chat da equipe', crumb: 'Mensagens internas' },
       config:    { title: 'Configurações',crumb: 'Sistema' },
     };
     const meta = titles[page] || { title: page, crumb: '' };
@@ -2869,10 +3056,35 @@ const UI = {
 
     Store.currentPage = page;
 
+    try {
+      sessionStorage.setItem(NAV_LAST_PAGE_KEY, page);
+    } catch {
+      /* ignore */
+    }
+
     // Re-renderiza página específica
     if (page === 'tarefas') this.renderOpPage();
     if (page === 'calendario') this.renderCalendarPage();
     if (page === 'relatorios') this.renderReportsPage();
+    Controllers.teamChat?.onPageChange?.(page);
+  },
+
+  /**
+   * Restaura menu após recarregar a página ou logar (persistência por aba).
+   * Assim o chat continua ativo e com polling após F5.
+   */
+  restoreLastPageIfAuthed() {
+    if (!Controllers.auth._isAuthenticated()) return;
+    let saved = '';
+    try {
+      saved = String(sessionStorage.getItem(NAV_LAST_PAGE_KEY) || '').trim();
+    } catch {
+      return;
+    }
+    const allowed = new Set(['dashboard', 'tarefas', 'calendario', 'relatorios', 'chat', 'config']);
+    if (!saved || !allowed.has(saved)) return;
+    if (!document.getElementById(`page-${saved}`)) return;
+    this.navigateTo(saved);
   },
 
   /* ── Full dashboard render ─────────────────────────────── */
@@ -3017,9 +3229,216 @@ const CtoLocationRegistry = (() => {
 })();
 
 
+/** Notificações do sininho: menções @você no chat da equipe (só mensagens incrementais, não histórico inicial). */
+const ChatMentionNotifs = {
+  _readInbox() {
+    try {
+      const r = localStorage.getItem(CHAT_MENTION_INBOX_KEY);
+      if (!r) return { items: [] };
+      const p = JSON.parse(r);
+      return p && Array.isArray(p.items) ? p : { items: [] };
+    } catch {
+      return { items: [] };
+    }
+  },
+  _writeInbox(data) {
+    try {
+      localStorage.setItem(CHAT_MENTION_INBOX_KEY, JSON.stringify(data));
+    } catch {
+      /* ignore */
+    }
+  },
+  _readHandledSet() {
+    try {
+      const r = localStorage.getItem(CHAT_MENTION_HANDLED_IDS_KEY);
+      const a = r ? JSON.parse(r) : [];
+      if (!Array.isArray(a)) return new Set();
+      return new Set(a.map(Number).filter(n => Number.isFinite(n)));
+    } catch {
+      return new Set();
+    }
+  },
+  _writeHandledSet(set) {
+    const arr = [...set].sort((x, y) => x - y).slice(-400);
+    try {
+      localStorage.setItem(CHAT_MENTION_HANDLED_IDS_KEY, JSON.stringify(arr));
+    } catch {
+      /* ignore */
+    }
+  },
+  /**
+   * @param {object[]} messages
+   * @param {string} myKey
+   * @param {{ incremental?: boolean }} [opts] incremental=true só após since>0 (evita disparar no histórico ao abrir chat).
+   */
+  processIncomingMessages(messages, myKey, opts = {}) {
+    if (opts.incremental !== true) return;
+    const mk = String(myKey || '').toLowerCase();
+    if (!mk || !Array.isArray(messages) || !messages.length) return;
+    const handled = this._readHandledSet();
+    const inbox = this._readInbox();
+    let inboxChanged = false;
+    for (const m of messages) {
+      const id = Number(m.id);
+      if (!Number.isFinite(id)) continue;
+      if (handled.has(id)) continue;
+      handled.add(id);
+      if (String(m.userKey || '').toLowerCase() === mk) continue;
+      if (!Utils.messageMentionsUser(m.body, mk)) continue;
+      if (inbox.items.some(x => x.id === id)) continue;
+      inbox.items.unshift({
+        id,
+        fromKey: String(m.userKey || ''),
+        fromName: String(m.displayName || m.userKey || '—'),
+        snippet: String(m.body || '').trim().slice(0, 140),
+        createdAt: String(m.createdAt || ''),
+        read: false,
+      });
+      if (inbox.items.length > 40) inbox.items.length = 40;
+      inboxChanged = true;
+    }
+    this._writeHandledSet(handled);
+    if (inboxChanged) this._writeInbox(inbox);
+    this.syncBellUi();
+  },
+  markAllRead() {
+    const inbox = this._readInbox();
+    let ch = false;
+    for (const it of inbox.items) {
+      if (!it.read) {
+        it.read = true;
+        ch = true;
+      }
+    }
+    if (ch) this._writeInbox(inbox);
+    this.syncBellUi();
+  },
+  syncBellUi() {
+    const inbox = this._readInbox();
+    const n = inbox.items.filter(x => !x.read).length;
+    const badge = document.getElementById('topbarNotifBadge');
+    const btn = document.getElementById('topbarNotifBtn');
+    if (badge) {
+      badge.textContent = n > 9 ? '9+' : String(n);
+      badge.hidden = n <= 0;
+    }
+    if (btn) {
+      btn.title = n > 0 ? `${n} menção(ões) no chat` : 'Notificações';
+      btn.setAttribute('aria-label', n > 0 ? `Notificações: ${n} menção(ões) no chat` : 'Notificações');
+    }
+  },
+  _closePanel() {
+    const panel = document.getElementById('topbarNotifPanel');
+    const btn = document.getElementById('topbarNotifBtn');
+    if (panel) panel.hidden = true;
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  },
+  renderDropdown() {
+    const panel = document.getElementById('topbarNotifPanel');
+    if (!panel) return;
+    const inbox = this._readInbox();
+    const items = inbox.items.slice(0, 25);
+    if (!items.length) {
+      panel.innerHTML = '<div class="topbar-notif-empty">Nenhuma menção no chat ainda.</div>';
+      return;
+    }
+    panel.innerHTML = items
+      .map(
+        it => `<button type="button" class="topbar-notif-item" role="menuitem" data-chat-msg-id="${Number(it.id)}">
+<span class="topbar-notif-item-title">${Utils.escapeHtml(it.fromName)} mencionou você no chat</span>
+<span class="topbar-notif-item-snippet">${Utils.escapeHtml(it.snippet)}</span>
+</button>`,
+      )
+      .join('');
+    panel.querySelectorAll('[data-chat-msg-id]').forEach(b => {
+      b.addEventListener('click', () => {
+        const mid = b.dataset.chatMsgId;
+        this.markAllRead();
+        this._closePanel();
+        UI.navigateTo('chat');
+        queueMicrotask(() => {
+          const row = document.querySelector(`[data-chat-id="${mid}"]`);
+          row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        });
+      });
+    });
+  },
+  init() {
+    this.syncBellUi();
+    const btn = document.getElementById('topbarNotifBtn');
+    const panel = document.getElementById('topbarNotifPanel');
+    const wrap = document.getElementById('topbarNotifWrap');
+    btn?.addEventListener('click', e => {
+      e.stopPropagation();
+      const isOpen = panel && !panel.hidden;
+      if (isOpen) {
+        this._closePanel();
+        return;
+      }
+      this.markAllRead();
+      this.renderDropdown();
+      if (panel) panel.hidden = false;
+      btn.setAttribute('aria-expanded', 'true');
+    });
+    document.addEventListener(
+      'mousedown',
+      e => {
+        if (!panel || panel.hidden) return;
+        if (wrap && wrap.contains(e.target)) return;
+        this._closePanel();
+      },
+      true,
+    );
+  },
+};
+
 /* ─────────────────────────────────────────────────────────────
    CONTROLLERS — Lógica de interação do usuário
 ───────────────────────────────────────────────────────────── */
+/** Seletor de emojis do chat (grupos estilo WhatsApp). */
+const TEAM_CHAT_EMOJI_GROUPS = [
+  {
+    id: 'faces',
+    label: 'Rostos',
+    emojis: [
+      '😀', '😃', '😄', '😁', '😅', '😂', '🤣', '🥲', '☺️', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔', '🤐', '🤨', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🤧', '🥵', '🥶', '🥴', '😵', '🤯', '🤠', '🥳', '🥸', '😎', '🤓', '🧐', '😕', '😟', '🙁', '☹️', '😮', '😯', '😲', '😳', '🥺', '😦', '😧', '😨', '😰', '😥', '😢', '😭', '😱', '😖', '😣', '😞', '😓', '😩', '😫', '🥱', '😤', '😡', '😠', '🤬', '😈', '👿', '💀', '☠️', '💩', '🤡', '👹', '👺', '👻', '👽', '👾', '🤖',
+    ],
+  },
+  {
+    id: 'maos',
+    label: 'Mãos',
+    emojis: [
+      '👍', '👎', '👌', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👆', '👇', '☝️', '👋', '🤚', '🖐️', '✋', '🖖', '👏', '🙌', '🤲', '🤝', '🙏', '✍️', '💪', '🦾', '🦿', '🦵', '🦶',
+    ],
+  },
+  {
+    id: 'amor',
+    label: 'Amor',
+    emojis: [
+      '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔', '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💋', '🔥', '✨', '💫', '⭐', '🌟', '💯',
+    ],
+  },
+  {
+    id: 'objetos',
+    label: 'Trabalho',
+    emojis: [
+      '💼', '📁', '📎', '📌', '📋', '📧', '📱', '💻', '⌚', '⏰', '📍', '🗺️', '🔔', '📣', '💡', '🔦', '🏠', '🏢', '🚗', '🚙', '🛠️', '🔧', '⚡', '🔒', '🔑', '💰', '✅', '❌', '❗', '❓', '⚠️', '🎉', '🎊', '🎁', '🏆', '🥇', '🚀',
+    ],
+  },
+  {
+    id: 'comida',
+    label: 'Comida',
+    emojis: [
+      '🍕', '🍔', '🍟', '🌭', '🥪', '🌮', '🌯', '🥗', '🍝', '🍜', '🍲', '🍱', '🍣', '🍪', '🎂', '☕', '🍺', '🥤', '🧉',
+    ],
+  },
+  {
+    id: 'sport',
+    label: 'Esporte / BR',
+    emojis: ['⚽', '🏀', '🏈', '⚾', '🎾', '🏐', '🎯', '🏁', '🇧🇷', '🥳', '👏', '💪'],
+  },
+];
+
 const Controllers = {
   theme: {
     init() {
@@ -3072,6 +3491,13 @@ const Controllers = {
       this._unlock();
       this._syncSidebarUser();
       Controllers.profileAvatar?.render();
+      queueMicrotask(() => {
+        ChatMentionNotifs.syncBellUi();
+        UI.restoreLastPageIfAuthed?.();
+        if (Controllers.auth._isAuthenticated() && Store.currentPage !== 'chat') {
+          Controllers.teamChat.startBackgroundNotify?.();
+        }
+      });
     },
     _syncSidebarUser() {
       const nameEl = document.getElementById('sidebarUserName');
@@ -3152,6 +3578,15 @@ const Controllers = {
       return true;
     },
     logout() {
+      Controllers.teamChat?.stop?.();
+      Controllers.teamChat?.stopBackgroundNotify?.();
+      try {
+        localStorage.removeItem(CHAT_MENTION_INBOX_KEY);
+      } catch {
+        /* ignore */
+      }
+      ChatMentionNotifs._closePanel();
+      ChatMentionNotifs.syncBellUi();
       localStorage.removeItem(this._sessionKey);
       localStorage.removeItem(this._displayNameKey);
       localStorage.removeItem(this._sessionUserKey);
@@ -4930,7 +5365,10 @@ const Controllers = {
         } else if (res && res.ok) {
           ToastService.show('Webhook salvo no servidor. Válido para todos que acessam o site.', 'success');
         } else {
-          ToastService.show('Salvo no navegador. No servidor falhou: no Vercel, crie BLOB_READ_WRITE_TOKEN em Environment Variables.', 'danger');
+          ToastService.show(
+            'Salvo no navegador. No servidor falhou: verifique api/credentials.php, permissões da pasta api e o PHP no cPanel.',
+            'danger'
+          );
         }
       });
 
@@ -4966,6 +5404,610 @@ const Controllers = {
     },
   },
 
+  /* ── Chat da equipe (MySQL + polling; sem WebSocket) ───── */
+  teamChat: {
+    /** timeoutId do poll (setTimeout recursivo com jitter — setInterval em aba em segundo plano some browsers “congelam”). */
+    _timer: null,
+    /** Poll leve fora do chat (badge “novas”). */
+    _notifyTimer: null,
+    _lastId: 0,
+    /** Fila serial: evita corrida entre poll e envio (antes _inFlight descartava o refresh após Enviar). */
+    _loadChain: Promise.resolve(),
+    _emojiBuilt: false,
+    /** Evita reabrir o painel no click após fechar no mousedown do botão 😊. */
+    _suppressNextEmojiBtnClick: false,
+
+    _els() {
+      return {
+        list: document.getElementById('teamChatList'),
+        offline: document.getElementById('teamChatOffline'),
+        input: document.getElementById('teamChatInput'),
+        send: document.getElementById('teamChatSend'),
+        jump: document.getElementById('teamChatJumpBottom'),
+        emojiBtn: document.getElementById('teamChatEmojiBtn'),
+        emojiPanel: document.getElementById('teamChatEmojiPanel'),
+        emojiTabs: document.getElementById('teamChatEmojiTabs'),
+        emojiGrid: document.getElementById('teamChatEmojiGrid'),
+      };
+    },
+
+    _isEmojiPanelOpen() {
+      const { emojiPanel } = this._els();
+      return !!(emojiPanel && !emojiPanel.hidden);
+    },
+
+    _closeEmojiPanel() {
+      const { emojiBtn, emojiPanel } = this._els();
+      if (emojiPanel) emojiPanel.hidden = true;
+      if (emojiBtn) emojiBtn.setAttribute('aria-expanded', 'false');
+    },
+
+    _openEmojiPanel() {
+      this._hideMentionSuggest();
+      this._ensureEmojiPanelBuilt();
+      const { emojiBtn, emojiPanel } = this._els();
+      if (emojiPanel) emojiPanel.hidden = false;
+      if (emojiBtn) emojiBtn.setAttribute('aria-expanded', 'true');
+    },
+
+    _toggleEmojiPanel() {
+      if (this._isEmojiPanelOpen()) this._closeEmojiPanel();
+      else this._openEmojiPanel();
+    },
+
+    _ensureEmojiPanelBuilt() {
+      if (this._emojiBuilt) return;
+      const { emojiTabs, emojiGrid } = this._els();
+      if (!emojiTabs || !emojiGrid) return;
+      this._emojiBuilt = true;
+      TEAM_CHAT_EMOJI_GROUPS.forEach((g, idx) => {
+        const tab = document.createElement('button');
+        tab.type = 'button';
+        tab.className = `team-chat-emoji-tab${idx === 0 ? ' is-active' : ''}`;
+        tab.textContent = g.label;
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('aria-selected', idx === 0 ? 'true' : 'false');
+        tab.addEventListener('click', () => this._setEmojiTab(idx));
+        emojiTabs.appendChild(tab);
+      });
+      this._fillEmojiGrid(0);
+    },
+
+    _setEmojiTab(idx) {
+      const { emojiTabs } = this._els();
+      if (emojiTabs) {
+        const tabs = emojiTabs.querySelectorAll('[role="tab"]');
+        tabs.forEach((t, i) => {
+          t.classList.toggle('is-active', i === idx);
+          t.setAttribute('aria-selected', i === idx ? 'true' : 'false');
+        });
+      }
+      this._fillEmojiGrid(idx);
+    },
+
+    _fillEmojiGrid(tabIdx) {
+      const { emojiGrid } = this._els();
+      const g = TEAM_CHAT_EMOJI_GROUPS[tabIdx];
+      if (!emojiGrid || !g) return;
+      emojiGrid.innerHTML = '';
+      for (const ch of g.emojis) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'team-chat-emoji-cell';
+        b.textContent = ch;
+        b.setAttribute('role', 'option');
+        b.title = ch;
+        b.addEventListener('click', () => {
+          this._insertEmojiAtCursor(ch);
+          this._closeEmojiPanel();
+        });
+        emojiGrid.appendChild(b);
+      }
+    },
+
+    _insertEmojiAtCursor(text) {
+      const { input } = this._els();
+      if (!input || !text) return;
+      const maxAttr = input.getAttribute('maxlength');
+      const max = maxAttr != null ? parseInt(maxAttr, 10) : 2000;
+      const start = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
+      const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : start;
+      const before = input.value.slice(0, start);
+      const after = input.value.slice(end);
+      let insert = text;
+      const room = max - before.length - after.length;
+      if (room <= 0) return;
+      if (insert.length > room) insert = insert.slice(0, room);
+      input.value = before + insert + after;
+      const newPos = start + insert.length;
+      try {
+        input.setSelectionRange(newPos, newPos);
+      } catch {
+        /* alguns browsers em input “estranho” */
+      }
+      input.focus();
+    },
+
+    _hideMentionSuggest() {
+      const el = document.getElementById('teamChatMentionSuggest');
+      if (el) el.hidden = true;
+    },
+
+    _isMentionSuggestOpen() {
+      const el = document.getElementById('teamChatMentionSuggest');
+      return !!(el && !el.hidden);
+    },
+
+    _updateMentionSuggest() {
+      const suggest = document.getElementById('teamChatMentionSuggest');
+      const { input } = this._els();
+      if (!suggest || !input) return;
+      const roster = Store.getTeamChatRosterKeys();
+      if (!roster.length) {
+        suggest.hidden = true;
+        return;
+      }
+      const v = input.value;
+      const pos = typeof input.selectionStart === 'number' ? input.selectionStart : v.length;
+      const before = v.slice(0, pos);
+      const at = before.lastIndexOf('@');
+      if (at === -1) {
+        suggest.hidden = true;
+        return;
+      }
+      const prevOk = at === 0 || /\s/.test(before.charAt(at - 1));
+      if (!prevOk) {
+        suggest.hidden = true;
+        return;
+      }
+      const q = before.slice(at + 1);
+      if (/[\s\n]/.test(q)) {
+        suggest.hidden = true;
+        return;
+      }
+      const qlow = q.toLowerCase();
+      const matches = roster.filter(u => u.startsWith(qlow)).slice(0, 10);
+      if (!matches.length) {
+        suggest.hidden = true;
+        return;
+      }
+      suggest.innerHTML = matches
+        .map(
+          u =>
+            `<button type="button" class="team-chat-mention-option" role="option" data-user="${Utils.escapeHtml(u)}"><span class="mention-key">@${Utils.escapeHtml(u)}</span></button>`,
+        )
+        .join('');
+      suggest.hidden = false;
+      suggest.querySelectorAll('.team-chat-mention-option').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const u = btn.getAttribute('data-user');
+          if (u) this._insertMentionAtCaret(u);
+          suggest.hidden = true;
+        });
+      });
+    },
+
+    _insertMentionAtCaret(userKey) {
+      const { input } = this._els();
+      if (!input) return;
+      const maxAttr = input.getAttribute('maxlength');
+      const max = maxAttr != null ? parseInt(maxAttr, 10) : 2000;
+      const v = input.value;
+      const pos = typeof input.selectionStart === 'number' ? input.selectionStart : v.length;
+      const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : pos;
+      const before = v.slice(0, pos);
+      const after = v.slice(end);
+      const at = before.lastIndexOf('@');
+      if (at === -1) return;
+      const insert = `@${userKey} `;
+      const next = v.slice(0, at) + insert + after;
+      if (next.length > max) return;
+      input.value = next;
+      const newPos = at + insert.length;
+      try {
+        input.setSelectionRange(newPos, newPos);
+      } catch {
+        /* ignore */
+      }
+      input.focus();
+    },
+
+    _acceptFirstMentionSuggestion() {
+      const suggest = document.getElementById('teamChatMentionSuggest');
+      if (!suggest || suggest.hidden) return false;
+      const first = suggest.querySelector('.team-chat-mention-option[data-user]');
+      if (!first) return false;
+      const u = first.getAttribute('data-user');
+      if (u) this._insertMentionAtCaret(u);
+      suggest.hidden = true;
+      return true;
+    },
+
+    _readLastSeenId() {
+      try {
+        const n = parseInt(localStorage.getItem(CHAT_LAST_SEEN_ID_KEY) || '0', 10);
+        return Number.isFinite(n) && n > 0 ? n : 0;
+      } catch {
+        return 0;
+      }
+    },
+
+    _markChatSeen(maxId) {
+      if (!Number.isFinite(maxId) || maxId <= 0) return;
+      try {
+        const cur = this._readLastSeenId();
+        if (maxId > cur) localStorage.setItem(CHAT_LAST_SEEN_ID_KEY, String(maxId));
+      } catch {
+        /* ignore */
+      }
+      this._syncNavBadge(0);
+    },
+
+    _syncNavBadge(count) {
+      const el = document.getElementById('nav-chat-badge');
+      if (!el) return;
+      if (!count || Store.currentPage === 'chat') {
+        el.style.display = 'none';
+        el.textContent = '';
+        return;
+      }
+      el.style.display = '';
+      el.textContent = count > 9 ? '9+' : String(count);
+    },
+
+    startBackgroundNotify() {
+      this.stopBackgroundNotify();
+      if (!Store.isRemoteApiEnabled() || !Controllers.auth._isAuthenticated()) return;
+      const tick = async () => {
+        if (!Controllers.auth._isAuthenticated()) {
+          this.stopBackgroundNotify();
+          return;
+        }
+        if (Store.currentPage === 'chat') return;
+        const since = this._readLastSeenId();
+        if (since <= 0) return;
+        const res = await Store.fetchTeamChat(since);
+        if (res && res.ok && Array.isArray(res.messages) && res.messages.length) {
+          this._syncNavBadge(res.messages.length);
+          const myKey = String(localStorage.getItem(Controllers.auth._sessionUserKey) || '').toLowerCase();
+          ChatMentionNotifs.processIncomingMessages(res.messages, myKey, { incremental: true });
+        }
+      };
+      void tick();
+      this._notifyTimer = setInterval(tick, 20000);
+    },
+
+    stopBackgroundNotify() {
+      if (this._notifyTimer) {
+        clearInterval(this._notifyTimer);
+        this._notifyTimer = null;
+      }
+    },
+
+    _scrollBottom() {
+      const { list } = this._els();
+      if (!list) return;
+      list.scrollTop = list.scrollHeight;
+    },
+
+    _isNearBottom(px = 100) {
+      const { list } = this._els();
+      if (!list) return true;
+      return list.scrollHeight - list.scrollTop - list.clientHeight <= px;
+    },
+
+    _toggleJumpBottom(show) {
+      const { jump } = this._els();
+      if (!jump) return;
+      jump.hidden = !show;
+    },
+
+    _renderMessages(messages, replace) {
+      const { list, offline, jump } = this._els();
+      if (!list) return;
+
+      if (!Store.isRemoteApiEnabled()) {
+        if (offline) {
+          offline.hidden = false;
+          offline.textContent = 'API PHP desligada neste ambiente (localhost) ou indisponível. Com a pasta api no HostGator, o chat funciona automaticamente.';
+        }
+        if (jump) jump.hidden = true;
+        list.innerHTML =
+          '<div class="team-chat-empty">O chat usa o mesmo servidor do painel. Acesse pelo site publicado com <code>api</code> configurada.</div>';
+        return;
+      }
+
+      const arr = Array.isArray(messages) ? messages : [];
+      if (replace) {
+        list.innerHTML = '';
+        this._lastId = 0;
+        if (jump) jump.hidden = true;
+      }
+
+      if (!arr.length && replace) {
+        list.innerHTML = '<div class="team-chat-empty">Nenhuma mensagem ainda. Envie a primeira abaixo.</div>';
+        this._scrollBottom();
+        return;
+      }
+
+      const stickToBottom = replace || this._isNearBottom(100);
+      let appended = 0;
+      const myKey = String(localStorage.getItem(Controllers.auth._sessionUserKey) || '').toLowerCase();
+      for (const m of arr) {
+        const id = Number(m.id);
+        if (!Number.isFinite(id)) continue;
+        if (!replace && id <= this._lastId) continue;
+        if (!replace && list.querySelector(`[data-chat-id="${id}"]`)) continue;
+
+        this._lastId = Math.max(this._lastId, id);
+        const isMe = String(m.userKey || '').toLowerCase() === myKey;
+        const row = document.createElement('div');
+        row.className = `team-chat-msg${isMe ? ' is-mine' : ''}`;
+        row.dataset.chatId = String(id);
+        const who = Utils.escapeHtml(m.displayName || m.userKey || '—');
+        const whenRel = Utils.escapeHtml(Utils.formatChatRelative(m.createdAt));
+        const whenFull = Utils.escapeHtml(Utils.formatChatFullDateTime(m.createdAt));
+        const roster = Store.getTeamChatRosterKeys();
+        const body = Utils.formatChatBodyHtml(m.body || '', roster);
+        row.innerHTML = `<div class="team-chat-msg-meta"><span class="team-chat-who">${who}</span><span class="team-chat-when" title="${whenFull}">${whenRel}</span></div><div class="team-chat-msg-body">${body}</div>`;
+        list.appendChild(row);
+        appended += 1;
+      }
+      if (offline) offline.hidden = true;
+      if (appended > 0 || (replace && arr.length)) {
+        if (stickToBottom || replace) {
+          this._scrollBottom();
+          this._toggleJumpBottom(false);
+        } else {
+          this._toggleJumpBottom(true);
+        }
+      }
+    },
+
+    async _load(since) {
+      if (!Controllers.auth._isAuthenticated()) return;
+      const run = async () => {
+        try {
+          await this._loadImpl(since);
+        } catch {
+          /* abort / rede */
+        }
+      };
+      this._loadChain = this._loadChain.then(run, run);
+      return this._loadChain;
+    },
+
+    async _loadImpl(since) {
+      if (!Store.isRemoteApiEnabled()) {
+        this._renderMessages([], true);
+        return;
+      }
+      const res = await Store.fetchTeamChat(since);
+      if (res && res.ok && Array.isArray(res.messages)) {
+        if (Array.isArray(res.teamRoster) && res.teamRoster.length) {
+          Store.applyTeamChatRosterFromApi(res.teamRoster);
+        }
+        this._renderMessages(res.messages, since === 0);
+        if (typeof res.lastId === 'number' && res.lastId > this._lastId) {
+          this._lastId = res.lastId;
+        }
+        if (Store.currentPage === 'chat') {
+          this._markChatSeen(this._lastId);
+        }
+        const myKey = String(localStorage.getItem(Controllers.auth._sessionUserKey) || '').toLowerCase();
+        ChatMentionNotifs.processIncomingMessages(res.messages, myKey, { incremental: since > 0 });
+      } else if (res && res.error === 'table_missing') {
+        const { offline, list } = this._els();
+        if (offline) {
+          offline.hidden = false;
+          offline.textContent =
+            'Tabela team_chat_message ausente. Execute no MySQL o arquivo api/migrations/006_team_chat_message.sql (ou use o schema.sql atualizado).';
+        }
+        if (list) {
+          list.innerHTML =
+            '<div class="team-chat-empty">Configuração pendente: rode a migração do chat no banco de dados.</div>';
+        }
+      } else if (res && !res.ok) {
+        const { offline } = this._els();
+        if (offline) {
+          offline.hidden = false;
+          offline.textContent = 'Não foi possível carregar o chat. Tente atualizar a página.';
+        }
+      } else {
+        const base = Store.getApiBaseUrl();
+        const { offline, list } = this._els();
+        const hint =
+          'O painel não recebeu JSON do servidor (404, bloqueio ou URL errada). ' +
+          (base
+            ? `Abra no navegador: ${base}/chat.php — deve retornar JSON. Confirme api/chat.php no FTP, migração MySQL do chat e, se o painel estiver em subpasta, apiBaseUrl em src/js/config.js (ex.: https://seudominio.com.br/pasta/api).`
+            : 'Confirme a pasta api no servidor e apiBaseUrl em src/js/config.js se a URL automática não bater com a subpasta.');
+        if (offline) {
+          offline.hidden = false;
+          offline.textContent = hint;
+        }
+        if (list && since === 0) {
+          list.innerHTML = `<div class="team-chat-empty">${Utils.escapeHtml(hint)}</div>`;
+        }
+      }
+    },
+
+    async send() {
+      this._closeEmojiPanel();
+      this._hideMentionSuggest();
+      if (!Controllers.auth._isAuthenticated()) return;
+      const { input } = this._els();
+      if (!input) return;
+      const body = input.value.trim();
+      if (!body) return;
+      const userKey = String(localStorage.getItem(Controllers.auth._sessionUserKey) || '')
+        .trim()
+        .toLowerCase();
+      const displayName =
+        String(localStorage.getItem(Controllers.auth._displayNameKey) || '').trim() || userKey;
+      if (!userKey) {
+        ToastService.show('Sessão inválida; entre novamente.', 'danger');
+        return;
+      }
+      if (!Store.isRemoteApiEnabled()) {
+        ToastService.show('API indisponível neste ambiente.', 'danger');
+        return;
+      }
+      const btn = this._els().send;
+      input.disabled = true;
+      if (btn) btn.disabled = true;
+      try {
+        const res = await Store.sendTeamChat({ userKey, displayName, body });
+        if (res && res.ok) {
+          input.value = '';
+          await this._load(this._lastId);
+        } else if (res && res.error === 'unknown_user') {
+          ToastService.show('Usuário não autorizado no servidor para este chat.', 'danger');
+        } else if (res && res.error === 'table_missing') {
+          ToastService.show('Execute a migração SQL do chat no MySQL.', 'danger');
+        } else {
+          const base = Store.getApiBaseUrl();
+          const extra =
+            !res && base
+              ? ` Sem resposta em ${base}/chat.php — veja Rede (F12), erros PHP e apiBaseUrl no config.js se estiver em subpasta.`
+              : '';
+          ToastService.show(`Não foi possível enviar a mensagem.${extra}`, 'danger');
+        }
+      } finally {
+        input.disabled = false;
+        if (btn) btn.disabled = false;
+        input.focus();
+      }
+    },
+
+    onPageChange(page) {
+      if (page === 'chat') {
+        this.stopBackgroundNotify();
+        this._syncNavBadge(0);
+        this.start();
+      } else {
+        this.stop();
+        this.startBackgroundNotify();
+      }
+    },
+
+    /** Reanexa fila e força histórico — útil após aba em background, bfcache ou falha intermitente da rede. */
+    _recoverFromSleep() {
+      if (Store.currentPage !== 'chat' || !Controllers.auth._isAuthenticated()) return;
+      this._loadChain = Promise.resolve();
+      void this._load(0);
+    },
+
+    _schedulePoll() {
+      if (this._timer) {
+        clearTimeout(this._timer);
+        this._timer = null;
+      }
+      if (Store.currentPage !== 'chat') return;
+      const delay = 5500 + Math.floor(Math.random() * 2000);
+      this._timer = setTimeout(() => {
+        this._timer = null;
+        if (Store.currentPage === 'chat' && Controllers.auth._isAuthenticated()) {
+          void this._load(this._lastId);
+        }
+        if (Store.currentPage === 'chat') this._schedulePoll();
+      }, delay);
+    },
+
+    start() {
+      this.stop();
+      this._loadChain = Promise.resolve();
+      void this._load(0);
+      this._schedulePoll();
+    },
+
+    stop() {
+      if (this._timer) {
+        clearTimeout(this._timer);
+        this._timer = null;
+      }
+    },
+
+    init() {
+      const { send, input, list, jump, emojiBtn } = this._els();
+      send?.addEventListener('click', () => this.send());
+      emojiBtn?.addEventListener('click', e => {
+        e.stopPropagation();
+        if (this._suppressNextEmojiBtnClick) {
+          this._suppressNextEmojiBtnClick = false;
+          return;
+        }
+        this._toggleEmojiPanel();
+      });
+      document.addEventListener(
+        'mousedown',
+        e => {
+          if (!this._isEmojiPanelOpen()) return;
+          if (e.button !== 0) return;
+          const btn = document.getElementById('teamChatEmojiBtn');
+          if (btn && (e.target === btn || btn.contains(e.target))) {
+            this._closeEmojiPanel();
+            this._suppressNextEmojiBtnClick = true;
+            return;
+          }
+          const wrap = document.querySelector('.team-chat-compose');
+          if (wrap && wrap.contains(e.target)) return;
+          this._closeEmojiPanel();
+        },
+        true,
+      );
+      input?.addEventListener('input', () => this._updateMentionSuggest());
+      input?.addEventListener('click', () => queueMicrotask(() => this._updateMentionSuggest()));
+      input?.addEventListener('keyup', e => {
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') this._updateMentionSuggest();
+      });
+      input?.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && this._isMentionSuggestOpen()) {
+          e.preventDefault();
+          this._hideMentionSuggest();
+          return;
+        }
+        if ((e.key === 'Tab' || e.key === 'Enter') && this._isMentionSuggestOpen() && !e.shiftKey) {
+          if (this._acceptFirstMentionSuggestion()) {
+            e.preventDefault();
+            return;
+          }
+        }
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          this.send();
+        }
+      });
+      document.addEventListener(
+        'mousedown',
+        e => {
+          if (!this._isMentionSuggestOpen()) return;
+          const sugg = document.getElementById('teamChatMentionSuggest');
+          const { input: inp } = this._els();
+          if (sugg && sugg.contains(e.target)) return;
+          if (inp && (e.target === inp || inp.contains(e.target))) return;
+          this._hideMentionSuggest();
+        },
+        true,
+      );
+      jump?.addEventListener('click', () => {
+        this._scrollBottom();
+        this._toggleJumpBottom(false);
+      });
+      list?.addEventListener('scroll', () => {
+        if (this._isNearBottom(72)) this._toggleJumpBottom(false);
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') this._recoverFromSleep();
+      });
+      window.addEventListener('pageshow', () => {
+        queueMicrotask(() => this._recoverFromSleep());
+      });
+      window.addEventListener('online', () => {
+        queueMicrotask(() => this._recoverFromSleep());
+      });
+    },
+  },
+
   /* ── Global Modal Helpers ─────────────────────────────── */
   globalModal: {
     init() {
@@ -4978,6 +6020,17 @@ const Controllers = {
       // Fechar com ESC (menu mobile antes dos modais)
       document.addEventListener('keydown', e => {
         if (e.key !== 'Escape') return;
+        if (Controllers.teamChat._isEmojiPanelOpen()) {
+          Controllers.teamChat._closeEmojiPanel();
+          e.preventDefault();
+          return;
+        }
+        const notifPanel = document.getElementById('topbarNotifPanel');
+        if (notifPanel && !notifPanel.hidden) {
+          ChatMentionNotifs._closePanel();
+          e.preventDefault();
+          return;
+        }
         if (document.body.classList.contains('nav-open')) {
           Controllers.sidebar.closeMobileNav();
           return;
@@ -5000,6 +6053,7 @@ async function initApp() {
   Controllers.theme.init();
   CtoLocationRegistry.load().catch(() => {});
   Controllers.auth.init();
+  ChatMentionNotifs.syncBellUi();
 
   // Bootstrap remoto pode demorar; listeners precisam existir antes do await
   // para quem logar rápido não ficar com UI “morta”.
@@ -5025,11 +6079,20 @@ async function initApp() {
   Controllers.profileAvatar.init();
   Controllers.webhook.init();
   Controllers.notes.init();
+  Controllers.teamChat.init();
+  ChatMentionNotifs.init();
   Controllers.globalModal.init();
 
-  await bootstrapWithTimeout(6000);
+  void bootstrapWithTimeout(10000).then(ok => {
+    if (!ok) return;
+    UI.renderAgenda();
+    const p = Store.currentPage;
+    if (p === 'dashboard') UI.renderDashboard();
+    else if (p === 'tarefas') UI.renderOpPage();
+    else if (p === 'calendario') UI.renderCalendarPage();
+    else if (p === 'relatorios') UI.renderReportsPage();
+  });
 
-  // Renderização inicial
   UI.renderAgenda();
   UI.renderDashboard();
   UI.renderCalendarPage();
@@ -5046,6 +6109,11 @@ async function initApp() {
     UI.renderCalendarPage();
     UI.renderReportsPage();
   }, 25000);
+
+  UI.restoreLastPageIfAuthed();
+  if (Controllers.auth._isAuthenticated() && Store.currentPage !== 'chat') {
+    Controllers.teamChat.startBackgroundNotify();
+  }
 }
 
 // Inicia quando o DOM estiver pronto
@@ -5054,4 +6122,3 @@ if (document.readyState === 'loading') {
 } else {
   initApp();
 }
-//teste

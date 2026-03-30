@@ -15,7 +15,7 @@ export default async function handler(req, res) {
     else data.tasks.push(body);
     const saved = await saveData(data);
     if (!saved) {
-      return sendJson(res, 503, { ok: false, error: 'BLOB_READ_WRITE_TOKEN ausente' });
+      return sendJson(res, 503, { ok: false, error: 'Armazenamento remoto não configurado' });
     }
     return sendJson(res, 200, { ok: true });
   } catch (error) {

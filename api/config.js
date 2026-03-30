@@ -1,6 +1,6 @@
 /**
- * Rota serverless (ex.: Vercel) — NÃO é configuração do painel Burrinho.
- * Para o chat e a API PHP na HostGator, use src/js/config.js (apiBaseUrl) e api/credentials.php.
+ * Rota experimental (Node) — não faz parte do deploy HostGator.
+ * Em produção use api/config.php e src/js/config.js (apiBaseUrl se precisar).
  */
 import { loadData, parseBody, saveData, sendJson } from '../lib/store.js';
 
@@ -17,7 +17,7 @@ export default async function handler(req, res) {
     if (!saved) {
       return sendJson(res, 503, {
         ok: false,
-        error: 'Defina BLOB_READ_WRITE_TOKEN no Vercel para persistir webhook e dados.',
+        error: 'Persistência remota não configurada (este .js não é usado na HostGator).',
       });
     }
     return sendJson(res, 200, { ok: true });

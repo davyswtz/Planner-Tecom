@@ -1,10 +1,12 @@
 // Config local (não versionar com tokens reais, se possível).
-// apiBaseUrl: em produzão costuma ser auto (mesmo host + pasta do app + /api). Defina manual se precisar.
+// apiBaseUrl: na HostGator costuma ser auto (mesmo domínio + pasta do app + /api). Defina manual só se a subpasta exigir.
+// appBuild: altere a cada deploy (ex. 2026-03-30-2). Limpa cache local antigo e força navegador a buscar JS/CSS novos.
 (function () {
   const prev = (typeof window !== 'undefined' && window.APP_CONFIG) ? window.APP_CONFIG : {};
 
   window.APP_CONFIG = {
     ...prev,
+    appBuild: Object.prototype.hasOwnProperty.call(prev, 'appBuild') ? prev.appBuild : '2026-03-30-1',
     // Webhooks por região (Google Chat).
     // IMPORTANTE: URLs com token são sensíveis. Evite commitar em repositório público.
     defaultWebhookUrlsByRegion: {

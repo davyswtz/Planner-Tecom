@@ -1,3 +1,4 @@
+/** Opcional para Node; na HostGator use apenas os .php desta pasta. */
 import { list, put } from '@vercel/blob';
 
 const DATA_PATH = 'planner-data.json';

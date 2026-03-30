@@ -59,11 +59,12 @@ public_html/
     ├── op_tasks.php
     ├── op_task_image.php
     ├── calendar_notes.php
-    ├── op_desc_images.inc.php
+    ├── chat.php
+    └── op_desc_images.inc.php
     └── migrations/            ← opcional
 ```
 
-- **Não envie** `api/*.js` (Vercel/Node): ver `api/NAO_SUBIR_NA_HOSTGATOR_NODE_VERCEL.txt`.
+- **Não envie** os `api/*.js` experimentais (não são PHP): ver `api/NAO_SUBIR_JS_NA_HOSTGATOR.txt`.
 - **`api/migrations/`** e `*.sql` são opcionais no FTP (úteis como backup).
 
 ## 4. PHP
@@ -71,6 +72,8 @@ public_html/
 A HostGator costuma usar **PHP 8.x**. No cPanel, em **Select PHP Version**, prefira **8.1 ou 8.2**.
 
 ## 5. Front-end e URL da API
+
+O **`index.html`** carrega **`config.js`** no `<head>`, injeta **`main.css?`** e, ao final do `<body>`, **`main.js?`** com o sufixo **`appBuild`** definido em **`config.js`**. A cada deploy, **altere `appBuild`** (ex.: `2026-03-30-2`): o navegador baixa JS/CSS novos e o app **remove caches `planner.*` antigos** (mantém login e tema).
 
 O **`main.js`** monta a base da API como **`https://seudominio.com/api`** (mesmo domínio + pasta **`api`**).
 
@@ -89,19 +92,15 @@ O **`main.js`** monta a base da API como **`https://seudominio.com/api`** (mesmo
 O front-end carrega **`src/data/*.json`**. Envie a pasta **`src/data/`** completa no FTP, na mesma hierarquia relativa a `index.html`.  
 Se o JSON estiver em outro caminho absoluto (CDN ou subpasta diferente), defina em `config.js` a chave **`ctoDataBase`** (URL da pasta terminando em `/`, apontando para onde estão os `.json`).
 
-## 6. Arquivo `config.js` (opcional)
+## 6. Arquivo `config.js`
 
-Copie **`src/js/config.example.js`** → **`src/js/config.js`** e, em **`index.html`**, carregue **antes** de `main.js`:
-
-```html
-<script src="./src/js/config.js"></script>
-<script src="./src/js/main.js"></script>
-```
+Copie **`src/js/config.example.js`** → **`src/js/config.js`**. O **`index.html`** do repositório já referencia `config.js` no `<head>` (não é preciso duplicar antes do `main.js` no rodapé).
 
 Chaves úteis de `window.APP_CONFIG`:
 
 | Chave | Uso |
-|--------|-----|
+| ----- | --- |
+| **`appBuild`** | Mude a cada publicação para invalidar cache local e forçar novo `main.js` / `main.css`. |
 | `apiBaseUrl` | Base da API PHP (já documentada acima). |
 | `defaultWebhookUrl` | Webhook Google Chat padrão (só se quiser pré-preencher; usuário ainda pode trocar no modal). |
 | `ctoDataBase` | Pasta base dos JSON de CTO, se não forem servidos em `src/data/` relativo ao site. |

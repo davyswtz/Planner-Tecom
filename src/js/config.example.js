@@ -15,8 +15,14 @@
  */
 window.APP_CONFIG = {
   /**
+   * Mude a cada deploy (ex.: data + sufixo). Zera caches `planner.*` (exceto sessão e tema),
+   * e o `index.html` usa este valor em `?v=` no main.js e main.css.
+   */
+  appBuild: '2026-03-30-1',
+
+  /**
    * URL base da pasta `api` (sem barra no final). Ex.: https://meusite.com/burrinho/api
-   * Deixe '' para auto-detectar: mesmo host + caminho da página + `/api` (funciona em subpastas na HostGator).
+   * Deixe '' para auto-detectar na HostGator: mesmo domínio + caminho da página + `/api`.
    */
   apiBaseUrl: '',
 

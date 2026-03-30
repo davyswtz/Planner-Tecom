@@ -1,5 +1,5 @@
 Arquivos .js nesta pasta (config.js, bootstrap.js, tasks.js, op-tasks.js, calendar-notes.js, _store.js)
-são para deploy em Vercel / Node, não para PHP na HostGator.
+não fazem parte do deploy PHP na HostGator — o painel usa apenas os .php.
 
 No servidor compartilhado envie apenas os .php, .htaccess, SQL de apoio e credentials.php.
 
