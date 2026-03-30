@@ -58,6 +58,42 @@ function normalizeTechName(name) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
+/** Emojis exibidos no seletor do chat (Unicode; um item por célula). */
+const BP_CHAT_EMOJI_LIST = [
+  '😀', '😃', '😄', '😁', '😅', '😂', '🤣', '😊', '😇', '🙂', '😉', '😍', '🥰', '😘', '😗', '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤔', '😐', '😑', '🙄', '😬', '🤥', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🥵', '🥶', '🥴', '😵', '🤯', '🥳', '😎', '🤓', '😕', '🙁', '☹️', '😮', '😯', '😲', '😳', '🥺', '😦', '😧', '😨', '😰', '😥', '😢', '😭', '😱', '😖', '😣', '😞', '😓', '😩', '😫', '🥱', '😤', '😡', '😠', '🤬', '💀', '💩', '🤡', '👻', '👽', '🤖',
+  '👍', '👎', '👌', '✌️', '🤞', '🤟', '🤘', '👋', '🤝', '🙏', '💪', '👏', '🙌', '✋', '🖐️', '☝️', '👆', '👇', '👉', '👈', '✍️',
+  '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '💔', '💕', '💖', '💗', '💘', '💝',
+  '🔥', '✨', '⭐', '🌟', '💫', '💥', '💯', '✅', '❌', '❓', '❗', '💬', '🗯️', '💭', '⚠️', '🎉', '🎊', '🎁', '🏆', '🥇', '🎯', '⚽', '🏀', '🎮', '🎵', '📷', '📱', '💻',
+  '☕', '🍕', '🍔', '🍰', '🍺', '🥂', '🌮', '🍣',
+  '🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼', '🐨', '🐯', '🦁', '🐮', '🐷', '🐸', '🐵', '🐔', '🐧', '🐦', '🦆', '🐝', '🦋', '🐢', '🐍', '🐙', '🐳', '🦈', '🌈', '☀️', '🌙', '⛅', '🌧️',
+];
+
+/**
+ * Insere texto na posição do cursor respeitando maxlength do campo.
+ * @param {HTMLInputElement | HTMLTextAreaElement | null} el
+ * @param {string} text
+ */
+function insertTextAtInputCursor(el, text) {
+  if (!el || text === '') return;
+  const max = typeof el.maxLength === 'number' && el.maxLength > 0 ? el.maxLength : 2500;
+  const start = typeof el.selectionStart === 'number' ? el.selectionStart : 0;
+  const end = typeof el.selectionEnd === 'number' ? el.selectionEnd : 0;
+  const val = el.value;
+  const next = val.slice(0, start) + text + val.slice(end);
+  if (next.length > max) {
+    ToastService.show('Mensagem no limite de caracteres.', 'warning');
+    return;
+  }
+  el.value = next;
+  const pos = start + text.length;
+  try {
+    el.setSelectionRange(pos, pos);
+  } catch {
+    /* some inputs */
+  }
+  el.focus();
+}
+
 function getTechDirectory(regionKey = '') {
   const cfg = window.APP_CONFIG || {};
   const byRegion = cfg.techsByRegion && typeof cfg.techsByRegion === 'object' ? cfg.techsByRegion : {};
@@ -122,6 +158,14 @@ const ThemeService = {
   init() {
     const saved = this._readSaved() || this._defaultTheme;
     this.apply(saved);
+  },
+
+  /** Reaplica tema salvo (útil após voltar pelo cache do navegador) e sincroniza o checkbox. */
+  refreshFromStorage() {
+    const saved = this._readSaved() || this._defaultTheme;
+    this.apply(saved);
+    const toggle = document.getElementById('themeLightToggle');
+    if (toggle) toggle.checked = document.documentElement.dataset.theme === 'light';
   },
 
   set(theme) {
@@ -245,10 +289,29 @@ const Store = (() => {
     async request(path, options = {}) {
       if (!this.enabled()) return null;
       try {
+        const timeoutMs = typeof options.timeoutMs === 'number' ? options.timeoutMs : 15000;
+        const { timeoutMs: _omitTimeout, headers: optHeaders, ...rest } = options;
+        const ctrl = new AbortController();
+        const kill = setTimeout(() => {
+          try {
+            ctrl.abort();
+          } catch {
+            /* ignore */
+          }
+        }, timeoutMs);
+        const method = String(rest.method || 'GET').toUpperCase();
+        const hasJsonBody =
+          rest.body != null && typeof rest.body === 'string' && method !== 'GET' && method !== 'HEAD';
+        const headers = {
+          ...(hasJsonBody ? { 'Content-Type': 'application/json' } : {}),
+          ...(optHeaders && typeof optHeaders === 'object' ? optHeaders : {}),
+        };
         const response = await fetch(`${this.baseUrl}${path}`, {
-          headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-          ...options,
+          ...rest,
+          signal: ctrl.signal,
+          headers,
         });
+        clearTimeout(kill);
         if (!response.ok) return null;
         const text = await response.text();
         const head = text.trim().slice(0, 12).toLowerCase();
@@ -294,10 +357,10 @@ const Store = (() => {
       if (sinceId) qs.set('since_id', String(sinceId));
       if (limit) qs.set('limit', String(limit));
       const suffix = qs.toString() ? `?${qs.toString()}` : '';
-      return this.requestAny([`/chat_messages.php${suffix}`, `/chat-messages${suffix}`], { method: 'GET' });
+      return this.request(`/chat_messages.php${suffix}`, { method: 'GET', timeoutMs: 8000 });
     },
     async sendChatMessage(payload) {
-      return this.requestAny(['/chat_messages.php', '/chat-messages'], { method: 'POST', body: JSON.stringify(payload) });
+      return this.request('/chat_messages.php', { method: 'POST', body: JSON.stringify(payload), timeoutMs: 25000 });
     },
     buildUrl(path) {
       const p = String(path || '');
@@ -2991,11 +3054,21 @@ const Controllers = {
     init() {
       ThemeService.init();
       const toggle = document.getElementById('themeLightToggle');
-      if (!toggle) return;
-      toggle.checked = document.documentElement.dataset.theme === 'light';
-      toggle.addEventListener('change', () => {
-        ThemeService.set(toggle.checked ? 'light' : 'dark');
-      });
+      if (toggle) {
+        if (toggle.dataset.bpBound !== '1') {
+          toggle.dataset.bpBound = '1';
+          toggle.checked = document.documentElement.dataset.theme === 'light';
+          toggle.addEventListener('change', () => {
+            ThemeService.set(toggle.checked ? 'light' : 'dark');
+          });
+        } else {
+          toggle.checked = document.documentElement.dataset.theme === 'light';
+        }
+      }
+      if (typeof window !== 'undefined' && !window.__bpThemePageshow) {
+        window.__bpThemePageshow = true;
+        window.addEventListener('pageshow', () => ThemeService.refreshFromStorage());
+      }
     },
   },
   auth: {
@@ -3165,6 +3238,23 @@ const Controllers = {
     _isOnChatPage() {
       return Store.currentPage === 'chat';
     },
+    _formatChatTime(raw) {
+      const s = String(raw || '').trim();
+      if (!s) return '';
+      try {
+        const normalized = s.includes('T') ? s : s.replace(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})/, '$1T$2');
+        const d = new Date(normalized);
+        if (Number.isNaN(d.getTime())) return s.slice(0, 16);
+        return d.toLocaleString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+      } catch {
+        return s.slice(0, 16);
+      }
+    },
     _status(text) {
       const el = document.getElementById('chatStatus');
       if (el) el.textContent = text;
@@ -3173,43 +3263,64 @@ const Controllers = {
       const root = document.getElementById('chatMessages');
       if (!root || !msg) return;
 
-      const wrap = document.createElement('div');
-      wrap.className = 'chat-msg';
+      const me = getSessionUserKey();
+      const authorKey = String(msg.username || '').trim().toLowerCase();
+      const isMine = Boolean(me && authorKey && authorKey === me);
 
-      const head = document.createElement('div');
-      head.className = 'chat-msg-head';
+      const row = document.createElement('div');
+      row.className = `chat-row ${isMine ? 'chat-row--mine' : 'chat-row--other'}`;
+      row.setAttribute('data-chat-author', authorKey || '');
 
-      const user = document.createElement('div');
-      user.className = 'chat-msg-user';
-      user.textContent = String(msg.displayName || msg.username || '—');
+      if (!isMine) {
+        const av = document.createElement('div');
+        av.className = 'chat-msg-avatar';
+        const label = String(msg.displayName || msg.username || '?');
+        av.textContent = Utils.getInitials(label);
+        av.style.background = Utils.getAvatarColor(label);
+        av.setAttribute('aria-hidden', 'true');
+        row.appendChild(av);
+      }
 
-      const time = document.createElement('div');
-      time.className = 'chat-msg-time';
-      const created = String(msg.createdAt || '').trim();
-      time.textContent = created ? created.replace('T', ' ').replace('Z', '') : '';
+      const bubble = document.createElement('div');
+      bubble.className = 'chat-bubble';
 
-      head.appendChild(user);
-      head.appendChild(time);
+      const meta = document.createElement('div');
+      meta.className = `chat-bubble-meta${isMine ? ' chat-bubble-meta--mine' : ''}`;
 
-      const body = document.createElement('div');
-      body.className = 'chat-msg-text';
-      body.textContent = String(msg.message || '');
+      if (!isMine) {
+        const nameEl = document.createElement('span');
+        nameEl.className = 'chat-bubble-name';
+        nameEl.textContent = String(msg.displayName || msg.username || '—');
+        meta.appendChild(nameEl);
+      }
 
-      wrap.appendChild(head);
-      wrap.appendChild(body);
+      const timeEl = document.createElement('span');
+      timeEl.className = 'chat-bubble-time';
+      timeEl.textContent = this._formatChatTime(msg.createdAt);
+      meta.appendChild(timeEl);
+      bubble.appendChild(meta);
+
+      const text = String(msg.message || '').trim();
+      if (text) {
+        const body = document.createElement('div');
+        body.className = 'chat-bubble-text';
+        body.textContent = text;
+        bubble.appendChild(body);
+      }
 
       const hasImage = Boolean(msg.hasImage) || Boolean(msg.image);
       if (hasImage) {
         const img = document.createElement('img');
-        img.className = 'chat-msg-img';
+        img.className = 'chat-bubble-img';
         const base = Store.getApiBaseUrl();
         img.src = base ? `${base}/chat_image.php?id=${encodeURIComponent(String(msg.id))}` : `./api/chat_image.php?id=${encodeURIComponent(String(msg.id))}`;
         img.alt = 'Imagem enviada no chat';
         img.loading = 'lazy';
-        wrap.appendChild(img);
+        bubble.appendChild(img);
       }
 
-      root.appendChild(wrap);
+      row.appendChild(bubble);
+      root.appendChild(row);
     },
     _scrollToBottomIfNearEnd() {
       const root = document.getElementById('chatMessages');
@@ -3228,7 +3339,7 @@ const Controllers = {
       try {
         const res = await Store.fetchChatMessages(this._lastId, this._lastId ? 120 : 60);
         if (!res || !res.ok || !Array.isArray(res.messages)) {
-          this._status('Falha ao carregar mensagens.');
+          this._status('Sem resposta do servidor (timeout ou erro). Verifique a API /api.');
           return;
         }
         if (!res.messages.length && !this._lastId) {
@@ -3286,9 +3397,18 @@ const Controllers = {
     close() {
       if (this._timer) clearInterval(this._timer);
       this._timer = null;
+      const pop = document.getElementById('chatEmojiPopover');
+      const btn = document.getElementById('chatEmojiBtn');
+      if (pop) {
+        pop.hidden = true;
+        pop.setAttribute('aria-hidden', 'true');
+      }
+      if (btn) btn.setAttribute('aria-expanded', 'false');
     },
     init() {
       const form = document.getElementById('chatForm');
+      if (form && form.dataset.bpBound === '1') return;
+      if (form) form.dataset.bpBound = '1';
       const input = document.getElementById('chatInput');
       const attachBtn = document.getElementById('chatAttachBtn');
       const emojiBtn = document.getElementById('chatEmojiBtn');
@@ -3318,10 +3438,65 @@ const Controllers = {
         });
       };
 
-      emojiBtn?.addEventListener('click', () => {
-        // O teclado/selector de emoji é nativo do SO; aqui só focamos o input.
-        input?.focus();
+      const popover = document.getElementById('chatEmojiPopover');
+      const emojiGrid = document.getElementById('chatEmojiGrid');
+
+      const syncEmojiPopoverA11y = (open) => {
+        if (!popover) return;
+        popover.setAttribute('aria-hidden', open ? 'false' : 'true');
+        emojiBtn?.setAttribute('aria-expanded', open ? 'true' : 'false');
+      };
+
+      const setEmojiPopoverOpen = (open) => {
+        if (!popover) return;
+        popover.hidden = !open;
+        syncEmojiPopoverA11y(open);
+      };
+
+      const buildEmojiGridOnce = () => {
+        if (!emojiGrid || emojiGrid.dataset.bpBuilt === '1') return;
+        emojiGrid.dataset.bpBuilt = '1';
+        const frag = document.createDocumentFragment();
+        for (const ch of BP_CHAT_EMOJI_LIST) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'chat-emoji-cell';
+          b.textContent = ch;
+          b.title = `Inserir ${ch}`;
+          b.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            insertTextAtInputCursor(input, ch);
+          });
+          frag.appendChild(b);
+        }
+        emojiGrid.appendChild(frag);
+      };
+
+      emojiBtn?.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        buildEmojiGridOnce();
+        const open = Boolean(popover && popover.hidden);
+        setEmojiPopoverOpen(open);
+        if (open) input?.focus();
       });
+
+      const closeEmojiIfOutside = (ev) => {
+        if (!popover || popover.hidden) return;
+        const t = ev.target;
+        if (popover.contains(t)) return;
+        if (emojiBtn && (t === emojiBtn || emojiBtn.contains(t))) return;
+        setEmojiPopoverOpen(false);
+      };
+      document.addEventListener('mousedown', closeEmojiIfOutside);
+
+      const onEmojiEscape = (ev) => {
+        if (ev.key !== 'Escape' || !popover || popover.hidden) return;
+        if (!Controllers.chat._isOnChatPage()) return;
+        setEmojiPopoverOpen(false);
+      };
+      document.addEventListener('keydown', onEmojiEscape);
       attachBtn?.addEventListener('click', () => fileInput?.click());
       fileInput?.addEventListener('change', () => {
         const f = fileInput.files && fileInput.files[0];
@@ -5150,6 +5325,10 @@ const Controllers = {
    APP INIT — Bootstrap da aplicação
 ───────────────────────────────────────────────────────────── */
 async function initApp() {
+  if (typeof window !== 'undefined') {
+    if (window.__bpAppStarted) return;
+    window.__bpAppStarted = true;
+  }
   Controllers.theme.init();
   CtoLocationRegistry.load().catch(() => {});
   Controllers.auth.init();

@@ -709,9 +709,13 @@
             <span class="panel-subtitle chat-subtitle" id="chatStatus">Conectando…</span>
           </div>
           <div class="chat-messages" id="chatMessages" aria-live="polite"></div>
+          <div class="chat-composer-wrap">
+            <div class="chat-emoji-popover" id="chatEmojiPopover" hidden role="dialog" aria-label="Escolher emoji" aria-hidden="true">
+              <div class="chat-emoji-grid" id="chatEmojiGrid"></div>
+            </div>
           <form class="chat-composer" id="chatForm" autocomplete="off">
             <input type="file" id="chatImageInput" accept="image/*" hidden />
-            <button class="ghost-btn chat-icon-btn" type="button" id="chatEmojiBtn" title="Emojis" aria-label="Emojis">😀</button>
+            <button class="ghost-btn chat-icon-btn" type="button" id="chatEmojiBtn" title="Emojis" aria-label="Emojis" aria-expanded="false" aria-controls="chatEmojiPopover">😀</button>
             <button class="ghost-btn chat-icon-btn" type="button" id="chatAttachBtn" title="Anexar imagem" aria-label="Anexar imagem">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path d="M21.44 11.05l-8.49 8.49a5 5 0 01-7.07-7.07l9.19-9.19a3.5 3.5 0 014.95 4.95l-9.19 9.19a2 2 0 01-2.83-2.83l8.49-8.49"/>
@@ -720,6 +724,7 @@
             <input class="chat-input" id="chatInput" type="text" placeholder="Digite uma mensagem e aperte Enter…" maxlength="2500"/>
             <button class="primary-btn" type="submit" id="chatSendBtn">Enviar</button>
           </form>
+          </div>
           <div class="chat-preview" id="chatImagePreview" hidden aria-label="Prévia da imagem"></div>
         </div>
       </section>
