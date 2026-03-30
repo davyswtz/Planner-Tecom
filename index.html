@@ -100,6 +100,15 @@
         <span class="nav-badge" id="badge-late" style="display:none" aria-label="tarefas atrasadas">0</span>
       </button>
 
+      <button type="button" class="nav-item" data-page="atendimento" aria-label="Atendimento ao cliente">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <path d="M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z"/>
+          <path d="M8 10h8"/>
+          <path d="M8 14h5"/>
+        </svg>
+        <span class="nav-label">Atendimento ao cliente</span>
+      </button>
+
       <button type="button" class="nav-item" data-page="calendario">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
           <rect x="3" y="4" width="18" height="18" rx="2"/>
@@ -356,11 +365,6 @@
             </summary>
             <div class="tasks-top-details-body">
               <div class="tasks-tabs tasks-tabs--top" role="tablist" aria-label="Projetos de Rede">
-                <button type="button" class="tasks-tab" role="tab" aria-selected="false" data-category="atendimento-cliente" id="tab-atendimento-cliente" aria-controls="panel-atendimento-cliente">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z"/></svg>
-                  Atendimento ao Cliente
-                  <span class="tasks-tab-count" id="tab-count-atendimento-cliente">0</span>
-                </button>
                 <button type="button" class="tasks-tab" role="tab" aria-selected="false" data-category="otimizacao-rede" id="tab-otimizacao-rede" aria-controls="panel-otimizacao-rede">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                     <path d="M4 12a8 8 0 0 1 16 0"/>
@@ -513,6 +517,53 @@
 
       </section>
       <!-- /page-tarefas -->
+
+      <!-- ═══ PAGE: ATENDIMENTO AO CLIENTE (módulo próprio) ═══ -->
+      <section class="page" id="page-atendimento" aria-label="Atendimento ao cliente">
+        <div class="panel" style="padding:0;overflow:hidden">
+          <div class="toolbar" role="toolbar" aria-label="Filtros do atendimento">
+            <div class="toolbar-left">
+              <div class="search-box" role="search">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="search" id="atdOpSearchInput" placeholder="Buscar atendimentos…" aria-label="Buscar atendimentos"/>
+              </div>
+              <div class="search-box" role="group" aria-label="Filtro de região">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <select id="atdOpRegionSelectFilter" aria-label="Filtrar por região">
+                  <option value="">Todas as regiões</option>
+                  <option value="Goval">Goval</option>
+                  <option value="Vale do Aço">Vale do Aço</option>
+                  <option value="Caratinga">Caratinga</option>
+                  <option value="Backup">Backup</option>
+                </select>
+              </div>
+              <div class="search-box" role="group" aria-label="Ordenar por data">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h10"/><path d="M8 18h7"/><path d="M3 6l1-1 1 1"/><path d="M4 5v14"/><path d="M3 18l1 1 1-1"/></svg>
+                <select id="atdOpDateSortFilter" aria-label="Ordenar por data">
+                  <option value="all">Todas as datas</option>
+                  <option value="oldest">Mais antigos</option>
+                  <option value="newest">Mais novos</option>
+                </select>
+              </div>
+              <div class="search-box" role="search">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <input type="search" id="atdOpTecnicoInput" placeholder="Filtrar por técnico…" aria-label="Filtrar por técnico"/>
+              </div>
+              <div class="search-box" role="search">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 16V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2h14a2 2 0 002-2z"/><polyline points="7 12 10 15 17 8"/></svg>
+                <input type="search" id="atdOpTaskIdInput" placeholder="ID da tarefa…" aria-label="ID da tarefa"/>
+              </div>
+            </div>
+            <button class="primary-btn" id="openAtendimentoTaskModalBtn" type="button" aria-label="Nova lista de atendimento">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Nova lista
+            </button>
+          </div>
+          <div class="op-kanban-wrap" style="border-top:1px solid var(--border)">
+            <div id="atendimentoBoard" class="kanban-board" role="region" aria-label="Painel de atendimento ao cliente"></div>
+          </div>
+        </div>
+      </section>
 
       <!-- ═══ PAGE: CALENDÁRIO ═══ -->
       <section class="page" id="page-calendario" aria-label="Calendário">

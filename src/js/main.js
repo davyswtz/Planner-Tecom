@@ -523,6 +523,12 @@ const Store = (() => {
   let opTecnicoSearch = '';
   let opTaskIdSearch = '';
   let opDateSort = 'all';
+  /** Filtros da página dedicada "Atendimento ao cliente" (independentes de Tarefas). */
+  let atdOpSearch = '';
+  let atdOpRegionSearch = '';
+  let atdOpTecnicoSearch = '';
+  let atdOpTaskIdSearch = '';
+  let atdOpDateSort = 'all';
   let editingTaskId = null;
   let editingOpTaskId = null;
   let sidebarOpen = true;
@@ -738,6 +744,16 @@ const Store = (() => {
     set opTaskIdSearch(v)  { opTaskIdSearch = v; },
     get opDateSort()       { return opDateSort; },
     set opDateSort(v)      { opDateSort = v; },
+    get atdOpSearch()       { return atdOpSearch; },
+    set atdOpSearch(v)      { atdOpSearch = v; },
+    get atdOpRegionSearch() { return atdOpRegionSearch; },
+    set atdOpRegionSearch(v){ atdOpRegionSearch = v; },
+    get atdOpTecnicoSearch(){ return atdOpTecnicoSearch; },
+    set atdOpTecnicoSearch(v){ atdOpTecnicoSearch = v; },
+    get atdOpTaskIdSearch() { return atdOpTaskIdSearch; },
+    set atdOpTaskIdSearch(v){ atdOpTaskIdSearch = v; },
+    get atdOpDateSort()     { return atdOpDateSort; },
+    set atdOpDateSort(v)    { atdOpDateSort = v; },
     get editingTaskId()     { return editingTaskId; },
     set editingTaskId(v)    { editingTaskId = v; },
     get editingOpTaskId()   { return editingOpTaskId; },
@@ -1807,14 +1823,19 @@ const OpTaskService = {
     }
   },
 
-  /** Retorna tarefas operacionais filtradas por categoria e busca */
-  getFilteredByCategory(category) {
-    const query = (Store.opSearch || '').toLowerCase();
-    const regionQuery = (Store.opRegionSearch || '').toLowerCase();
-    const techQuery = (Store.opTecnicoSearch || '').toLowerCase();
-    const taskIdRaw = String(Store.opTaskIdSearch || '').trim();
+  /**
+   * Retorna tarefas operacionais filtradas por categoria e busca.
+   * @param {string} category
+   * @param {{ filterNamespace?: 'op' | 'atd' }} [opts] — `atd`: usa filtros da página Atendimento (Store.atdOp*).
+   */
+  getFilteredByCategory(category, opts = {}) {
+    const ns = opts.filterNamespace === 'atd' ? 'atd' : 'op';
+    const query = (ns === 'atd' ? Store.atdOpSearch : Store.opSearch || '').toLowerCase();
+    const regionQuery = (ns === 'atd' ? Store.atdOpRegionSearch : Store.opRegionSearch || '').toLowerCase();
+    const techQuery = (ns === 'atd' ? Store.atdOpTecnicoSearch : Store.opTecnicoSearch || '').toLowerCase();
+    const taskIdRaw = String((ns === 'atd' ? Store.atdOpTaskIdSearch : Store.opTaskIdSearch) || '').trim();
     const taskIdNum = taskIdRaw && /^\d+$/.test(taskIdRaw) ? Number(taskIdRaw) : null;
-    const dateSort = String(Store.opDateSort || 'all');
+    const dateSort = String((ns === 'atd' ? Store.atdOpDateSort : Store.opDateSort) || 'all');
 
     const filtered = Store.getOpTasksByCategory(category).filter(t => {
       const matchSearch =
@@ -2113,6 +2134,8 @@ const UI = {
     Finalizada: true,
   },
   _atdStatusOrder: ['Backlog', 'Em andamento', 'Concluída', 'Finalizada'],
+  /** Após soltar um card na estante, evita abrir o modal no click fantasma. */
+  _atdSuppressBookClickUntil: 0,
   _normalizeAtdStatus(status) {
     if (status === 'Criada' || status === 'A iniciar') return 'Backlog';
     return status;
@@ -2249,17 +2272,14 @@ const UI = {
     const allOpTasks = Store.getOpTasks();
     const rompimentosCount = allOpTasks.filter(t => t.categoria === 'rompimentos').length;
     const trocaPosteCount = allOpTasks.filter(t => t.categoria === 'troca-poste').length;
-    const atendimentoCount = allOpTasks.filter(t => t.categoria === 'atendimento-cliente' && !t.parentTaskId).length;
     const otimizacaoCount = allOpTasks.filter(t => t.categoria === 'otimizacao-rede').length;
     const certCemigCount = allOpTasks.filter(t => t.categoria === 'certificacao-cemig').length;
     const tabRompimentos = document.getElementById('tab-count-rompimentos');
     const tabTrocaPoste = document.getElementById('tab-count-troca-poste');
-    const tabAtendimento = document.getElementById('tab-count-atendimento-cliente');
     const tabOtim = document.getElementById('tab-count-otimizacao-rede');
     const tabCertCemig = document.getElementById('tab-count-certificacao-cemig');
     if (tabRompimentos) tabRompimentos.textContent = String(rompimentosCount);
     if (tabTrocaPoste) tabTrocaPoste.textContent = String(trocaPosteCount);
-    if (tabAtendimento) tabAtendimento.textContent = String(atendimentoCount);
     if (tabOtim) tabOtim.textContent = String(otimizacaoCount);
     if (tabCertCemig) tabCertCemig.textContent = String(certCemigCount);
   },
@@ -2269,15 +2289,9 @@ const UI = {
     const category = Store.currentOpCategory;
     const tasks    = OpTaskService.getFilteredByCategory(category);
     const tod      = Utils.todayIso();
-    const isAtendimento = category === 'atendimento-cliente';
     const board = document.getElementById('kanbanBoard');
-    if (isAtendimento) {
-      board?.classList.add('atd-mode');
-      board?.classList.remove('kanban-board--cemig');
-      this.renderAtendimentoList(tasks);
-      return;
-    }
     board?.classList.remove('atd-mode');
+    const isAtendimento = false;
 
     const isCemig = category === 'certificacao-cemig';
     if (isCemig) board?.classList.add('kanban-board--cemig');
@@ -2490,9 +2504,10 @@ const UI = {
     });
   },
 
-  renderAtendimentoList(tasks) {
-    const board = document.getElementById('kanbanBoard');
-    const currentCategory = Store.currentOpCategory;
+  renderAtendimentoList(tasks, boardEl) {
+    const board = boardEl || document.getElementById('kanbanBoard');
+    if (!board) return;
+    const atdCategory = board.id === 'atendimentoBoard' ? 'atendimento-cliente' : Store.currentOpCategory;
     const currentLabel = 'Atendimento ao Cliente';
     const statusLabel = (status) => status === 'Concluída' ? 'Concluído' : status;
     const statusBadgeAtd = (status) => this.statusBadge(status).replace(status, statusLabel(status));
@@ -2521,91 +2536,77 @@ const UI = {
       emAndamento: childTasksAll.filter(t => t.status === 'Em andamento').length,
     };
 
-    const renderSubtaskItem = (child, parentStatus) => `
-      <div class="atd-subtask-row ${this._atdLastMoved?.id === child.id ? 'just-moved' : ''}" data-task-row-id="${child.id}" data-open-subtask="${child.id}" draggable="true" data-drag-subtask="${child.id}">
-        <div class="atd-subtask-title-stack">
-          <span class="atd-subtask-title">${child.titulo}</span>
-          <span class="atd-badge-row">${[this.regionBadge(child.regiao), this.priorityBadge(child.prioridade || 'Média')].filter(Boolean).join('')}</span>
-        </div>
-        <span class="atd-parent-meta">${child.taskCode || ''}</span>
-        <span class="atd-parent-meta">${child.responsavel}</span>
-        <span class="atd-parent-meta">${Utils.formatDate(child.prazo)}</span>
-        <span class="atd-status-cell">${statusBadgeAtd(child.status)}</span>
-        <div class="atd-subtask-actions">
-          <select class="atd-status-select" data-change-status="${child.id}">
-            ${['A iniciar', 'Em andamento', 'Concluída', 'Finalizada'].map(s => `<option value="${s}" ${s === child.status ? 'selected' : ''}>${statusLabel(s)}</option>`).join('')}
-          </select>
-          <button class="atd-action-btn" data-edit-subtask="${child.id}">Editar</button>
-          <button class="atd-action-btn danger" data-delete-subtask="${child.id}">Excluir</button>
-        </div>
-      </div>
-    `;
-
-    const renderTaskItem = (parent, groupStatus) => {
+    const todIso = Utils.todayIso();
+    const renderBookCard = (parent) => {
       const children = getChildren(parent.id);
-      const expanded = this._atendimentoExpanded[parent.id] !== false;
       const doneCount = children.filter(c => ['Concluída', 'Finalizada'].includes(c.status)).length;
-      const allDone = children.length > 0 && doneCount === children.length;
-      const subHint = children.length ? ` · ${children.length} subtarefa${children.length === 1 ? '' : 's'}` : '';
+      const protocolo = String(parent.protocolo || '').trim();
+      const idLine = [parent.taskCode, protocolo].filter(Boolean).join(' · ');
+      const isLate = parent.prazo && parent.prazo < todIso && !['Concluída', 'Finalizada', 'Finalizado'].includes(parent.status);
+      const badgeRow = [this.regionBadge(parent.regiao), this.priorityBadge(parent.prioridade || 'Média')].filter(Boolean).join('');
+      const subLabel = children.length
+        ? `${doneCount}/${children.length} subtarefa${children.length === 1 ? '' : 's'}`
+        : 'Sem subtarefas';
+      const shelfGroup = parent._groupStatus || this._normalizeAtdStatus(parent.status);
       return `
-        <section class="atd-parent-card" data-parent-id="${parent.id}">
-          <div class="atd-parent-row ${this._atdLastMoved?.id === parent.id ? 'just-moved' : ''}" data-task-row-id="${parent.id}" data-toggle-parent="${parent.id}" role="button" tabindex="0" aria-expanded="${expanded ? 'true' : 'false'}">
-            <span class="atd-chevron ${expanded ? 'open' : ''}">▾</span>
-            <div class="atd-title-stack">
-              <span class="atd-parent-title">${parent.titulo}</span>
-              <span class="atd-badge-row">${[this.regionBadge(parent.regiao), this.priorityBadge(parent.prioridade || 'Média')].filter(Boolean).join('')}</span>
-            </div>
-            <span class="atd-parent-meta">${parent.taskCode || ''}</span>
-            <span class="atd-parent-meta">${parent.responsavel}</span>
-            <span class="atd-parent-meta">${Utils.formatDate(parent.prazo)}</span>
-            <span class="atd-status-cell">${statusBadgeAtd(parent.status)}</span>
-            <span class="atd-parent-meta">${children.length ? `${doneCount}/${children.length} concluídas` : 'Sem subtarefas'}${allDone ? ' · OK' : ''}${subHint}</span>
-            <span class="atd-row-actions">
-              <select class="atd-status-select" data-change-status="${parent.id}">
+        <article class="atd-book-card ${this._atdLastMoved?.id === parent.id ? 'just-moved' : ''} ${isLate ? 'atd-book-card--late' : ''}"
+          data-task-row-id="${parent.id}" data-parent-id="${parent.id}" data-atd-group-status="${shelfGroup}"
+          draggable="true" tabindex="0" role="button"
+          aria-label="Abrir lista: ${Utils.escapeHtml(parent.titulo)}">
+          <div class="atd-book-spine" aria-hidden="true"></div>
+          <div class="atd-book-inner">
+            <header class="atd-book-top">
+              <h3 class="atd-book-title">${Utils.escapeHtml(parent.titulo)}</h3>
+              ${badgeRow ? `<div class="atd-book-badges">${badgeRow}</div>` : ''}
+            </header>
+            ${idLine ? `<p class="atd-book-line atd-book-line--mono">${Utils.escapeHtml(idLine)}</p>` : ''}
+            <p class="atd-book-line"><span class="atd-book-k">Resp.</span> ${Utils.escapeHtml(String(parent.responsavel || '—').trim())}</p>
+            <p class="atd-book-line"><span class="atd-book-k">Prazo</span> <time class="${isLate ? 'atd-book-late' : ''}" datetime="${Utils.escapeHtml(String(parent.prazo || ''))}">${Utils.formatDate(parent.prazo)}</time></p>
+            <div class="atd-book-status">${statusBadgeAtd(parent.status)}</div>
+            <p class="atd-book-subs" title="Subtarefas desta lista">${subLabel}</p>
+            <footer class="atd-book-foot">
+              <select class="atd-status-select atd-book-select" data-change-status="${parent.id}" aria-label="Alterar etapa da lista" draggable="false">
                 ${this._atdStatusOrder.map(s => `<option value="${s}" ${s === parent.status ? 'selected' : ''}>${statusLabel(s)}</option>`).join('')}
               </select>
-              <button class="atd-action-btn" data-edit-parent="${parent.id}">Editar</button>
-              <button class="atd-action-btn danger" data-delete-parent="${parent.id}">Excluir</button>
-            </span>
+              <div class="atd-book-foot-btns">
+                <button type="button" class="atd-book-ico" data-add-child="${parent.id}" title="Nova subtarefa" aria-label="Nova subtarefa" draggable="false">＋</button>
+                <button type="button" class="atd-book-ico atd-book-ico--danger" data-delete-parent="${parent.id}" title="Excluir lista" aria-label="Excluir lista" draggable="false">✕</button>
+              </div>
+            </footer>
           </div>
-          <div class="atd-subtasks ${expanded ? 'open' : ''}" data-drop-parent="${parent.id}">
-            ${children.length ? children.map(c => renderSubtaskItem(c, parent.status)).join('') : `<div class="calendar-empty" style="padding:12px 8px">Sem subtarefas nesta lista.</div>`}
-            <button class="kanban-col-add" style="margin:8px 0 0" data-add-child="${parent.id}" data-group-status="${groupStatus}">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              Adicionar subtarefa
-            </button>
-          </div>
-        </section>
+        </article>
       `;
     };
 
-    const renderTaskGroup = (status) => {
+    const renderShelf = (status) => {
       const groupParents = parentTasks
         .filter(t => (t._groupStatus || this._normalizeAtdStatus(t.status)) === status)
         .sort(sortByDefault);
       const expanded = this._atendimentoGroupExpanded[status] !== false;
+      const books = groupParents.length
+        ? groupParents.map(p => renderBookCard(p)).join('')
+        : '<p class="atd-shelf-empty">Nenhuma lista nesta etapa.</p>';
       return `
-        <section class="atd-group" data-group="${status}">
-          <header class="atd-group-head">
-            <button type="button" class="atd-group-toggle" data-toggle-group="${status}">
+        <section class="atd-shelf" data-atd-shelf="${status}">
+          <header class="atd-shelf-head">
+            <button type="button" class="atd-shelf-toggle" data-toggle-group="${status}">
               <span class="atd-chevron ${expanded ? 'open' : ''}">▾</span>
-              <span class="atd-group-title">${status.toUpperCase()}</span>
-              <span class="atd-group-count">${groupParents.length}</span>
+              <span class="atd-shelf-title">${status.toUpperCase()}</span>
+              <span class="atd-shelf-count">${groupParents.length}</span>
             </button>
           </header>
-          <div class="atd-group-body ${expanded ? 'open' : ''}">
-            ${groupParents.length
-              ? `<div class="atd-table-head"><span></span><span>Tarefa</span><span>ID</span><span>Responsável</span><span>Prazo</span><span>Status</span><span>Progresso</span><span>Ações</span></div>${groupParents.map(p => renderTaskItem(p, status)).join('')}`
-              : `<div class="calendar-empty">Nenhuma tarefa neste grupo.</div>`}
+          <div class="atd-shelf-body ${expanded ? 'open' : ''}">
+            <div class="atd-shelf-plank" aria-hidden="true"></div>
+            <div class="atd-shelf-books" data-drop-atd-status="${status}">${books}</div>
           </div>
         </section>
       `;
     };
 
     board.innerHTML = `
-      <div class="atd-list-wrap">
+      <div class="atd-list-wrap atd-list-wrap--shelves">
         <div class="atd-list-toolbar">
-          <span class="panel-title">${currentLabel} · Listas e Subtarefas</span>
+          <span class="panel-title">${currentLabel} · Estante <span class="atd-toolbar-hint">cada card é uma lista; clique para abrir, ou arraste para outra prateleira para mudar a etapa</span></span>
           <div class="atd-toolbar-right">
             <div class="atd-kpi-group" aria-label="Indicadores de atendimento">
               <span class="atd-kpi">Listas: <strong>${totals.listas}</strong></span>
@@ -2619,49 +2620,85 @@ const UI = {
             </button>
           </div>
         </div>
-        <div class="atd-groups">
-          ${this._atdStatusOrder.map(renderTaskGroup).join('')}
+        <div class="atd-shelves">
+          ${this._atdStatusOrder.map(renderShelf).join('')}
         </div>
       </div>
     `;
 
     document.getElementById('addAtdParentBtn')?.addEventListener('click', () => {
-      Controllers.opTask.openNewModal({ kind: 'parent', category: Store.currentOpCategory, status: 'Backlog' });
+      Controllers.opTask.openNewModal({ kind: 'parent', category: atdCategory, status: 'Backlog' });
     });
 
     board.querySelectorAll('[data-toggle-group]').forEach(btn => {
       btn.addEventListener('click', () => {
         const status = btn.dataset.toggleGroup;
         this._atendimentoGroupExpanded[status] = !(this._atendimentoGroupExpanded[status] !== false);
-        this.renderAtendimentoList(normalized);
+        this.renderAtendimentoList(normalized, board);
       });
     });
 
-    board.querySelectorAll('[data-toggle-parent]').forEach(btn => {
-      const toggleParent = (e) => {
-        const parentId = Number(e.currentTarget.dataset.toggleParent);
-        if (e.target.closest('.atd-row-actions')) return;
-        // Clique na setinha: expandir/contrair. Clique no restante da linha: editar.
-        if (e.target.closest('.atd-chevron')) {
-          this._atendimentoExpanded[parentId] = !(this._atendimentoExpanded[parentId] !== false);
-          this.renderAtendimentoList(normalized);
+    let atdDraggedBookId = null;
+    let atdDraggedFromGroup = null;
+
+    board.querySelectorAll('.atd-book-card').forEach(card => {
+      const parentId = Number(card.dataset.parentId);
+      if (!parentId) return;
+      card.addEventListener('click', (e) => {
+        if (Date.now() < this._atdSuppressBookClickUntil) return;
+        if (e.target.closest('select') || e.target.closest('button') || e.target.closest('a')) return;
+        Controllers.opTask.openEditModal(parentId);
+      });
+      card.addEventListener('keydown', (e) => {
+        if (e.target !== card) return;
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        Controllers.opTask.openEditModal(parentId);
+      });
+      card.addEventListener('dragstart', (e) => {
+        if (e.target.closest('select') || e.target.closest('button')) {
+          e.preventDefault();
           return;
         }
-        Controllers.opTask.openEditModal(parentId);
-      };
-      btn.addEventListener('click', toggleParent);
-      btn.addEventListener('keydown', e => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          // Enter: editar (comportamento padrão de "abrir"). Espaço: expandir/contrair.
-          if (e.key === 'Enter') {
-            Controllers.opTask.openEditModal(Number(e.currentTarget.dataset.toggleParent));
-          } else {
-            const parentId = Number(e.currentTarget.dataset.toggleParent);
-            this._atendimentoExpanded[parentId] = !(this._atendimentoExpanded[parentId] !== false);
-            this.renderAtendimentoList(normalized);
-          }
-        }
+        atdDraggedBookId = parentId;
+        atdDraggedFromGroup = card.dataset.atdGroupStatus || '';
+        card.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(parentId));
+      });
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        board.querySelectorAll('.atd-shelf-books.drag-over').forEach(z => z.classList.remove('drag-over'));
+        this._atdSuppressBookClickUntil = Date.now() + 280;
+      });
+    });
+
+    board.querySelectorAll('.atd-shelf-books').forEach(zone => {
+      zone.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        zone.classList.add('drag-over');
+      });
+      zone.addEventListener('dragleave', e => {
+        if (e.relatedTarget && zone.contains(e.relatedTarget)) return;
+        zone.classList.remove('drag-over');
+      });
+      zone.addEventListener('drop', e => {
+        e.preventDefault();
+        zone.classList.remove('drag-over');
+        zone.classList.add('drop-flash');
+        setTimeout(() => zone.classList.remove('drop-flash'), 500);
+        const targetGroup = zone.dataset.dropAtdStatus;
+        if (!atdDraggedBookId || !targetGroup || targetGroup === atdDraggedFromGroup) return;
+        const task = Store.findOpTask(atdDraggedBookId);
+        if (!task || task.parentTaskId) return;
+        this._atdLastMoved = { id: atdDraggedBookId, status: targetGroup };
+        this._atendimentoGroupExpanded[targetGroup] = true;
+        OpTaskService.changeStatus(atdDraggedBookId, targetGroup);
+        UI.refreshOperationalUi();
+        UI.renderCalendarPage();
+        UI.renderReportsPage();
+        ToastService.show(`Lista movida para "${targetGroup}"`, 'success');
       });
     });
 
@@ -2679,18 +2716,12 @@ const UI = {
         this._atdLastMoved = { id, status: targetGroup };
         this._atendimentoGroupExpanded[targetGroup] = true;
         OpTaskService.changeStatus(id, newStatus);
-        UI.renderOpPage();
+        UI.refreshOperationalUi();
         UI.renderCalendarPage();
         UI.renderReportsPage();
       });
     });
 
-    board.querySelectorAll('[data-edit-parent]').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        Controllers.opTask.openEditModal(Number(btn.dataset.editParent));
-      });
-    });
     board.querySelectorAll('[data-delete-parent]').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
@@ -2699,64 +2730,9 @@ const UI = {
     });
     board.querySelectorAll('[data-add-child]').forEach(btn => {
       btn.addEventListener('click', e => {
+        e.stopPropagation();
         const parentId = Number(e.currentTarget.dataset.addChild);
-        Controllers.opTask.openNewModal({ kind: 'child', parentTaskId: parentId, category: Store.currentOpCategory });
-      });
-    });
-
-    board.querySelectorAll('[data-open-subtask]').forEach(row => {
-      row.addEventListener('click', e => {
-        if (e.target.closest('.atd-subtask-actions')) return;
-        Controllers.opTask.openEditModal(Number(row.dataset.openSubtask));
-      });
-    });
-    board.querySelectorAll('[data-edit-subtask]').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        Controllers.opTask.openEditModal(Number(btn.dataset.editSubtask));
-      });
-    });
-    board.querySelectorAll('[data-delete-subtask]').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        Controllers.opTask.deleteTask(Number(btn.dataset.deleteSubtask), { cascade: false });
-      });
-    });
-
-    let draggedSubtaskId = null;
-    board.querySelectorAll('[data-drag-subtask]').forEach(row => {
-      row.addEventListener('dragstart', e => {
-        draggedSubtaskId = Number(row.dataset.dragSubtask);
-        row.classList.add('dragging');
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', String(draggedSubtaskId));
-      });
-      row.addEventListener('dragend', () => {
-        row.classList.remove('dragging');
-        board.querySelectorAll('.atd-subtasks.drop-over').forEach(el => el.classList.remove('drop-over'));
-      });
-    });
-    board.querySelectorAll('[data-drop-parent]').forEach(zone => {
-      zone.addEventListener('dragover', e => {
-        e.preventDefault();
-        zone.classList.add('drop-over');
-      });
-      zone.addEventListener('dragleave', e => {
-        if (e.relatedTarget && zone.contains(e.relatedTarget)) return;
-        zone.classList.remove('drop-over');
-      });
-      zone.addEventListener('drop', e => {
-        e.preventDefault();
-        zone.classList.remove('drop-over');
-        const targetParentId = Number(zone.dataset.dropParent);
-        if (!draggedSubtaskId || !targetParentId) return;
-        const subtask = Store.findOpTask(draggedSubtaskId);
-        if (!subtask || Number(subtask.parentTaskId) === targetParentId) return;
-        Store.updateOpTask(draggedSubtaskId, { parentTaskId: targetParentId, isParentTask: false });
-        UI.renderOpPage();
-        UI.renderCalendarPage();
-        UI.renderReportsPage();
-        ToastService.show('Subtarefa movida para outra lista', 'success');
+        Controllers.opTask.openNewModal({ kind: 'child', parentTaskId: parentId, category: atdCategory });
       });
     });
 
@@ -3045,6 +3021,7 @@ const UI = {
     const titles = {
       dashboard: { title: 'Dashboard',    crumb: 'Visão Geral' },
       tarefas:   { title: 'Tarefas',      crumb: 'Operacionais' },
+      atendimento: { title: 'Atendimento ao cliente', crumb: 'Central de atendimento' },
       calendario:{ title: 'Calendário',   crumb: 'Agenda' },
       relatorios:{ title: 'Relatórios',   crumb: 'Análises' },
       chat:      { title: 'Chat da equipe', crumb: 'Mensagens internas' },
@@ -3064,6 +3041,7 @@ const UI = {
 
     // Re-renderiza página específica
     if (page === 'tarefas') this.renderOpPage();
+    if (page === 'atendimento') this.renderAtendimentoPage();
     if (page === 'calendario') this.renderCalendarPage();
     if (page === 'relatorios') this.renderReportsPage();
     Controllers.teamChat?.onPageChange?.(page);
@@ -3081,7 +3059,7 @@ const UI = {
     } catch {
       return;
     }
-    const allowed = new Set(['dashboard', 'tarefas', 'calendario', 'relatorios', 'chat', 'config']);
+    const allowed = new Set(['dashboard', 'tarefas', 'atendimento', 'calendario', 'relatorios', 'chat', 'config']);
     if (!saved || !allowed.has(saved)) return;
     if (!document.getElementById(`page-${saved}`)) return;
     this.navigateTo(saved);
@@ -3092,6 +3070,22 @@ const UI = {
     this.renderAgenda();
     this.renderDashboardStats();
     this.renderTaskTable();
+  },
+
+  /* ── Página dedicada: Atendimento ao cliente ───────────── */
+  renderAtendimentoPage() {
+    const board = document.getElementById('atendimentoBoard');
+    if (!board) return;
+    board.classList.add('atd-mode');
+    board.classList.remove('kanban-board--cemig');
+    const tasks = OpTaskService.getFilteredByCategory('atendimento-cliente', { filterNamespace: 'atd' });
+    this.renderAtendimentoList(tasks, board);
+  },
+
+  /** Atualiza Kanban (Tarefas) ou painel de Atendimento conforme a página ativa. */
+  refreshOperationalUi() {
+    if (Store.currentPage === 'atendimento') this.renderAtendimentoPage();
+    else if (Store.currentPage === 'tarefas') this.renderOpPage();
   },
 
   /* ── Full op page render ────────────────────────────────── */
@@ -3729,10 +3723,10 @@ const Controllers = {
     },
 
     _validate() {
-      const titulo      = document.getElementById('f-titulo').value.trim();
-      const responsavel = document.getElementById('f-responsavel').value.trim();
-      if (!titulo)      { ToastService.show('Informe o título da tarefa', 'danger');       return null; }
-      if (!responsavel) { ToastService.show('Informe o responsável pela tarefa', 'danger'); return null; }
+      let titulo      = document.getElementById('f-titulo').value.trim();
+      let responsavel = document.getElementById('f-responsavel').value.trim();
+      if (!titulo)      titulo = 'Nova tarefa';
+      if (!responsavel) responsavel = getSignedUserName();
       return {
         titulo, responsavel,
         prazo:      document.getElementById('f-prazo').value,
@@ -3786,7 +3780,7 @@ const Controllers = {
         const wasDone = task.status === 'Concluída' || task.status === 'Finalizada';
         const nextStatus = wasDone ? 'Em andamento' : 'Concluída';
         OpTaskService.changeStatus(id, nextStatus);
-        UI.renderOpPage();
+        UI.refreshOperationalUi();
       } else {
         const task = Store.findTask(id);
         if (!task) return;
@@ -4143,7 +4137,7 @@ const Controllers = {
     _syncAtendimentoKindFields() {
       const modalCat = Store.editingOpTaskId
         ? (Store.findOpTask(Store.editingOpTaskId)?.categoria || Store.currentOpCategory)
-        : Store.currentOpCategory;
+        : (this._newTaskPreset?.category || Store.currentOpCategory);
       if (modalCat === 'otimizacao-rede') {
         const atdWrap = document.getElementById('opAtdParentOnlyWrap');
         const atdChildWrap = document.getElementById('opAtdChildOnlyWrap');
@@ -4399,33 +4393,35 @@ const Controllers = {
     },
 
     _validate() {
-      const titulo      = document.getElementById('op-titulo').value.trim();
-      const responsavel = document.getElementById('op-responsavel').value.trim();
+      let titulo      = document.getElementById('op-titulo').value.trim();
+      let responsavel = document.getElementById('op-responsavel').value.trim();
       const responsavelChatId = document.getElementById('op-responsavel-chatid')?.value?.trim() || '';
-      const prazo       = document.getElementById('op-prazo').value;
+      let prazo       = document.getElementById('op-prazo').value;
       const existing = Store.editingOpTaskId ? Store.findOpTask(Store.editingOpTaskId) : null;
-      const category = existing?.categoria || Store.currentOpCategory;
+      const category = existing?.categoria
+        || (this._newTaskPreset && this._newTaskPreset.category)
+        || Store.currentOpCategory;
       const parentTaskIdRaw = document.getElementById('op-parent-task-id')?.value || '';
       const parentTaskId = parentTaskIdRaw ? Number(parentTaskIdRaw) : (existing?.parentTaskId ? Number(existing.parentTaskId) : null);
       const isParentTask = !parentTaskId;
-      const regiao = document.getElementById('op-regiao').value;
-      const protocoloRaw = document.getElementById('op-atd-protocolo')?.value?.trim() || '';
-      const dataEntradaRaw = document.getElementById('op-atd-data-entrada')?.value || '';
-      const subProcessoRaw = document.getElementById('op-atd-subprocesso')?.value?.trim() || '';
+      let regiao = document.getElementById('op-regiao').value;
+      let protocoloRaw = document.getElementById('op-atd-protocolo')?.value?.trim() || '';
+      let dataEntradaRaw = document.getElementById('op-atd-data-entrada')?.value || '';
+      let subProcessoRaw = document.getElementById('op-atd-subprocesso')?.value?.trim() || '';
       const dataInstalacaoRaw = document.getElementById('op-atd-data-instalacao')?.value || '';
       const ordemServicoRaw = document.getElementById('op-atd-ordem-servico')?.value?.trim() || '';
-      const descAtdRaw = document.getElementById('op-atd-descricao')?.value?.trim() || '';
+      let descAtdRaw = document.getElementById('op-atd-descricao')?.value?.trim() || '';
       const selectedParent = parentTaskId ? Store.findOpTask(parentTaskId) : null;
       const codeRegion = isParentTask ? regiao : (selectedParent?.regiao || regiao);
       const taskCode = existing?.taskCode || this._nextTaskCode(category, codeRegion);
-      const coordsRaw = document.getElementById('op-coords')?.value.trim() || '';
-      const autoAddress = document.getElementById('op-address-readonly')?.value.trim() || '';
+      let coordsRaw = document.getElementById('op-coords')?.value.trim() || '';
+      let autoAddress = document.getElementById('op-address-readonly')?.value.trim() || '';
       const otimGeoCoords = document.getElementById('op-otim-coords')?.value.trim() || '';
       const otimGeoAddress = document.getElementById('op-otim-address')?.value.trim() || '';
       const cemigGeoCoords = document.getElementById('op-cemig-coords')?.value.trim() || '';
       const cemigGeoAddress = document.getElementById('op-cemig-address')?.value.trim() || '';
-      const clientesAfetadosRaw = document.getElementById('op-clientes-afetados')?.value.trim() || '';
-      const setorCto = document.getElementById('op-setor-cto')?.value.trim() || '';
+      let clientesAfetadosRaw = document.getElementById('op-clientes-afetados')?.value.trim() || '';
+      let setorCto = document.getElementById('op-setor-cto')?.value.trim() || '';
       const isRompimento = this._isRompimentoCategory(category);
       const isTrocaPoste = this._isTrocaPosteCategory(category);
       const isOtimRede = category === 'otimizacao-rede';
@@ -4436,20 +4432,17 @@ const Controllers = {
       const isAtdParentOnly = this._isAtendimentoClienteCategory(category) && isParentTask && !isRompimento;
       const isAtdChildOnly = this._isAtendimentoClienteCategory(category) && !isParentTask && !isRompimento;
 
-      if (!isRompimento && !isTrocaPoste && !isCemig && !isOtimRede && !titulo) { ToastService.show('Informe o título da tarefa', 'danger'); return null; }
-      if (!isAtdParentOnly && isParentTask && !responsavel && !isOtimRede && !isCemig) { ToastService.show('Informe o responsável pela tarefa', 'danger'); return null; }
-      if (!isAtdParentOnly && !isRompimento && !isOtimRede && !isCemig && isParentTask && !prazo) { ToastService.show('Informe a data de vencimento', 'danger'); return null; }
-      if (!isRompimento && !isOtimRede && !isCemig && !document.getElementById('op-prioridade').value) { ToastService.show('Informe a prioridade', 'danger'); return null; }
-      if (isParentTask && !regiao && !isOtimRede && !isCemig) { ToastService.show('Informe a região', 'danger'); return null; }
-      if (isRompimento && !setorCto) {
-        ToastService.show('Informe o nome da CTO ou setor', 'danger');
-        return null;
-      }
-      if ((isRompimento || isTrocaPoste) && !coordsRaw)   { ToastService.show('Informe as coordenadas da localização', 'danger'); return null; }
-      if ((isRompimento || isTrocaPoste) && !autoAddress) { ToastService.show('Aguarde identificar rua e bairro ou verifique as coordenadas', 'danger'); return null; }
+      if (!isRompimento && !isTrocaPoste && !isCemig && !isOtimRede && !titulo) titulo = 'Sem título';
+      if (!isAtdParentOnly && isParentTask && !responsavel && !isOtimRede && !isCemig) responsavel = getSignedUserName();
+      if (!isAtdParentOnly && !isRompimento && !isOtimRede && !isCemig && isParentTask && !prazo) prazo = Utils.todayIso();
+      const prioridadeEl = document.getElementById('op-prioridade');
+      if (!isRompimento && !isOtimRede && !isCemig && prioridadeEl && !prioridadeEl.value) prioridadeEl.value = 'Média';
+      if (isParentTask && !regiao && !isOtimRede && !isCemig) regiao = 'N/D';
+      if (isRompimento && !setorCto) setorCto = 'N/D';
+      if ((isRompimento || isTrocaPoste) && !coordsRaw) coordsRaw = '0, 0';
+      if ((isRompimento || isTrocaPoste) && !autoAddress) autoAddress = 'Local não informado (teste)';
       if (isRompimento && (!clientesAfetadosRaw || !/^\d+$/.test(clientesAfetadosRaw) || Number(clientesAfetadosRaw) <= 0)) {
-        ToastService.show('Informe uma quantidade de clientes afetados válida', 'danger');
-        return null;
+        clientesAfetadosRaw = '1';
       }
       if (this._isAtendimentoCategory(category) && !isParentTask && !selectedParent) {
         ToastService.show('Subtarefa inválida: crie pela tarefa pai', 'danger');
@@ -4457,14 +4450,14 @@ const Controllers = {
       }
 
       if (isAtdParentOnly) {
-        if (!protocoloRaw) { ToastService.show('Informe o protocolo', 'danger'); return null; }
-        if (!dataEntradaRaw) { ToastService.show('Informe a data de entrada', 'danger'); return null; }
-        if (!subProcessoRaw) { ToastService.show('Informe o SubProcesso', 'danger'); return null; }
+        if (!protocoloRaw) protocoloRaw = 'PROT-TESTE';
+        if (!dataEntradaRaw) dataEntradaRaw = Utils.todayIso();
+        if (!subProcessoRaw) subProcessoRaw = 'N/D';
       }
 
       if (isAtdChildOnly) {
-        if (!regiao) { ToastService.show('Informe a região', 'danger'); return null; }
-        if (!descAtdRaw) { ToastService.show('Informe a descrição da tarefa', 'danger'); return null; }
+        if (!regiao) regiao = String(selectedParent?.regiao || '').trim() || 'N/D';
+        if (!descAtdRaw) descAtdRaw = '—';
       }
 
       const presetStatus = this._newTaskPreset?.status || null;
@@ -4573,7 +4566,7 @@ const Controllers = {
 
     openNewModal(preset = {}) {
       Store.editingOpTaskId = null;
-      if (preset.category) Store.currentOpCategory = preset.category;
+      if (preset.category && Store.currentPage === 'tarefas') Store.currentOpCategory = preset.category;
       document.getElementById('opTaskModalTitle').textContent = 'Nova tarefa';
       const deleteBtn = document.getElementById('deleteOpTaskBtn');
       if (deleteBtn) deleteBtn.style.display = 'none';
@@ -4763,7 +4756,7 @@ const Controllers = {
       }
       ToastService.show('Tarefa excluída com sucesso', 'success');
       ModalService.close('opTaskModal');
-      UI.renderOpPage();
+      UI.refreshOperationalUi();
       UI.renderDashboard();
       UI.renderCalendarPage();
       UI.renderReportsPage();
@@ -4788,18 +4781,20 @@ const Controllers = {
         }
       }
 
-      // Atualiza categoria ativa para a que foi salva
-      Store.currentOpCategory = data.categoria;
+      // Atualiza categoria ativa para a que foi salva (aba Tarefas)
+      if (Store.currentPage === 'tarefas') Store.currentOpCategory = data.categoria;
 
       ModalService.close('opTaskModal');
-      UI.renderOpPage();
+      UI.refreshOperationalUi();
       UI.renderCalendarPage();
       UI.renderReportsPage();
-      // Atualiza tabs
-      document.querySelectorAll('.tasks-tab').forEach(t => {
-        t.classList.toggle('active', t.dataset.category === Store.currentOpCategory);
-        t.setAttribute('aria-selected', t.dataset.category === Store.currentOpCategory ? 'true' : 'false');
-      });
+      // Atualiza tabs (somente na página Tarefas)
+      if (Store.currentPage === 'tarefas') {
+        document.querySelectorAll('.tasks-tab').forEach(t => {
+          t.classList.toggle('active', t.dataset.category === Store.currentOpCategory);
+          t.setAttribute('aria-selected', t.dataset.category === Store.currentOpCategory ? 'true' : 'false');
+        });
+      }
     },
 
     init() {
@@ -4853,6 +4848,9 @@ const Controllers = {
       });
 
       document.getElementById('openOpTaskModalBtn').addEventListener('click', () => this.openNewModal());
+      document.getElementById('openAtendimentoTaskModalBtn')?.addEventListener('click', () => {
+        this.openNewModal({ kind: 'parent', category: 'atendimento-cliente', status: 'Backlog' });
+      });
       document.getElementById('saveOpTaskBtn').addEventListener('click', () => this.save());
       document.getElementById('deleteOpTaskBtn')?.addEventListener('click', () => this.deleteTask());
       // Segurança: se alguém abrir modal de subtarefa sem pai, limpa o hidden.
@@ -4942,6 +4940,27 @@ const Controllers = {
       document.getElementById('opDateSortFilter')?.addEventListener('change', e => {
         Store.opDateSort = String(e.target.value || 'all');
         UI.renderKanban();
+      });
+
+      document.getElementById('atdOpSearchInput')?.addEventListener('input', e => {
+        Store.atdOpSearch = e.target.value.trim().toLowerCase();
+        UI.renderAtendimentoPage();
+      });
+      document.getElementById('atdOpRegionSelectFilter')?.addEventListener('change', e => {
+        Store.atdOpRegionSearch = e.target.value.trim().toLowerCase();
+        UI.renderAtendimentoPage();
+      });
+      document.getElementById('atdOpTecnicoInput')?.addEventListener('input', e => {
+        Store.atdOpTecnicoSearch = e.target.value.trim().toLowerCase();
+        UI.renderAtendimentoPage();
+      });
+      document.getElementById('atdOpTaskIdInput')?.addEventListener('input', e => {
+        Store.atdOpTaskIdSearch = e.target.value;
+        UI.renderAtendimentoPage();
+      });
+      document.getElementById('atdOpDateSortFilter')?.addEventListener('change', e => {
+        Store.atdOpDateSort = String(e.target.value || 'all');
+        UI.renderAtendimentoPage();
       });
     },
   },
@@ -5116,13 +5135,13 @@ const Controllers = {
     },
 
     _saveNote() {
-      const date = document.getElementById('cal-note-date').value;
-      const title = document.getElementById('cal-note-title').value.trim();
+      let date = document.getElementById('cal-note-date').value;
+      let title = document.getElementById('cal-note-title').value.trim();
       const description = document.getElementById('cal-note-desc').value.trim();
       const priority = document.getElementById('cal-note-priority').value;
 
-      if (!date) { ToastService.show('Selecione a data da anotação', 'danger'); return; }
-      if (!title) { ToastService.show('Informe o título da anotação', 'danger'); return; }
+      if (!date) date = CalendarService.selectedDateIso || Utils.todayIso();
+      if (!title) title = 'Anotação';
 
       CalendarService.createNote({ date, title, description, priority });
       CalendarService.selectedDateIso = date;
@@ -6088,7 +6107,7 @@ async function initApp() {
     UI.renderAgenda();
     const p = Store.currentPage;
     if (p === 'dashboard') UI.renderDashboard();
-    else if (p === 'tarefas') UI.renderOpPage();
+    else if (p === 'tarefas' || p === 'atendimento') UI.refreshOperationalUi();
     else if (p === 'calendario') UI.renderCalendarPage();
     else if (p === 'relatorios') UI.renderReportsPage();
   });
@@ -6105,7 +6124,7 @@ async function initApp() {
     const updated = await bootstrapWithTimeout(6000);
     if (!updated) return;
     UI.renderDashboard();
-    UI.renderOpPage();
+    UI.refreshOperationalUi();
     UI.renderCalendarPage();
     UI.renderReportsPage();
   }, 25000);
