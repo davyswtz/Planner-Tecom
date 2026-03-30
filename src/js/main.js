@@ -289,6 +289,21 @@ const Store = (() => {
     async saveConfig(payload) {
       return this.requestAny(['/config', '/config.php'], { method: 'POST', body: JSON.stringify(payload) });
     },
+    async getChatMessages(sinceId = 0, limit = 60) {
+      const qs = new URLSearchParams();
+      if (sinceId) qs.set('since_id', String(sinceId));
+      if (limit) qs.set('limit', String(limit));
+      const suffix = qs.toString() ? `?${qs.toString()}` : '';
+      return this.requestAny([`/chat_messages.php${suffix}`, `/chat-messages${suffix}`], { method: 'GET' });
+    },
+    async sendChatMessage(payload) {
+      return this.requestAny(['/chat_messages.php', '/chat-messages'], { method: 'POST', body: JSON.stringify(payload) });
+    },
+    buildUrl(path) {
+      const p = String(path || '');
+      if (!p) return '';
+      return `${this.baseUrl}${p.startsWith('/') ? '' : '/'}${p}`;
+    },
   };
 
   const readLocal = (key, fallback) => {
@@ -512,6 +527,9 @@ const Store = (() => {
     },
     loginRemote: async (username, password) => ApiService.login(username, password),
     isRemoteApiEnabled: () => ApiService.enabled(),
+    fetchChatMessages: async (sinceId = 0, limit = 60) => ApiService.getChatMessages(sinceId, limit),
+    postChatMessage: async (payload) => ApiService.sendChatMessage(payload),
+    getApiBaseUrl: () => String(ApiService.baseUrl || ''),
 
     // Config
     getPlannerConfig: () => ({ ...plannerConfig }),
@@ -677,6 +695,15 @@ const Utils = {
     if (!iso) return '—';
     const [y, m, d] = iso.split('-');
     return `${d}/${m}/${y}`;
+  },
+
+  escapeHtml(s) {
+    return String(s ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
   },
 
   /** Extrai iniciais de um nome (até 2 letras) */
@@ -2785,6 +2812,7 @@ const UI = {
       tarefas:   { title: 'Tarefas',      crumb: 'Operacionais' },
       calendario:{ title: 'Calendário',   crumb: 'Agenda' },
       relatorios:{ title: 'Relatórios',   crumb: 'Análises' },
+      chat:      { title: 'Chat',         crumb: 'Geral' },
       config:    { title: 'Configurações',crumb: 'Sistema' },
     };
     const meta = titles[page] || { title: page, crumb: '' };
@@ -2797,6 +2825,8 @@ const UI = {
     if (page === 'tarefas') this.renderOpPage();
     if (page === 'calendario') this.renderCalendarPage();
     if (page === 'relatorios') this.renderReportsPage();
+    if (page === 'chat') Controllers.chat.open();
+    else Controllers.chat.close();
   },
 
   /* ── Full dashboard render ─────────────────────────────── */
@@ -3112,6 +3142,207 @@ const Controllers = {
       });
 
       document.getElementById('logoutBtn')?.addEventListener('click', () => this.logout());
+    },
+  },
+
+  chat: {
+    _pollMs: 2500,
+    _timer: null,
+    _lastId: 0,
+    _loading: false,
+    _isOnChatPage() {
+      return Store.currentPage === 'chat';
+    },
+    _status(text) {
+      const el = document.getElementById('chatStatus');
+      if (el) el.textContent = text;
+    },
+    _appendMessage(msg) {
+      const root = document.getElementById('chatMessages');
+      if (!root || !msg) return;
+
+      const wrap = document.createElement('div');
+      wrap.className = 'chat-msg';
+
+      const head = document.createElement('div');
+      head.className = 'chat-msg-head';
+
+      const user = document.createElement('div');
+      user.className = 'chat-msg-user';
+      user.textContent = String(msg.displayName || msg.username || '—');
+
+      const time = document.createElement('div');
+      time.className = 'chat-msg-time';
+      const created = String(msg.createdAt || '').trim();
+      time.textContent = created ? created.replace('T', ' ').replace('Z', '') : '';
+
+      head.appendChild(user);
+      head.appendChild(time);
+
+      const body = document.createElement('div');
+      body.className = 'chat-msg-text';
+      body.textContent = String(msg.message || '');
+
+      wrap.appendChild(head);
+      wrap.appendChild(body);
+
+      const hasImage = Boolean(msg.hasImage) || Boolean(msg.image);
+      if (hasImage) {
+        const img = document.createElement('img');
+        img.className = 'chat-msg-img';
+        const base = Store.getApiBaseUrl();
+        img.src = base ? `${base}/chat_image.php?id=${encodeURIComponent(String(msg.id))}` : `./api/chat_image.php?id=${encodeURIComponent(String(msg.id))}`;
+        img.alt = 'Imagem enviada no chat';
+        img.loading = 'lazy';
+        wrap.appendChild(img);
+      }
+
+      root.appendChild(wrap);
+    },
+    _scrollToBottomIfNearEnd() {
+      const root = document.getElementById('chatMessages');
+      if (!root) return;
+      const dist = root.scrollHeight - root.scrollTop - root.clientHeight;
+      if (dist < 140) root.scrollTop = root.scrollHeight;
+    },
+    async _pollOnce() {
+      if (!this._isOnChatPage()) return;
+      if (!Store.isRemoteApiEnabled()) {
+        this._status('Chat indisponível: API não configurada.');
+        return;
+      }
+      if (this._loading) return;
+      this._loading = true;
+      try {
+        const res = await Store.fetchChatMessages(this._lastId, this._lastId ? 120 : 60);
+        if (!res || !res.ok || !Array.isArray(res.messages)) {
+          this._status('Falha ao carregar mensagens.');
+          return;
+        }
+        if (!res.messages.length && !this._lastId) {
+          this._status('Sem mensagens ainda.');
+          return;
+        }
+        this._status('Online');
+        for (const m of res.messages) {
+          const id = Number(m.id) || 0;
+          if (id > this._lastId) this._lastId = id;
+          this._appendMessage(m);
+        }
+        this._scrollToBottomIfNearEnd();
+      } finally {
+        this._loading = false;
+      }
+    },
+    async send(text, imageDataUrl = '') {
+      if (!Store.isRemoteApiEnabled()) {
+        ToastService.show('Chat indisponível (API não configurada).', 'danger');
+        return;
+      }
+      const msg = String(text || '').trim();
+      const imgUrl = String(imageDataUrl || '').trim();
+      if (!msg && !imgUrl) return;
+      const username = getSessionUserKey();
+      const displayName = (localStorage.getItem('planner.session.displayName.v1') || '').trim() || username || 'Usuário';
+      if (!username) {
+        ToastService.show('Faça login para enviar mensagens.', 'danger');
+        return;
+      }
+      const res = await Store.postChatMessage({ username, displayName, message: msg, imageDataUrl: imgUrl });
+      if (!res || !res.ok) {
+        ToastService.show('Não foi possível enviar a mensagem.', 'danger');
+        return;
+      }
+      const returned = res.message;
+      if (returned && Number(returned.id) > this._lastId) {
+        this._lastId = Number(returned.id);
+        this._appendMessage(returned);
+        this._scrollToBottomIfNearEnd();
+      } else {
+        await this._pollOnce();
+      }
+    },
+    open() {
+      const root = document.getElementById('chatMessages');
+      if (root) root.innerHTML = '';
+      this._lastId = 0;
+      this._status('Conectando…');
+      void this._pollOnce();
+      if (this._timer) clearInterval(this._timer);
+      this._timer = setInterval(() => void this._pollOnce(), this._pollMs);
+    },
+    close() {
+      if (this._timer) clearInterval(this._timer);
+      this._timer = null;
+    },
+    init() {
+      const form = document.getElementById('chatForm');
+      const input = document.getElementById('chatInput');
+      const attachBtn = document.getElementById('chatAttachBtn');
+      const emojiBtn = document.getElementById('chatEmojiBtn');
+      const fileInput = document.getElementById('chatImageInput');
+      const preview = document.getElementById('chatImagePreview');
+      let pendingImageDataUrl = '';
+
+      const renderPreview = () => {
+        if (!preview) return;
+        if (!pendingImageDataUrl) {
+          preview.hidden = true;
+          preview.innerHTML = '';
+          return;
+        }
+        preview.hidden = false;
+        preview.innerHTML = `
+          <div class="chat-preview-row">
+            <div class="chat-preview-title">Imagem anexada</div>
+            <button type="button" class="ghost-btn" id="chatRemoveImageBtn">Remover</button>
+          </div>
+          <img class="chat-preview-img" src="${Utils.escapeHtml(pendingImageDataUrl)}" alt="Prévia da imagem anexada"/>
+        `;
+        preview.querySelector('#chatRemoveImageBtn')?.addEventListener('click', () => {
+          pendingImageDataUrl = '';
+          if (fileInput) fileInput.value = '';
+          renderPreview();
+        });
+      };
+
+      emojiBtn?.addEventListener('click', () => {
+        // O teclado/selector de emoji é nativo do SO; aqui só focamos o input.
+        input?.focus();
+      });
+      attachBtn?.addEventListener('click', () => fileInput?.click());
+      fileInput?.addEventListener('change', () => {
+        const f = fileInput.files && fileInput.files[0];
+        if (!f) return;
+        if (!f.type || !f.type.startsWith('image/')) {
+          ToastService.show('Selecione um arquivo de imagem.', 'danger');
+          fileInput.value = '';
+          return;
+        }
+        if (f.size > 1_000_000) {
+          ToastService.show('Imagem grande demais (máx. 1MB).', 'danger');
+          fileInput.value = '';
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          pendingImageDataUrl = String(reader.result || '');
+          renderPreview();
+        };
+        reader.readAsDataURL(f);
+      });
+
+      form?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!input) return;
+        const val = input.value;
+        input.value = '';
+        const img = pendingImageDataUrl;
+        pendingImageDataUrl = '';
+        if (fileInput) fileInput.value = '';
+        renderPreview();
+        await this.send(val, img);
+      });
     },
   },
 
@@ -4932,6 +5163,7 @@ async function initApp() {
   Controllers.opFolders.init();
   Controllers.reports.init();
   Controllers.calendar.init();
+  Controllers.chat.init();
   Controllers.profileAvatar.init();
   Controllers.webhook.init();
   Controllers.notes.init();
