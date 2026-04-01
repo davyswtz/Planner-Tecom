@@ -7,6 +7,7 @@
  * @typedef {{
  *   apiBaseUrl?: string|false,
  *   defaultWebhookUrl?: string,
+ *   defaultWebhookUrlsByRegion?: Record<string,string>,
  *   ctoDataBase?: string,
  *   authUsers?: AuthUser[],
  *   sidebarAvatarUrl?: string,
@@ -28,6 +29,17 @@ window.APP_CONFIG = {
 
   /** URL do webhook Google Chat (só para ambiente fechado; em geral configure pelo modal do app). */
   // defaultWebhookUrl: 'https://chat.googleapis.com/v1/spaces/...',
+
+  /**
+   * URLs de webhook por região. IMPORTANTE: não commitar tokens reais em repositório público.
+   * Prefira manter valores reais em um `config.js` local fora do controle de versão.
+   */
+  // defaultWebhookUrlsByRegion: {
+  //   GOVAL: 'https://chat.googleapis.com/v1/spaces/...',
+  //   VALE_DO_ACO: 'https://chat.googleapis.com/v1/spaces/...',
+  //   CARATINGA: 'https://chat.googleapis.com/v1/spaces/...',
+  //   BACKUP: 'https://chat.googleapis.com/v1/spaces/...',
+  // },
 
   /**
    * Pasta base dos JSON de CTO (termina com /). Ex.: `https://meusite.com/burrinho/src/data/`

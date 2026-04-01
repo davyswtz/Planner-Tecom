@@ -7,6 +7,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 try {
+    if (empty($_SESSION['planner_user'])) {
+        jsonResponse(['ok' => false, 'error' => 'unauthorized'], 401);
+    }
+
     $pdo = db();
     $tasks = $pdo->query('SELECT id, titulo, responsavel, prazo, status, prioridade FROM tasks ORDER BY id ASC')->fetchAll();
     $opSql = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,

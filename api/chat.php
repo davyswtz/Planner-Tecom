@@ -88,6 +88,10 @@ try {
         chatJsonResponse(['ok' => false, 'error' => 'Method not allowed'], 405);
     }
 
+    if (empty($_SESSION['planner_user'])) {
+        chatJsonResponse(['ok' => false, 'error' => 'unauthorized'], 401);
+    }
+
     $data = readJsonBody();
     $userKey = strtolower(trim((string) ($data['userKey'] ?? '')));
     $displayName = trim((string) ($data['displayName'] ?? ''));

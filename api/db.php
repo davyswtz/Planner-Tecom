@@ -2,6 +2,13 @@
 declare(strict_types=1);
 
 /**
+ * Sessão compartilhada pelos endpoints da API.
+ */
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+/**
  * Conexão MySQL — HostGator/cPanel ou variáveis de ambiente.
  * Preferência: api/credentials.php (copie de credentials.example.php).
  */

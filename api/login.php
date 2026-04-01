@@ -43,6 +43,11 @@ try {
     $computed = hash_pbkdf2('sha256', $password, $salt, $iterations, 32, true);
     $valid = hash_equals($expected, $computed);
 
+    if ($valid) {
+        // Marca sessão autenticada para os demais endpoints PHP.
+        $_SESSION['planner_user'] = $username;
+    }
+
     jsonResponse(['ok' => $valid]);
 } catch (Throwable $e) {
     // Não vazar detalhes de erro para o front.

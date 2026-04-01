@@ -84,61 +84,6 @@ function getSignedUserName() {
   }
 }
 
-/* ─────────────────────────────────────────────────────────────
-   THEME — modo claro/escuro (persistente)
-───────────────────────────────────────────────────────────── */
-const ThemeService = {
-  _key: 'planner.theme.v1',
-  _defaultTheme: 'dark',
-  _lightThemeColor: '#f6f8f6',
-  _darkThemeColor: '#0a0c0a',
-
-  _readSaved() {
-    try {
-      const raw = localStorage.getItem(this._key);
-      const t = String(raw || '').trim().toLowerCase();
-      return (t === 'light' || t === 'dark') ? t : '';
-    } catch {
-      return '';
-    }
-  },
-
-  _writeSaved(theme) {
-    try { localStorage.setItem(this._key, theme); } catch {}
-  },
-
-  _setMeta(name, content) {
-    const meta = document.querySelector(`meta[name="${name}"]`);
-    if (meta) meta.setAttribute('content', content);
-  },
-
-  apply(theme) {
-    const t = (theme === 'light' || theme === 'dark') ? theme : this._defaultTheme;
-    document.documentElement.dataset.theme = t;
-    this._setMeta('color-scheme', t);
-    this._setMeta('theme-color', t === 'light' ? this._lightThemeColor : this._darkThemeColor);
-  },
-
-  init() {
-    const saved = this._readSaved() || this._defaultTheme;
-    this.apply(saved);
-  },
-
-  /** Reaplica tema salvo (útil após voltar pelo cache do navegador) e sincroniza o checkbox. */
-  refreshFromStorage() {
-    const saved = this._readSaved() || this._defaultTheme;
-    this.apply(saved);
-    const toggle = document.getElementById('themeLightToggle');
-    if (toggle) toggle.checked = document.documentElement.dataset.theme === 'light';
-  },
-
-  set(theme) {
-    const t = (theme === 'light' || theme === 'dark') ? theme : this._defaultTheme;
-    this._writeSaved(t);
-    this.apply(t);
-  },
-};
-
 /**
  * Foto na barra lateral (circular). Por padrão usa o mascote do projeto em `assets/`.
  * Substitua por URL absoluta se preferir; vazio = só iniciais do usuário.
@@ -387,14 +332,13 @@ const Store = (() => {
       return this.requestAny(['/config.php', '/config'], { method: 'POST', body: JSON.stringify(payload) });
     },
     /** Chat interno: `since=0` → últimas 100; `since>0` → apenas mensagens novas. `_` evita cache agressivo de proxies. */
-    async getTeamChat(since = 0) {
-      const s = Math.max(0, Math.floor(Number(since) || 0));
-      const cb = `_=${Date.now()}`;
-      const q = s > 0 ? `?since=${s}&${cb}` : `?${cb}`;
-      return this.request(`/chat.php${q}`);
+    async getTeamChat() {
+      // Chat interno desativado.
+      return null;
     },
-    async postTeamChat(payload) {
-      return this.request('/chat.php', { method: 'POST', body: JSON.stringify(payload) });
+    async postTeamChat() {
+      // Chat interno desativado.
+      return null;
     },
     buildUrl(path) {
       const p = String(path || '');
@@ -2505,245 +2449,9 @@ const UI = {
   },
 
   renderAtendimentoList(tasks, boardEl) {
-    const board = boardEl || document.getElementById('kanbanBoard');
-    if (!board) return;
-    const atdCategory = board.id === 'atendimentoBoard' ? 'atendimento-cliente' : Store.currentOpCategory;
-    const currentLabel = 'Atendimento ao Cliente';
-    const statusLabel = (status) => status === 'Concluída' ? 'Concluído' : status;
-    const statusBadgeAtd = (status) => this.statusBadge(status).replace(status, statusLabel(status));
-    const normalized = tasks.map(t => {
-      const groupStatus = this._normalizeAtdStatus(t.status);
-      return { ...t, _groupStatus: groupStatus };
-    });
-    const parentTasks = normalized.filter(t => t.isParentTask || !t.parentTaskId);
-    const childTasksAll = normalized.filter(t => t.parentTaskId);
-
-    const sortByDefault = (a, b) => {
-      const byDate = String(a.prazo || '9999-12-31').localeCompare(String(b.prazo || '9999-12-31'));
-      if (byDate !== 0) return byDate;
-      return String(a.criadaEm || '').localeCompare(String(b.criadaEm || ''));
-    };
-
-    const getChildren = (parentId) =>
-      childTasksAll
-        .filter(t => Number(t.parentTaskId) === Number(parentId))
-        .sort(sortByDefault);
-
-    const totals = {
-      listas: parentTasks.length,
-      subtarefas: childTasksAll.length,
-      concluidas: childTasksAll.filter(t => ['Concluída', 'Finalizada'].includes(t.status)).length,
-      emAndamento: childTasksAll.filter(t => t.status === 'Em andamento').length,
-    };
-
-    const todIso = Utils.todayIso();
-    const renderBookCard = (parent) => {
-      const children = getChildren(parent.id);
-      const doneCount = children.filter(c => ['Concluída', 'Finalizada'].includes(c.status)).length;
-      const protocolo = String(parent.protocolo || '').trim();
-      const idLine = [parent.taskCode, protocolo].filter(Boolean).join(' · ');
-      const isLate = parent.prazo && parent.prazo < todIso && !['Concluída', 'Finalizada', 'Finalizado'].includes(parent.status);
-      const badgeRow = [this.regionBadge(parent.regiao), this.priorityBadge(parent.prioridade || 'Média')].filter(Boolean).join('');
-      const subLabel = children.length
-        ? `${doneCount}/${children.length} subtarefa${children.length === 1 ? '' : 's'}`
-        : 'Sem subtarefas';
-      const shelfGroup = parent._groupStatus || this._normalizeAtdStatus(parent.status);
-      return `
-        <article class="atd-book-card ${this._atdLastMoved?.id === parent.id ? 'just-moved' : ''} ${isLate ? 'atd-book-card--late' : ''}"
-          data-task-row-id="${parent.id}" data-parent-id="${parent.id}" data-atd-group-status="${shelfGroup}"
-          draggable="true" tabindex="0" role="button"
-          aria-label="Abrir lista: ${Utils.escapeHtml(parent.titulo)}">
-          <div class="atd-book-spine" aria-hidden="true"></div>
-          <div class="atd-book-inner">
-            <header class="atd-book-top">
-              <h3 class="atd-book-title">${Utils.escapeHtml(parent.titulo)}</h3>
-              ${badgeRow ? `<div class="atd-book-badges">${badgeRow}</div>` : ''}
-            </header>
-            ${idLine ? `<p class="atd-book-line atd-book-line--mono">${Utils.escapeHtml(idLine)}</p>` : ''}
-            <p class="atd-book-line"><span class="atd-book-k">Resp.</span> ${Utils.escapeHtml(String(parent.responsavel || '—').trim())}</p>
-            <p class="atd-book-line"><span class="atd-book-k">Prazo</span> <time class="${isLate ? 'atd-book-late' : ''}" datetime="${Utils.escapeHtml(String(parent.prazo || ''))}">${Utils.formatDate(parent.prazo)}</time></p>
-            <div class="atd-book-status">${statusBadgeAtd(parent.status)}</div>
-            <p class="atd-book-subs" title="Subtarefas desta lista">${subLabel}</p>
-            <footer class="atd-book-foot">
-              <select class="atd-status-select atd-book-select" data-change-status="${parent.id}" aria-label="Alterar etapa da lista" draggable="false">
-                ${this._atdStatusOrder.map(s => `<option value="${s}" ${s === parent.status ? 'selected' : ''}>${statusLabel(s)}</option>`).join('')}
-              </select>
-              <div class="atd-book-foot-btns">
-                <button type="button" class="atd-book-ico" data-add-child="${parent.id}" title="Nova subtarefa" aria-label="Nova subtarefa" draggable="false">＋</button>
-                <button type="button" class="atd-book-ico atd-book-ico--danger" data-delete-parent="${parent.id}" title="Excluir lista" aria-label="Excluir lista" draggable="false">✕</button>
-              </div>
-            </footer>
-          </div>
-        </article>
-      `;
-    };
-
-    const renderShelf = (status) => {
-      const groupParents = parentTasks
-        .filter(t => (t._groupStatus || this._normalizeAtdStatus(t.status)) === status)
-        .sort(sortByDefault);
-      const expanded = this._atendimentoGroupExpanded[status] !== false;
-      const books = groupParents.length
-        ? groupParents.map(p => renderBookCard(p)).join('')
-        : '<p class="atd-shelf-empty">Nenhuma lista nesta etapa.</p>';
-      return `
-        <section class="atd-shelf" data-atd-shelf="${status}">
-          <header class="atd-shelf-head">
-            <button type="button" class="atd-shelf-toggle" data-toggle-group="${status}">
-              <span class="atd-chevron ${expanded ? 'open' : ''}">▾</span>
-              <span class="atd-shelf-title">${status.toUpperCase()}</span>
-              <span class="atd-shelf-count">${groupParents.length}</span>
-            </button>
-          </header>
-          <div class="atd-shelf-body ${expanded ? 'open' : ''}">
-            <div class="atd-shelf-plank" aria-hidden="true"></div>
-            <div class="atd-shelf-books" data-drop-atd-status="${status}">${books}</div>
-          </div>
-        </section>
-      `;
-    };
-
-    board.innerHTML = `
-      <div class="atd-list-wrap atd-list-wrap--shelves">
-        <div class="atd-list-toolbar">
-          <span class="panel-title">${currentLabel} · Estante <span class="atd-toolbar-hint">cada card é uma lista; clique para abrir, ou arraste para outra prateleira para mudar a etapa</span></span>
-          <div class="atd-toolbar-right">
-            <div class="atd-kpi-group" aria-label="Indicadores de atendimento">
-              <span class="atd-kpi">Listas: <strong>${totals.listas}</strong></span>
-              <span class="atd-kpi">Subtarefas: <strong>${totals.subtarefas}</strong></span>
-              <span class="atd-kpi">Em andamento: <strong>${totals.emAndamento}</strong></span>
-              <span class="atd-kpi">Concluídas: <strong>${totals.concluidas}</strong></span>
-            </div>
-            <button class="primary-btn" id="addAtdParentBtn">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              Nova lista
-            </button>
-          </div>
-        </div>
-        <div class="atd-shelves">
-          ${this._atdStatusOrder.map(renderShelf).join('')}
-        </div>
-      </div>
-    `;
-
-    document.getElementById('addAtdParentBtn')?.addEventListener('click', () => {
-      Controllers.opTask.openNewModal({ kind: 'parent', category: atdCategory, status: 'Backlog' });
-    });
-
-    board.querySelectorAll('[data-toggle-group]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const status = btn.dataset.toggleGroup;
-        this._atendimentoGroupExpanded[status] = !(this._atendimentoGroupExpanded[status] !== false);
-        this.renderAtendimentoList(normalized, board);
-      });
-    });
-
-    let atdDraggedBookId = null;
-    let atdDraggedFromGroup = null;
-
-    board.querySelectorAll('.atd-book-card').forEach(card => {
-      const parentId = Number(card.dataset.parentId);
-      if (!parentId) return;
-      card.addEventListener('click', (e) => {
-        if (Date.now() < this._atdSuppressBookClickUntil) return;
-        if (e.target.closest('select') || e.target.closest('button') || e.target.closest('a')) return;
-        Controllers.opTask.openEditModal(parentId);
-      });
-      card.addEventListener('keydown', (e) => {
-        if (e.target !== card) return;
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        e.preventDefault();
-        Controllers.opTask.openEditModal(parentId);
-      });
-      card.addEventListener('dragstart', (e) => {
-        if (e.target.closest('select') || e.target.closest('button')) {
-          e.preventDefault();
-          return;
-        }
-        atdDraggedBookId = parentId;
-        atdDraggedFromGroup = card.dataset.atdGroupStatus || '';
-        card.classList.add('dragging');
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', String(parentId));
-      });
-      card.addEventListener('dragend', () => {
-        card.classList.remove('dragging');
-        board.querySelectorAll('.atd-shelf-books.drag-over').forEach(z => z.classList.remove('drag-over'));
-        this._atdSuppressBookClickUntil = Date.now() + 280;
-      });
-    });
-
-    board.querySelectorAll('.atd-shelf-books').forEach(zone => {
-      zone.addEventListener('dragover', e => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        zone.classList.add('drag-over');
-      });
-      zone.addEventListener('dragleave', e => {
-        if (e.relatedTarget && zone.contains(e.relatedTarget)) return;
-        zone.classList.remove('drag-over');
-      });
-      zone.addEventListener('drop', e => {
-        e.preventDefault();
-        zone.classList.remove('drag-over');
-        zone.classList.add('drop-flash');
-        setTimeout(() => zone.classList.remove('drop-flash'), 500);
-        const targetGroup = zone.dataset.dropAtdStatus;
-        if (!atdDraggedBookId || !targetGroup || targetGroup === atdDraggedFromGroup) return;
-        const task = Store.findOpTask(atdDraggedBookId);
-        if (!task || task.parentTaskId) return;
-        this._atdLastMoved = { id: atdDraggedBookId, status: targetGroup };
-        this._atendimentoGroupExpanded[targetGroup] = true;
-        OpTaskService.changeStatus(atdDraggedBookId, targetGroup);
-        UI.refreshOperationalUi();
-        UI.renderCalendarPage();
-        UI.renderReportsPage();
-        ToastService.show(`Lista movida para "${targetGroup}"`, 'success');
-      });
-    });
-
-    board.querySelectorAll('[data-change-status]').forEach(select => {
-      select.addEventListener('change', e => {
-        e.stopPropagation();
-        const id = Number(select.dataset.changeStatus);
-        const newStatus = select.value;
-        const task = Store.findOpTask(id);
-        if (!task) return;
-        const isChild = Boolean(task.parentTaskId);
-        const targetGroup = isChild
-          ? this._normalizeAtdStatus(Store.findOpTask(Number(task.parentTaskId))?.status || 'Backlog')
-          : newStatus;
-        this._atdLastMoved = { id, status: targetGroup };
-        this._atendimentoGroupExpanded[targetGroup] = true;
-        OpTaskService.changeStatus(id, newStatus);
-        UI.refreshOperationalUi();
-        UI.renderCalendarPage();
-        UI.renderReportsPage();
-      });
-    });
-
-    board.querySelectorAll('[data-delete-parent]').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        Controllers.opTask.deleteTask(Number(btn.dataset.deleteParent), { cascade: true });
-      });
-    });
-    board.querySelectorAll('[data-add-child]').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        const parentId = Number(e.currentTarget.dataset.addChild);
-        Controllers.opTask.openNewModal({ kind: 'child', parentTaskId: parentId, category: atdCategory });
-      });
-    });
-
-    if (this._atdLastMoved?.id) {
-      const movedId = this._atdLastMoved.id;
-      requestAnimationFrame(() => {
-        const el = board.querySelector(`[data-task-row-id="${movedId}"]`);
-        if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      });
-      setTimeout(() => { this._atdLastMoved = null; }, 650);
-    }
+    // Layout antigo substituído por renderização dedicada em renderAtendimentoPage.
+    // Mantido apenas para compatibilidade com chamadas internas.
+    this.renderAtendimentoPage();
   },
 
   /* ── Agenda ─────────────────────────────────────────────── */
@@ -3019,13 +2727,14 @@ const UI = {
 
     // Atualiza topbar
     const titles = {
-      dashboard: { title: 'Dashboard',    crumb: 'Visão Geral' },
-      tarefas:   { title: 'Tarefas',      crumb: 'Operacionais' },
+      dashboard: { title: 'Dashboard', crumb: 'Visão Geral' },
+      rompimentos: { title: 'Rompimentos', crumb: 'Atividade de manutenção' },
+      'troca-poste': { title: 'Troca de Poste', crumb: 'Atividade de manutenção' },
+      'otimizacao-rede': { title: 'Otimização de Rede', crumb: 'Projetos de rede' },
+      'certificacao-cemig': { title: 'Certificação Cemig', crumb: 'Projetos de rede' },
       atendimento: { title: 'Atendimento ao cliente', crumb: 'Central de atendimento' },
-      calendario:{ title: 'Calendário',   crumb: 'Agenda' },
-      relatorios:{ title: 'Relatórios',   crumb: 'Análises' },
-      chat:      { title: 'Chat da equipe', crumb: 'Mensagens internas' },
-      config:    { title: 'Configurações',crumb: 'Sistema' },
+      calendario: { title: 'Calendário', crumb: 'Agenda' },
+      config: { title: 'Configurações', crumb: 'Sistema' },
     };
     const meta = titles[page] || { title: page, crumb: '' };
     document.getElementById('pageTitle').textContent      = meta.title;
@@ -3040,11 +2749,16 @@ const UI = {
     }
 
     // Re-renderiza página específica
-    if (page === 'tarefas') this.renderOpPage();
+    const opPages = new Set(['rompimentos', 'troca-poste', 'otimizacao-rede', 'certificacao-cemig']);
+    if (opPages.has(page)) {
+      Store.currentOpCategory = page;
+      // Sempre usa o container de tarefas operacionais
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.getElementById('page-tarefas')?.classList.add('active');
+      this.renderOpPage();
+    }
     if (page === 'atendimento') this.renderAtendimentoPage();
     if (page === 'calendario') this.renderCalendarPage();
-    if (page === 'relatorios') this.renderReportsPage();
-    Controllers.teamChat?.onPageChange?.(page);
   },
 
   /**
@@ -3059,7 +2773,16 @@ const UI = {
     } catch {
       return;
     }
-    const allowed = new Set(['dashboard', 'tarefas', 'atendimento', 'calendario', 'relatorios', 'chat', 'config']);
+    const allowed = new Set([
+      'dashboard',
+      'rompimentos',
+      'troca-poste',
+      'otimizacao-rede',
+      'certificacao-cemig',
+      'atendimento',
+      'calendario',
+      'config',
+    ]);
     if (!saved || !allowed.has(saved)) return;
     if (!document.getElementById(`page-${saved}`)) return;
     this.navigateTo(saved);
@@ -3072,20 +2795,280 @@ const UI = {
     this.renderTaskTable();
   },
 
-  /* ── Página dedicada: Atendimento ao cliente ───────────── */
+  /* ── Página dedicada: Atendimento ao cliente (layout novo) ───────────── */
   renderAtendimentoPage() {
-    const board = document.getElementById('atendimentoBoard');
-    if (!board) return;
-    board.classList.add('atd-mode');
-    board.classList.remove('kanban-board--cemig');
-    const tasks = OpTaskService.getFilteredByCategory('atendimento-cliente', { filterNamespace: 'atd' });
-    this.renderAtendimentoList(tasks, board);
+    const root = document.getElementById('atendimentoBoard');
+    if (!root) return;
+
+    const all = OpTaskService.getFilteredByCategory('atendimento-cliente', { filterNamespace: 'atd' });
+    const normalized = all.map(t => ({ ...t, _groupStatus: ((status) => {
+      const s = String(status || '').toLowerCase();
+      if (s.includes('agend')) return 'agendado';
+      if (s.includes('andament')) return 'andamento';
+      if (s.includes('retorno')) return 'retorno';
+      if (s.includes('conclu') || s.includes('finaliz')) return 'concluido';
+      return 'entrada';
+    })(t.status) }));
+    const parents = normalized.filter(t => t.isParentTask || !t.parentTaskId);
+    const children = normalized.filter(t => t.parentTaskId);
+
+    const shelves = {
+      entrada: [],
+      agendado: [],
+      andamento: [],
+      retorno: [],
+      concluido: [],
+    };
+
+    parents.forEach(p => {
+      const g = p._groupStatus;
+      const key =
+        g === 'agendado'   ? 'agendado' :
+        g === 'andamento'  ? 'andamento' :
+        g === 'retorno'    ? 'retorno'   :
+        g === 'concluido'  ? 'concluido' : 'entrada';
+      shelves[key].push(p);
+    });
+
+    const buildCard = (parent, kids) => {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'atd-book-card';
+      card.dataset.taskId = String(parent.id);
+      card.setAttribute('draggable', 'true');
+
+      const spine = document.createElement('div');
+      spine.className = 'atd-book-spine';
+
+      const inner = document.createElement('div');
+      inner.className = 'atd-book-inner';
+
+      const top = document.createElement('div');
+      top.className = 'atd-book-top';
+
+      const title = document.createElement('h3');
+      title.className = 'atd-book-title';
+      title.textContent = parent.titulo || '(Sem título)';
+
+      const protoLine = document.createElement('p');
+      protoLine.className = 'atd-book-line atd-book-line--mono';
+      const proto = parent.protocolo || parent.taskCode || parent.id;
+      protoLine.innerHTML = `<span class="atd-book-k">PROTOCOLO</span>${proto}`;
+
+      const clientLine = document.createElement('p');
+      clientLine.className = 'atd-book-line';
+      const desc = parent.descricao || parent.localizacaoTexto || parent.setor || '';
+      clientLine.innerHTML = `<span class="atd-book-k">CLIENTE/LOCAL</span>${desc || '—'}`;
+
+      const regionLine = document.createElement('p');
+      regionLine.className = 'atd-book-line atd-book-line--mono';
+      const reg = parent.regiao || 'Sem região';
+      regionLine.innerHTML = `<span class="atd-book-k">REGIÃO</span>${reg}`;
+
+      const datesLine = document.createElement('p');
+      datesLine.className = 'atd-book-line atd-book-line--mono';
+      const entrada = parent.dataEntrada || parent.criadaEm || '';
+      const prazo = parent.prazo || '';
+      datesLine.innerHTML =
+        `<span class="atd-book-k">DATAS</span>${entrada || '—'}`
+        + (prazo ? ` · prazo ${prazo}` : '');
+
+      const badgesRow = document.createElement('div');
+      badgesRow.className = 'atd-book-badges';
+
+      if (parent.prioridade) {
+        const pr = document.createElement('span');
+        pr.className = 'badge ' + (
+          parent.prioridade === 'Alta' ? 'p-high'
+          : parent.prioridade === 'Média' ? 'p-med'
+          : 'p-low'
+        );
+        pr.textContent = `Prioridade ${parent.prioridade}`;
+        badgesRow.appendChild(pr);
+      }
+
+      if (parent.regiao) {
+        const regBadge = document.createElement('span');
+        const r = String(parent.regiao).toLowerCase();
+        regBadge.className = 'badge ' + (
+          r.includes('goval') ? 'reg-goval' :
+          r.includes('vale') ? 'reg-vale' :
+          r.includes('caratinga') ? 'reg-caratinga' :
+          'reg-unknown'
+        );
+        regBadge.textContent = parent.regiao;
+        badgesRow.appendChild(regBadge);
+      }
+
+      const status = String(parent.status || 'Criada');
+      const label = status === 'Concluída' ? 'Concluído' : status;
+      const tmp = document.createElement('span');
+      tmp.innerHTML = UI.statusBadge(status);
+      const statusBadge = document.createElement('span');
+      statusBadge.className = tmp.firstElementChild?.className || 'badge';
+      statusBadge.textContent = label;
+      badgesRow.appendChild(statusBadge);
+
+      top.appendChild(title);
+      top.appendChild(protoLine);
+      top.appendChild(clientLine);
+      top.appendChild(regionLine);
+      top.appendChild(datesLine);
+      if (badgesRow.children.length) top.appendChild(badgesRow);
+
+      inner.appendChild(top);
+
+      const subsCount = kids.length;
+      if (subsCount) {
+        const done = kids.filter(c => c.status === 'Concluída' || c.status === 'Finalizada').length;
+        const subs = document.createElement('p');
+        subs.className = 'atd-book-subs';
+        subs.textContent = `${subsCount} ordem(ns) de serviço · ${done} resolvida(s)`;
+        inner.appendChild(subs);
+      }
+
+      const foot = document.createElement('div');
+      foot.className = 'atd-book-foot';
+
+      const btnNovo = document.createElement('button');
+      btnNovo.type = 'button';
+      btnNovo.className = 'atd-book-ico';
+      btnNovo.title = 'Adicionar ordem de serviço';
+      btnNovo.textContent = '+';
+
+      const btnEditar = document.createElement('button');
+      btnEditar.type = 'button';
+      btnEditar.className = 'atd-book-ico';
+      btnEditar.title = 'Editar protocolo';
+      btnEditar.textContent = '✎';
+
+      foot.appendChild(btnNovo);
+      foot.appendChild(btnEditar);
+      inner.appendChild(foot);
+
+      card.appendChild(spine);
+      card.appendChild(inner);
+
+      card.addEventListener('click', (ev) => {
+        if (ev.target === btnNovo || ev.target.closest('.atd-book-ico') === btnNovo) {
+          ev.stopPropagation();
+          Controllers.opTask.openNewAtendimentoChild?.(parent);
+          return;
+        }
+        Controllers.opTask.openEditModal(parent.id);
+      });
+
+      card.addEventListener('dragstart', (ev) => {
+        card.classList.add('dragging');
+        ev.dataTransfer.effectAllowed = 'move';
+        ev.dataTransfer.setData('text/plain', String(parent.id));
+      });
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+      });
+
+      return card;
+    };
+
+    const buildShelf = (title, key, list) => {
+      const shelf = document.createElement('section');
+      shelf.className = 'atd-shelf';
+      shelf.dataset.shelf = key;
+
+      const head = document.createElement('header');
+      head.className = 'atd-shelf-head';
+
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'atd-shelf-toggle';
+      toggle.innerHTML = `
+        <span class="atd-shelf-title">${title}</span>
+        <span class="atd-shelf-count">${list.length}</span>
+      `;
+
+      const body = document.createElement('div');
+      body.className = 'atd-shelf-body open';
+
+      const plank = document.createElement('div');
+      plank.className = 'atd-shelf-plank';
+
+      const books = document.createElement('div');
+      books.className = 'atd-shelf-books';
+      books.dataset.dropShelf = key;
+
+      if (!list.length) {
+        const empty = document.createElement('div');
+        empty.className = 'atd-shelf-empty';
+        empty.textContent = 'Nenhum atendimento neste estágio.';
+        books.appendChild(empty);
+      } else {
+        const byId = new Map();
+        children.forEach(c => {
+          const pid = Number(c.parentTaskId || 0);
+          if (!pid) return;
+          if (!byId.has(pid)) byId.set(pid, []);
+          byId.get(pid).push(c);
+        });
+        list.forEach(p => {
+          const kids = byId.get(Number(p.id)) || [];
+          books.appendChild(buildCard(p, kids));
+        });
+      }
+
+      books.addEventListener('dragover', (ev) => {
+        ev.preventDefault();
+        books.classList.add('drag-over');
+      });
+      books.addEventListener('dragleave', (ev) => {
+        if (ev.relatedTarget && books.contains(ev.relatedTarget)) return;
+        books.classList.remove('drag-over');
+      });
+      books.addEventListener('drop', (ev) => {
+        ev.preventDefault();
+        books.classList.remove('drag-over');
+        const dragging = root.querySelector('.atd-book-card.dragging');
+        if (!dragging) return;
+        const id = Number(dragging.dataset.taskId || 0);
+        if (!id) return;
+        const statusMap = {
+          entrada: 'Criada',
+          agendado: 'Agendado',
+          andamento: 'Em andamento',
+          retorno: 'Em andamento',
+          concluido: 'Concluída',
+        };
+        const newStatus = statusMap[key] || 'Criada';
+        OpTaskService.changeStatus(id, newStatus);
+        UI.refreshOperationalUi();
+        ToastService.show(`Atendimento movido para "${title}"`, 'success');
+      });
+
+      toggle.addEventListener('click', () => {
+        const open = body.classList.contains('open');
+        body.classList.toggle('open', !open);
+      });
+
+      body.appendChild(books);
+      shelf.appendChild(head);
+      head.appendChild(toggle);
+      shelf.appendChild(body);
+      shelf.appendChild(plank);
+
+      root.appendChild(shelf);
+    };
+
+    root.innerHTML = '';
+    buildShelf('Entrada / Triagem', 'entrada',   shelves.entrada);
+    buildShelf('Agendado',          'agendado',  shelves.agendado);
+    buildShelf('Em atendimento',    'andamento', shelves.andamento);
+    buildShelf('Aguardando retorno','retorno',   shelves.retorno);
+    buildShelf('Concluído',         'concluido', shelves.concluido);
   },
 
   /** Atualiza Kanban (Tarefas) ou painel de Atendimento conforme a página ativa. */
   refreshOperationalUi() {
     if (Store.currentPage === 'atendimento') this.renderAtendimentoPage();
-    else if (Store.currentPage === 'tarefas') this.renderOpPage();
+    else this.renderOpPage();
   },
 
   /* ── Full op page render ────────────────────────────────── */
@@ -3436,23 +3419,7 @@ const TEAM_CHAT_EMOJI_GROUPS = [
 const Controllers = {
   theme: {
     init() {
-      ThemeService.init();
-      const toggle = document.getElementById('themeLightToggle');
-      if (toggle) {
-        if (toggle.dataset.bpBound !== '1') {
-          toggle.dataset.bpBound = '1';
-          toggle.checked = document.documentElement.dataset.theme === 'light';
-          toggle.addEventListener('change', () => {
-            ThemeService.set(toggle.checked ? 'light' : 'dark');
-          });
-        } else {
-          toggle.checked = document.documentElement.dataset.theme === 'light';
-        }
-      }
-      if (typeof window !== 'undefined' && !window.__bpThemePageshow) {
-        window.__bpThemePageshow = true;
-        window.addEventListener('pageshow', () => ThemeService.refreshFromStorage());
-      }
+      // Tema único (escuro minimalista). Mantido por compatibilidade.
     },
   },
   auth: {
@@ -4788,13 +4755,6 @@ const Controllers = {
       UI.refreshOperationalUi();
       UI.renderCalendarPage();
       UI.renderReportsPage();
-      // Atualiza tabs (somente na página Tarefas)
-      if (Store.currentPage === 'tarefas') {
-        document.querySelectorAll('.tasks-tab').forEach(t => {
-          t.classList.toggle('active', t.dataset.category === Store.currentOpCategory);
-          t.setAttribute('aria-selected', t.dataset.category === Store.currentOpCategory ? 'true' : 'false');
-        });
-      }
     },
 
     init() {
@@ -4967,12 +4927,8 @@ const Controllers = {
 
   /* ── Tasks Category Tabs ──────────────────────────────── */
   categoryTabs: {
+    // Tabs de categoria foram substituídas por navegação lateral (menu).
     _activateCategory(cat) {
-      document.querySelectorAll('.tasks-tab').forEach(t => {
-        const on = t.dataset.category === cat;
-        t.classList.toggle('active', on);
-        t.setAttribute('aria-selected', on ? 'true' : 'false');
-      });
       Store.currentOpCategory = cat;
       const hidden = document.getElementById('op-parent-task-id');
       if (hidden) hidden.value = '';
@@ -4980,11 +4936,7 @@ const Controllers = {
       UI.renderKanban();
     },
     init() {
-      document.querySelectorAll('.tasks-tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-          this._activateCategory(tab.dataset.category);
-        });
-      });
+      // Nada a fazer — mantido apenas por compatibilidade.
     },
   },
 

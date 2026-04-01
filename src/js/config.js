@@ -8,12 +8,14 @@
     ...prev,
     appBuild: Object.prototype.hasOwnProperty.call(prev, 'appBuild') ? prev.appBuild : '2026-03-30-1',
     // Webhooks por região (Google Chat).
-    // IMPORTANTE: URLs com token são sensíveis. Evite commitar em repositório público.
+    // IMPORTANTE: URLs com token são sensíveis. Configure somente em ambiente privado
+    // e evite commitar valores reais. Deixe vazio aqui e, se precisar, sobrescreva
+    // via outro script local não versionado.
     defaultWebhookUrlsByRegion: {
-      GOVAL: 'https://chat.googleapis.com/v1/spaces/AAQAALsNEnY/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=zOzkVRXR_IpFq180r_0RGs38Nijutd44TrH9Vpj1Qgo',
-      VALE_DO_ACO: 'https://chat.googleapis.com/v1/spaces/AAQAXZP72GA/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=H0xwX2gBWHgfN2YmxaNGFTtLt_MG1-HEdlVPpmFHlUc',
-      CARATINGA: 'https://chat.googleapis.com/v1/spaces/AAQArIWN3jM/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=eFDHTyVmz4f1AsxpJzxSPVC8TI0nOP0VSGOaK_bpowI',
-      BACKUP: 'https://chat.googleapis.com/v1/spaces/AAQAgqsNKYg/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=03UNaWYGsXuzDGcs-ascMurXLVsbxThfdDjda7taoDk',
+      GOVAL: '',
+      VALE_DO_ACO: '',
+      CARATINGA: '',
+      BACKUP: '',
     },
 
     // Diretório de técnicos para autocomplete + menções no Chat.

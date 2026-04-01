@@ -2,31 +2,40 @@
    DESIGN TOKENS — paleta verde / preto / branco
 ═══════════════════════════════════════════════════════════ */
 :root {
-  --black:       #0a0c0a;
-  --black2:      #111411;
-  --black3:      #181d18;
-  --black4:      #1f261f;
-  --black5:      #252e25;
-  --green:       #2dff6e;
-  --green-dim:   #1ed45a;
-  --green-dark:  #0a4a1e;
-  --green-muted: rgba(45,255,110,.1);
-  --green-glow:  rgba(45,255,110,.18);
-  --white:       #f5f8f5;
-  --white2:      #dce8dc;
-  --white3:      #a8bda8;
-  --white4:      #6b806b;
-  --border:      rgba(45,255,110,.12);
-  --border2:     rgba(45,255,110,.22);
-  --border3:     rgba(45,255,110,.35);
-  --warning:     #f5c842;
-  --warning-bg:  rgba(245,200,66,.1);
-  --danger:      #ff4d6d;
-  --danger-bg:   rgba(255,77,109,.1);
-  --info:        #42b8f5;
-  --info-bg:     rgba(66,184,245,.1);
+  /* Base mais suave e minimalista (dark "acinzentado") */
+  --black:       #0d1012;
+  --black2:      #13171a;
+  --black3:      #171c20;
+  --black4:      #1e252b;
+  --black5:      #242d35;
+
+  /* Verdes menos neon, mais sóbrios */
+  --green:       #7dd3a7;
+  --green-dim:   #4bb685;
+  --green-dark:  #115e3c;
+  --green-muted: rgba(125,211,167,.12);
+  --green-glow:  rgba(125,211,167,.22);
+
+  /* Tipografia clara, porém não "branca estourada" */
+  --white:       #f4f7f9;
+  --white2:      #d5e0ea;
+  --white3:      #9aa9b5;
+  --white4:      #6b7c88;
+
+  /* Bordas e divisórias mais discretas */
+  --border:      rgba(148,163,184,.28);
+  --border2:     rgba(148,163,184,.42);
+  --border3:     rgba(148,163,184,.65);
+
+  /* Cores de feedback suavizadas */
+  --warning:     #facc6b;
+  --warning-bg:  rgba(250,204,107,.12);
+  --danger:      #fb7185;
+  --danger-bg:   rgba(251,113,133,.10);
+  --info:        #60a5fa;
+  --info-bg:     rgba(96,165,250,.12);
   --purple:      #a78bfa;
-  --purple-bg:   rgba(167,139,250,.1);
+  --purple-bg:   rgba(167,139,250,.12);
   /* Regiões (harmônicas ao tema escuro + verde) */
   --region-goval:         #4d9fff;
   --region-goval-bg:      rgba(77,159,255,.14);
@@ -63,37 +72,6 @@
   --pad-x:        clamp(12px, 2.8vw, 24px);
   --pad-y:        clamp(12px, 2.2vw, 22px);
   --touch-min:    44px;
-}
-
-/* ═══════════════════════════════════════════════════════════
-   TEMA — modo claro (override de tokens)
-═══════════════════════════════════════════════════════════ */
-html[data-theme="light"] {
-  color-scheme: light;
-  scrollbar-color: rgba(10,12,10,.22) transparent;
-}
-html[data-theme="light"] body {
-  background: var(--black);
-  color: var(--white);
-}
-html[data-theme="light"] {
-  --black:       #f6f8f6;
-  --black2:      #eef2ee;
-  --black3:      #e6ece6;
-  --black4:      #dde5dd;
-  --black5:      #d2dcd2;
-
-  --white:       #0a0c0a;
-  --white2:      #111411;
-  --white3:      #1f261f;
-  --white4:      #435343;
-
-  --border:      rgba(10,12,10,.10);
-  --border2:     rgba(10,12,10,.18);
-  --border3:     rgba(10,12,10,.28);
-
-  --green-muted: rgba(45,255,110,.16);
-  --green-glow:  rgba(45,255,110,.22);
 }
 
 /* ═══ RESET ═══════════════════════════════════════════════ */
@@ -545,33 +523,7 @@ body.auth-locked .login-screen { display: flex; }
   box-shadow: 0 1px 0 var(--border);
 }
 
-/* Webhook Banner */
-.webhook-banner {
-  display: none; align-items: center; gap: 10px; padding: 10px 16px;
-  background: rgba(45,255,110,.07); border: 1px solid var(--border3);
-  border-radius: var(--radius); font-size: 12.5px; color: var(--green);
-  animation: fadeIn .3s ease;
-}
-.webhook-banner.visible { display: flex; flex-wrap: wrap; }
-.wh-dot {
-  width: 7px; height: 7px; border-radius: 50%; background: var(--green);
-  animation: pulse 2s infinite; flex-shrink: 0;
-}
-@keyframes pulse { 0%,100%{opacity:1;box-shadow:0 0 0 0 var(--green-glow)} 50%{opacity:.5;box-shadow:0 0 0 5px transparent} }
-.wh-label { font-weight: 600; }
-.wh-url {
-  color: var(--white4); font-family: var(--font-mono); font-size: 10px;
-  margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  max-width: min(300px, 100%);
-  flex: 1 1 140px;
-  min-width: 0;
-}
-.wh-disconnect {
-  margin-left: 8px; background: none; border: none; color: var(--white4);
-  cursor: pointer; font-size: 11px; font-family: var(--font-display);
-  transition: color var(--transition); flex-shrink: 0;
-}
-.wh-disconnect:hover { color: var(--danger); }
+/* Webhook banner removido do layout */
 
 /* ═══ STAT CARDS ════════════════════════════════════════════ */
 .stats {
@@ -1120,87 +1072,7 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
   #page-relatorios .toolbar-left select { min-width: 100%; }
 }
 
-/* Aviso Google Chat — compartilhado no topo de todas as páginas */
-.content-webhook-wrap {
-  width: 100%;
-  margin-bottom: clamp(12px, 2vw, 18px);
-}
-
-/* ═══ TAREFAS PAGE — categorias no topo + painel largura total ═══ */
-#page-tarefas .tasks-top-categories {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  margin-bottom: 16px;
-  min-width: 0;
-}
-#page-tarefas .tasks-top-details {
-  background: var(--black3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  min-width: 0;
-  overflow: hidden;
-  transition: border-color var(--transition), box-shadow var(--transition);
-}
-#page-tarefas .tasks-top-details[open] {
-  border-color: var(--border3);
-}
-#page-tarefas .tasks-top-summary {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
-  transition: background var(--transition);
-}
-#page-tarefas .tasks-top-summary::-webkit-details-marker,
-#page-tarefas .tasks-top-summary::marker {
-  display: none;
-  content: '';
-}
-#page-tarefas .tasks-top-summary:hover {
-  background: rgba(255,255,255,.03);
-}
-#page-tarefas .tasks-top-summary:focus {
-  outline: none;
-}
-#page-tarefas .tasks-top-summary:focus-visible {
-  box-shadow: 0 0 0 2px var(--black), 0 0 0 4px var(--green-dim);
-}
-#page-tarefas .tasks-top-group-icon {
-  display: flex;
-  color: var(--green);
-  flex-shrink: 0;
-}
-#page-tarefas .tasks-top-group-title {
-  flex: 1;
-  min-width: 0;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--white2);
-  font-family: var(--font-mono);
-}
-#page-tarefas .tasks-top-chevron {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--white4);
-  transition: transform var(--transition);
-  flex-shrink: 0;
-}
-#page-tarefas .tasks-top-details[open] .tasks-top-chevron {
-  transform: rotate(180deg);
-}
-#page-tarefas .tasks-top-details-body {
-  padding: 0 14px 14px;
-}
-#page-tarefas .tasks-tabs--top {
-  width: 100%;
-}
+/* ═══ TAREFAS PAGE — painel largura total (categorias via menu lateral) ═══ */
 #page-tarefas .tasks-main-panel {
   min-width: 0;
   width: 100%;
@@ -1478,8 +1350,10 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
 .atd-shelf {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, rgba(40, 32, 26, 0.6) 0%, var(--black2) 48%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  background: var(--black3);
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
   overflow: hidden;
   min-width: 0;
 }
@@ -1537,13 +1411,13 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
   border-radius: 3px;
   background: linear-gradient(
     180deg,
-    #5c4033 0%,
-    #3d2a22 38%,
-    #2a1d18 100%
+    rgba(45, 255, 110, 0.12) 0%,
+    #1b241b 45%,
+    #0a0c0a 100%
   );
   box-shadow:
-    0 3px 8px rgba(0, 0, 0, 0.45),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    0 3px 8px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(45, 255, 110, 0.18);
 }
 .atd-shelf-books {
   display: flex;

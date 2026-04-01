@@ -91,13 +91,33 @@
         <span class="nav-label">Dashboard</span>
       </button>
 
-      <button type="button" class="nav-item" data-page="tarefas">
+      <!-- Navegação operacional dividida por categoria -->
+      <button type="button" class="nav-item" data-page="rompimentos">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-          <polyline points="9 11 12 14 22 4"/>
-          <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
         </svg>
-        <span class="nav-label">Tarefas</span>
-        <span class="nav-badge" id="badge-late" style="display:none" aria-label="tarefas atrasadas">0</span>
+        <span class="nav-label">Rompimentos</span>
+      </button>
+
+      <button type="button" class="nav-item" data-page="troca-poste">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>
+        </svg>
+        <span class="nav-label">Troca de Poste</span>
+      </button>
+
+      <button type="button" class="nav-item" data-page="otimizacao-rede">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <path d="M4 12a8 8 0 0 1 16 0"/><path d="M7 12a5 5 0 0 1 10 0"/><circle cx="12" cy="12" r="1.5"/>
+        </svg>
+        <span class="nav-label">Otimização de Rede</span>
+      </button>
+
+      <button type="button" class="nav-item" data-page="certificacao-cemig">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <path d="M12 2L4 6v6c0 5 4 9 8 10 4-1 8-5 8-10V6l-8-4z"/><path d="M9 12l2 2 4-4"/>
+        </svg>
+        <span class="nav-label">Certificação Cemig</span>
       </button>
 
       <button type="button" class="nav-item" data-page="atendimento" aria-label="Atendimento ao cliente">
@@ -116,22 +136,6 @@
           <line x1="3" y1="10" x2="21" y2="10"/>
         </svg>
         <span class="nav-label">Calendário</span>
-      </button>
-
-      <button type="button" class="nav-item" data-page="relatorios">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-          <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/>
-          <line x1="6" y1="20" x2="6" y2="14"/>
-        </svg>
-        <span class="nav-label">Relatórios</span>
-      </button>
-
-      <button type="button" class="nav-item" data-page="chat">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
-        </svg>
-        <span class="nav-label">Chat equipe</span>
-        <span class="nav-badge" id="nav-chat-badge" style="display:none" aria-label="Novas mensagens no chat"></span>
       </button>
 
       <button type="button" class="nav-item" data-page="config">
@@ -171,11 +175,6 @@
     <!-- Topbar -->
     <header class="topbar" role="banner">
       <div class="topbar-left">
-        <button type="button" class="mobile-nav-btn icon-btn" id="mobileNavBtn" aria-label="Abrir menu" aria-controls="sidebar" aria-expanded="false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
-          </svg>
-        </button>
         <div class="topbar-titles">
           <div class="page-title" id="pageTitle">Dashboard</div>
           <div class="breadcrumb" id="pageBreadcrumb" aria-label="Localização atual">
@@ -215,13 +214,6 @@
 
     <!-- Content area -->
     <div class="content">
-
-      <div class="content-webhook-wrap">
-        <div class="webhook-banner" id="webhookBanner" role="status" aria-live="polite">
-          <div class="wh-dot" aria-hidden="true"></div>
-          <span class="wh-label">Google Chat conectado</span>
-        </div>
-      </div>
 
       <!-- ═══ PAGE: DASHBOARD ═══ -->
       <section class="page active" id="page-dashboard" aria-label="Dashboard">
@@ -348,71 +340,7 @@
       <!-- ═══ PAGE: TAREFAS ═══ -->
       <section class="page" id="page-tarefas" aria-label="Tarefas operacionais">
 
-        <div class="tasks-top-categories" aria-label="Categorias operacionais">
-          <details class="tasks-top-details" id="tasks-top-projetos" open>
-            <summary class="tasks-top-summary">
-              <span class="tasks-top-group-icon" aria-hidden="true">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M4 12a8 8 0 0 1 16 0"/>
-                  <path d="M7 12a5 5 0 0 1 10 0"/>
-                  <circle cx="12" cy="12" r="1.5"/>
-                </svg>
-              </span>
-              <span class="tasks-top-group-title">Projetos de Rede</span>
-              <span class="tasks-top-chevron" aria-hidden="true">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"/></svg>
-              </span>
-            </summary>
-            <div class="tasks-top-details-body">
-              <div class="tasks-tabs tasks-tabs--top" role="tablist" aria-label="Projetos de Rede">
-                <button type="button" class="tasks-tab" role="tab" aria-selected="false" data-category="otimizacao-rede" id="tab-otimizacao-rede" aria-controls="panel-otimizacao-rede">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <path d="M4 12a8 8 0 0 1 16 0"/>
-                    <path d="M7 12a5 5 0 0 1 10 0"/>
-                    <circle cx="12" cy="12" r="1.5"/>
-                  </svg>
-                  Otimização de Rede
-                  <span class="tasks-tab-count" id="tab-count-otimizacao-rede">0</span>
-                </button>
-                <button type="button" class="tasks-tab" role="tab" aria-selected="false" data-category="certificacao-cemig" id="tab-certificacao-cemig" aria-controls="panel-certificacao-cemig">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <path d="M12 2L4 6v6c0 5 4 9 8 10 4-1 8-5 8-10V6l-8-4z"/>
-                    <path d="M9 12l2 2 4-4"/>
-                  </svg>
-                  Certificação Cemig
-                  <span class="tasks-tab-count" id="tab-count-certificacao-cemig">0</span>
-                </button>
-              </div>
-            </div>
-          </details>
-          <details class="tasks-top-details" id="tasks-top-manutencao" open>
-            <summary class="tasks-top-summary">
-              <span class="tasks-top-group-icon" aria-hidden="true">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-                </svg>
-              </span>
-              <span class="tasks-top-group-title">Atividade de Manutenção</span>
-              <span class="tasks-top-chevron" aria-hidden="true">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"/></svg>
-              </span>
-            </summary>
-            <div class="tasks-top-details-body">
-              <div class="tasks-tabs tasks-tabs--top" role="tablist" aria-label="Atividade de Manutenção">
-                <button type="button" class="tasks-tab active" role="tab" aria-selected="true" data-category="rompimentos" id="tab-rompimentos" aria-controls="panel-rompimentos">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                  Rompimentos
-                  <span class="tasks-tab-count" id="tab-count-rompimentos">0</span>
-                </button>
-                <button type="button" class="tasks-tab" role="tab" aria-selected="false" data-category="troca-poste" id="tab-troca-poste" aria-controls="panel-troca-poste">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
-                  Troca de Poste
-                  <span class="tasks-tab-count" id="tab-count-troca-poste">0</span>
-                </button>
-              </div>
-            </div>
-          </details>
-        </div>
+        <!-- Categorias operacionais agora ficam no menu lateral; painel aqui apenas mostra filtros + kanban. -->
 
         <!-- Resumo de tarefas operacionais -->
         <div class="stats" role="list" aria-label="Resumo de tarefas operacionais">
@@ -518,16 +446,23 @@
       </section>
       <!-- /page-tarefas -->
 
-      <!-- ═══ PAGE: ATENDIMENTO AO CLIENTE (módulo próprio) ═══ -->
+      <!-- ═══ PAGE: ATENDIMENTO AO CLIENTE (layout redesenhado) ═══ -->
       <section class="page" id="page-atendimento" aria-label="Atendimento ao cliente">
-        <div class="panel" style="padding:0;overflow:hidden">
-          <div class="toolbar" role="toolbar" aria-label="Filtros do atendimento">
-            <div class="toolbar-left">
+        <div class="panel atd-list-wrap atd-list-wrap--shelves">
+          <div class="atd-list-toolbar" role="toolbar" aria-label="Painel de atendimento ao cliente">
+            <div class="panel-title">
+              Atendimento ao Cliente
+              <span class="atd-toolbar-hint">
+                Organize protocolos em listas (tarefas-pai) e distribua ordens de serviço como subtarefas por técnico.
+                Arraste cartões entre prateleiras para atualizar o status.
+              </span>
+            </div>
+            <div class="atd-toolbar-right">
               <div class="search-box" role="search">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input type="search" id="atdOpSearchInput" placeholder="Buscar atendimentos…" aria-label="Buscar atendimentos"/>
+                <input type="search" id="atdOpSearchInput" placeholder="Buscar protocolos, clientes, endereço…" aria-label="Buscar atendimentos"/>
               </div>
-              <div class="search-box" role="group" aria-label="Filtro de região">
+              <div class="search-box" role="group" aria-label="Filtrar por região">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 <select id="atdOpRegionSelectFilter" aria-label="Filtrar por região">
                   <option value="">Todas as regiões</option>
@@ -551,16 +486,17 @@
               </div>
               <div class="search-box" role="search">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 16V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2h14a2 2 0 002-2z"/><polyline points="7 12 10 15 17 8"/></svg>
-                <input type="search" id="atdOpTaskIdInput" placeholder="ID da tarefa…" aria-label="ID da tarefa"/>
+                <input type="search" id="atdOpTaskIdInput" placeholder="Protocolo ou ID…" aria-label="ID da tarefa"/>
               </div>
+              <button class="primary-btn" id="openAtendimentoTaskModalBtn" type="button" aria-label="Nova lista de atendimento">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Nova lista
+              </button>
             </div>
-            <button class="primary-btn" id="openAtendimentoTaskModalBtn" type="button" aria-label="Nova lista de atendimento">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              Nova lista
-            </button>
           </div>
-          <div class="op-kanban-wrap" style="border-top:1px solid var(--border)">
-            <div id="atendimentoBoard" class="kanban-board" role="region" aria-label="Painel de atendimento ao cliente"></div>
+
+          <div class="atd-shelves" id="atendimentoBoard" role="region" aria-label="Prateleiras de atendimento ao cliente">
+            <!-- conteúdo gerado via JS (UI.renderAtendimentoPage) -->
           </div>
         </div>
       </section>
@@ -604,200 +540,9 @@
       </section>
 
       <!-- ═══ PAGE: RELATÓRIOS ═══ -->
-      <section class="page" id="page-relatorios" aria-label="Relatórios">
-        <div class="panel">
-          <div class="panel-header">
-            <span class="panel-title">Relatórios Operacionais</span>
-            <div class="toolbar-left">
-              <select id="reportPeriodFilter" aria-label="Filtro de período">
-                <option value="today">Hoje</option>
-                <option value="week" selected>Últimos 7 dias</option>
-                <option value="month">Últimos 30 dias</option>
-                <option value="all">Todo período</option>
-              </select>
-              <select id="reportCategoryFilter" aria-label="Filtro de categoria">
-                <option value="all">Todas categorias</option>
-                <option value="dashboard">Dashboard</option>
-                <option value="rompimentos">Rompimentos</option>
-                <option value="troca-poste">Troca de Poste</option>
-                <option value="atendimento-cliente">Atendimento ao Cliente</option>
-                <option value="otimizacao-rede">Otimização de Rede</option>
-                <option value="certificacao-cemig">Certificação Cemig</option>
-              </select>
-              <select id="reportRegionFilter" aria-label="Filtro de região">
-                <option value="all">Todas as regiões</option>
-                <option value="Goval">Goval</option>
-                <option value="Vale do Aço">Vale do Aço</option>
-                <option value="Caratinga">Caratinga</option>
-                <option value="Backup">Backup</option>
-              </select>
-              <select id="reportTechFilter" aria-label="Filtro de técnico">
-                <option value="all">Todos os técnicos</option>
-              </select>
-              <button class="icon-btn" id="reportRefreshBtn" title="Atualizar relatório" aria-label="Atualizar relatório">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
-              </button>
-              <button class="primary-btn" id="reportExportBtn" aria-label="Exportar CSV">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Exportar CSV
-              </button>
-            </div>
-          </div>
-          <div class="report-content">
-            <div class="stats" role="list" aria-label="Indicadores dos relatórios">
-              <div class="stat-card s-info" role="listitem">
-                <div class="stat-label">Total no Período</div>
-                <div class="stat-row">
-                  <div class="stat-value" id="r-total">0</div>
-                  <div class="stat-icon" aria-hidden="true">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-                  </div>
-                </div>
-                <div class="stat-sub">Tarefas registradas</div>
-              </div>
-              <div class="stat-card s-green" role="listitem">
-                <div class="stat-label">Concluídas/Finalizadas</div>
-                <div class="stat-row">
-                  <div class="stat-value" id="r-done">0</div>
-                  <div class="stat-icon" aria-hidden="true">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
-                  </div>
-                </div>
-                <div class="stat-sub" id="r-done-rate">0%</div>
-              </div>
-              <div class="stat-card s-warning" role="listitem">
-                <div class="stat-label">Em andamento</div>
-                <div class="stat-row">
-                  <div class="stat-value" id="r-progress">0</div>
-                  <div class="stat-icon" aria-hidden="true">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                  </div>
-                </div>
-                <div class="stat-sub">Tarefas ativas</div>
-              </div>
-              <div class="stat-card s-danger" role="listitem">
-                <div class="stat-label">Atrasadas</div>
-                <div class="stat-row">
-                  <div class="stat-value" id="r-late">0</div>
-                  <div class="stat-icon" aria-hidden="true">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                  </div>
-                </div>
-                <div class="stat-sub">Atenção imediata</div>
-              </div>
-            </div>
+      <!-- Página de Relatórios removida: funcionalidade descontinuada -->
 
-            <div class="report-layout-grid" id="reportLayoutGrid" aria-label="Layout do relatório (arraste para reorganizar)">
-              <div class="panel report-widget report-chart-panel" draggable="true" data-report-widget="statusDist">
-                <div class="panel-header">
-                  <span class="panel-title">Distribuição por Status</span>
-                  <button type="button" class="drag-handle" draggable="true" title="Arrastar card" aria-label="Arrastar card">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="7" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="17" r="1"/><circle cx="15" cy="7" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="17" r="1"/></svg>
-                  </button>
-                </div>
-                <div class="report-bars" id="reportBars"></div>
-              </div>
-
-              <div class="panel report-widget" draggable="true" data-report-widget="lateTable">
-                <div class="panel-header">
-                  <span class="panel-title">Tarefas Atrasadas</span>
-                  <button type="button" class="drag-handle" draggable="true" title="Arrastar card" aria-label="Arrastar card">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="7" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="17" r="1"/><circle cx="15" cy="7" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="17" r="1"/></svg>
-                  </button>
-                </div>
-                <div class="table-wrap report-table-scroll">
-                  <table aria-label="Tabela de tarefas atrasadas">
-                    <thead>
-                      <tr>
-                        <th scope="col">Tarefa</th>
-                        <th scope="col">Origem</th>
-                        <th scope="col">Responsável</th>
-                        <th scope="col">Prazo</th>
-                        <th scope="col">Dias atraso</th>
-                      </tr>
-                    </thead>
-                    <tbody id="reportLateTableBody"></tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div class="panel report-widget report-chart-panel" draggable="true" data-report-widget="rompRegion">
-                <div class="panel-header">
-                  <span class="panel-title">Rompimentos por Região</span>
-                  <button type="button" class="drag-handle" draggable="true" title="Arrastar card" aria-label="Arrastar card">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="7" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="17" r="1"/><circle cx="15" cy="7" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="17" r="1"/></svg>
-                  </button>
-                </div>
-                <div class="report-bars" id="reportRompimentoRegionBars"></div>
-              </div>
-
-              <div class="panel report-widget report-chart-panel" draggable="true" data-report-widget="rompTec">
-                <div class="panel-header">
-                  <span class="panel-title">Rompimentos Resolvidos por Técnico</span>
-                  <button type="button" class="drag-handle" draggable="true" title="Arrastar card" aria-label="Arrastar card">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="7" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="17" r="1"/><circle cx="15" cy="7" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="17" r="1"/></svg>
-                  </button>
-                </div>
-                <div class="report-bars" id="reportRompimentoTecBars"></div>
-              </div>
-
-              <div class="panel report-widget" draggable="true" data-report-widget="rompTecTable">
-                <div class="panel-header">
-                  <span class="panel-title">Resumo de Rompimentos por Técnico</span>
-                  <button type="button" class="drag-handle" draggable="true" title="Arrastar card" aria-label="Arrastar card">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="7" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="17" r="1"/><circle cx="15" cy="7" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="17" r="1"/></svg>
-                  </button>
-                </div>
-                <div class="table-wrap report-table-scroll">
-                  <table aria-label="Tabela de rompimentos por técnico">
-                    <thead>
-                      <tr>
-                        <th scope="col">Técnico</th>
-                        <th scope="col">Concluídas</th>
-                        <th scope="col">Finalizadas</th>
-                        <th scope="col">Total Resolvidas</th>
-                      </tr>
-                    </thead>
-                    <tbody id="reportRompimentoTecTableBody"></tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ═══ PAGE: CHAT EQUIPE ═══ -->
-      <section class="page" id="page-chat" aria-label="Chat da equipe">
-        <div class="team-chat-wrap">
-          <div class="panel team-chat-panel" role="region" aria-label="Mensagens">
-            <div class="panel-header">
-              <span class="panel-title">Mensagens</span>
-              <span class="panel-title-hint">Atualização automática · @menções · emojis · links · até 100 mensagens</span>
-            </div>
-            <p class="team-chat-offline" id="teamChatOffline" hidden></p>
-            <div class="team-chat-list-wrap">
-              <button type="button" class="team-chat-jump-bottom sm-btn" id="teamChatJumpBottom" hidden>Novas mensagens ↓</button>
-              <div class="team-chat-list" id="teamChatList" tabindex="0" aria-live="polite"></div>
-            </div>
-            <div class="team-chat-compose">
-              <div class="team-chat-compose-main">
-                <label class="sr-only" for="teamChatInput">Sua mensagem</label>
-                <div class="team-chat-input-row">
-                  <button type="button" class="icon-btn team-chat-emoji-btn" id="teamChatEmojiBtn" title="Emojis" aria-label="Abrir seletor de emojis" aria-expanded="false" aria-controls="teamChatEmojiPanel">😊</button>
-                  <textarea id="teamChatInput" class="team-chat-input" rows="2" maxlength="2000" placeholder="Mensagem… Use @login para mencionar alguém da equipe" autocomplete="off"></textarea>
-                </div>
-                <div class="team-chat-emoji-panel" id="teamChatEmojiPanel" role="group" aria-label="Emojis" hidden>
-                  <div class="team-chat-emoji-tabs" id="teamChatEmojiTabs" role="tablist"></div>
-                  <div class="team-chat-emoji-grid" id="teamChatEmojiGrid" role="listbox"></div>
-                </div>
-                <div class="team-chat-mention-suggest" id="teamChatMentionSuggest" role="listbox" aria-label="Mencionar usuário" hidden></div>
-              </div>
-              <button type="button" class="primary-btn" id="teamChatSend">Enviar</button>
-            </div>
-          </div>
-        </div>
-      </section>
+      <!-- Página de Chat da equipe removida (função desativada) -->
 
       <!-- ═══ PAGE: CONFIG (placeholder) ═══ -->
       <section class="page" id="page-config" aria-label="Configurações">
@@ -830,23 +575,7 @@
               </div>
             </div>
 
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border:1px solid var(--border);border-radius:var(--radius);padding:14px;background:rgba(255,255,255,.02)">
-              <div style="min-width:220px">
-                <div style="font-weight:650;color:var(--white);display:flex;align-items:center;gap:8px">
-                  <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:8px;background:rgba(245,200,66,.12);color:var(--warning);flex-shrink:0" aria-hidden="true">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="M4.93 4.93l1.41 1.41"/><path d="M17.66 17.66l1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="M4.93 19.07l1.41-1.41"/><path d="M17.66 6.34l1.41-1.41"/></svg>
-                  </span>
-                  Tema
-                </div>
-                <div style="color:var(--white4);font-size:12.5px;margin-top:4px">Ative o modo claro para melhor leitura em ambientes iluminados.</div>
-              </div>
-              <div class="checkbox-group" style="margin-top:0">
-                <label class="checkbox-label" style="align-items:center">
-                  <input type="checkbox" id="themeLightToggle"/>
-                  <span>Modo claro</span>
-                </label>
-              </div>
-            </div>
+            <!-- Seção de modo claro removida: tema único (escuro minimalista) -->
 
             <div class="config-avatar-card">
               <div class="config-avatar-head">
