@@ -2427,6 +2427,40 @@ input[type=number]::-webkit-inner-spin-button { margin: 0; }
   grid-template-columns: 1fr;
 }
 
+.op-romp-desc-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.op-romp-desc-label {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--white3);
+}
+.op-romp-desc-expand {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-size: 11px;
+}
+.op-romp-desc-group .hint {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+.op-rich-editor--romp {
+  min-height: 140px;
+  max-height: min(38vh, 340px);
+}
+.op-romp-desc-group.is-expanded .op-rich-editor--romp {
+  min-height: 260px;
+  max-height: min(68vh, 620px);
+}
+
 /* Otimização de Rede — descrição com imagens coladas */
 .op-otim-desc-group .hint code {
   font-size: 10px;

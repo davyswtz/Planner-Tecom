@@ -2231,6 +2231,9 @@ const Controllers = {
       this._toggleGroup('opRompimentoExtraRow', false);
       this._toggleGroup('opRompimentoSetorGroup', false);
 
+      const rompDescWrap = document.getElementById('opRompimentoDescricaoWrap');
+      if (rompDescWrap) rompDescWrap.style.display = isRompimento || isTrocaPoste ? '' : 'none';
+
       this._syncCoordsBlockUi(isRompimento, isTrocaPoste);
 
       if (isTrocaPoste) {
@@ -2594,6 +2597,15 @@ const Controllers = {
       if (cemigProtoClear) cemigProtoClear.value = '';
       const cemigDescClear = document.getElementById('op-cemig-descricao');
       if (cemigDescClear) cemigDescClear.innerHTML = '';
+      const rompDescClear = document.getElementById('op-romp-descricao');
+      if (rompDescClear) rompDescClear.innerHTML = '';
+      const rompDescGrp = document.getElementById('opRompimentoDescricaoWrap');
+      if (rompDescGrp) rompDescGrp.classList.remove('is-expanded');
+      const rompExpBtn = document.getElementById('opRompDescExpandBtn');
+      if (rompExpBtn) {
+        rompExpBtn.textContent = 'Expandir';
+        rompExpBtn.setAttribute('aria-expanded', 'false');
+      }
       document.getElementById('op-prazo').value       = '';
       {
         const catClear = preset.category || Store.currentOpCategory;
@@ -2743,9 +2755,11 @@ const Controllers = {
       const finalPrioridade = isRompimento
         ? (prioPick || 'Média')
         : (isOtimRede || isCemig ? 'Média' : prioPick);
-      const finalDescricaoMeta = isRompimento
-        ? ''
-        : (isTrocaPoste ? '' : '');
+      const rompDescEl = document.getElementById('op-romp-descricao');
+      const rompDescHtml = (isRompimento || isTrocaPoste) && rompDescEl
+        ? String(rompDescEl.innerHTML || '').trim()
+        : '';
+      const finalDescricaoMeta = rompDescHtml;
       const setorField = isRompimento
         ? ''
         : (isParentTask ? regiao : (selectedParent?.setor || selectedParent?.regiao || existing?.setor || ''));
@@ -2888,6 +2902,8 @@ const Controllers = {
         if (opCemigProto) opCemigProto.value = '';
         const cemigDescOtim = document.getElementById('op-cemig-descricao');
         if (cemigDescOtim) cemigDescOtim.innerHTML = '';
+        const rompDescOtim = document.getElementById('op-romp-descricao');
+        if (rompDescOtim) rompDescOtim.innerHTML = '';
       } else if (task.categoria === 'certificacao-cemig') {
         let p = String(task.protocolo || '').trim();
         if (!p && task.titulo) {
@@ -2907,6 +2923,8 @@ const Controllers = {
         if (opOtimOs) opOtimOs.value = '';
         const otimDescC = document.getElementById('op-otim-descricao');
         if (otimDescC) otimDescC.innerHTML = '';
+        const rompDescCem = document.getElementById('op-romp-descricao');
+        if (rompDescCem) rompDescCem.innerHTML = '';
         const cemigDescEdit = document.getElementById('op-cemig-descricao');
         if (cemigDescEdit) {
           cemigDescEdit.innerHTML = this._normalizeOtimDescricaoImgSrcForEdit(String(task.descricao || ''));
@@ -2923,7 +2941,10 @@ const Controllers = {
         if (subp) subp.value = String(task.subProcesso || '').trim();
         if (dataInst) dataInst.value = String(task.dataInstalacao || '').trim();
         if (os) os.value = String(task.ordemServico || '').trim();
-        if (desc) desc.value = String(task.descricao || '').trim();
+        if (desc) {
+          if (task.categoria === 'rompimentos' || task.categoria === 'troca-poste') desc.value = '';
+          else desc.value = String(task.descricao || '').trim();
+        }
         const childTituloEdit = document.getElementById('op-atd-child-titulo');
         if (childTituloEdit) {
           childTituloEdit.value =
@@ -2936,6 +2957,15 @@ const Controllers = {
         if (otimDescOther) otimDescOther.innerHTML = '';
         const cemigDescOther = document.getElementById('op-cemig-descricao');
         if (cemigDescOther) cemigDescOther.innerHTML = '';
+      }
+      const rompDescLoad = document.getElementById('op-romp-descricao');
+      if (rompDescLoad) {
+        if (task.categoria === 'rompimentos' || task.categoria === 'troca-poste') {
+          rompDescLoad.innerHTML = this._normalizeOtimDescricaoImgSrcForEdit(String(task.descricao || ''));
+          this._wrapBareOtimDescricaoImages(rompDescLoad);
+        } else {
+          rompDescLoad.innerHTML = '';
+        }
       }
       document.getElementById('op-prazo').value       = task.prazo || '';
       document.getElementById('op-prioridade').value  = task.prioridade || '';
@@ -3096,7 +3126,7 @@ const Controllers = {
       const respInp = document.getElementById('op-responsavel');
       respInp?.addEventListener('input', () => this._syncSelectedTecnicoChatId());
 
-      ['op-otim-descricao', 'op-cemig-descricao'].forEach((richId) => {
+      ['op-romp-descricao', 'op-otim-descricao', 'op-cemig-descricao'].forEach((richId) => {
         const box = document.getElementById(richId);
         if (!box) return;
         box.addEventListener('click', (e) => {
@@ -3135,6 +3165,16 @@ const Controllers = {
             }
           }
         });
+      });
+
+      document.getElementById('opRompDescExpandBtn')?.addEventListener('click', () => {
+        const wrap = document.getElementById('opRompimentoDescricaoWrap');
+        const btn = document.getElementById('opRompDescExpandBtn');
+        if (!wrap || !btn) return;
+        wrap.classList.toggle('is-expanded');
+        const expanded = wrap.classList.contains('is-expanded');
+        btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        btn.textContent = expanded ? 'Recolher' : 'Expandir';
       });
 
       document.getElementById('openOpTaskModalBtn').addEventListener('click', () => this.openNewModal());

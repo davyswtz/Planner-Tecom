@@ -582,6 +582,22 @@
           <input type="hidden" id="op-responsavel-chatid" value=""/>
         </div>
       </div>
+      <div class="form-group op-romp-desc-group" id="opRompimentoDescricaoWrap" style="display:none">
+        <div class="op-romp-desc-toolbar">
+          <label class="op-romp-desc-label" for="op-romp-descricao">Descrição</label>
+          <button type="button" class="ghost-btn op-romp-desc-expand" id="opRompDescExpandBtn" aria-expanded="false" aria-controls="op-romp-descricao">Expandir</button>
+        </div>
+        <div
+          id="op-romp-descricao"
+          class="op-rich-editor op-rich-editor--romp"
+          contenteditable="true"
+          role="textbox"
+          aria-multiline="true"
+          tabindex="0"
+          data-placeholder="Detalhes, observações, checklist, contexto técnico… (opcional). Enter para novos parágrafos; imagens com Ctrl+V."
+        ></div>
+        <p class="hint">Imagens coladas (Ctrl+V) são gravadas no servidor ao salvar, como nas demais descrições operacionais.</p>
+      </div>
       <div class="form-row" id="opRompimentoExtraRow" style="display:none">
         <div class="form-group">
           <label for="op-clientes-afetados">Quantidade de clientes afetados</label>
