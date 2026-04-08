@@ -2,9 +2,7 @@
 declare(strict_types=1);
 require __DIR__ . '/db.php';
 
-/**
- * Evita cache intermediário (CDN/navegador) em lista de mensagens.
- */
+// Resposta JSON sem cache (polling do chat).
 function chatJsonResponse(array $payload, int $status = 200): void
 {
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
@@ -16,10 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     chatJsonResponse(['ok' => true]);
 }
 
-/**
- * Lista mensagens: sem ?since → últimas 100; com ?since=ID → id > since (até 100).
- * POST: { "userKey", "displayName"?, "body" } — userKey deve existir em usuario.
- */
+// GET: últimas 100 ou id > since; POST: nova mensagem (userKey em usuario).
 try {
     $pdo = db();
 
@@ -68,7 +63,7 @@ try {
         }
 
         $payload = ['ok' => true, 'messages' => $messages, 'lastId' => $lastId];
-        // Roster para @menções (só na carga inicial — evita repetir a cada poll).
+        // Na carga inicial ($since=0) envia também o roster para destacar @menções no front.
         if ($since === 0) {
             $rosterRows = $pdo->query('SELECT username FROM usuario ORDER BY username ASC')->fetchAll();
             $teamRoster = [];

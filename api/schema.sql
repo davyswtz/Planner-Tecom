@@ -1,13 +1,9 @@
--- ═══════════════════════════════════════════════════════════════════════════
--- Burrinho Projetos — schema MySQL 8.x / MariaDB 10.3+ (HostGator / cPanel)
--- Charset: utf8mb4 (acentuação e símbolos nas notificações)
--- Execute no phpMyAdmin ou: mysql -u USUARIO -p NOME_DB < schema.sql
--- ═══════════════════════════════════════════════════════════════════════════
+-- Schema MySQL 8 / MariaDB 10.3+ (utf8mb4). Import: mysql -u USUARIO -p NOME_DB < schema.sql
 
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
--- ─── Tarefas gerais (Dashboard) ───────────────────────────────────────────
+-- Tarefas gerais (dashboard)
 CREATE TABLE IF NOT EXISTS tasks (
   id INT NOT NULL,
   titulo VARCHAR(255) NOT NULL,
@@ -21,7 +17,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   KEY idx_tasks_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ─── Tarefas operacionais (Rompimentos, Troca de poste, Atendimento) ──────
+-- Tarefas operacionais (kanban)
 CREATE TABLE IF NOT EXISTS op_tasks (
   id INT NOT NULL,
   taskCode VARCHAR(32) NOT NULL,
@@ -49,7 +45,7 @@ CREATE TABLE IF NOT EXISTS op_tasks (
   KEY idx_op_tasks_parent (parent_task_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ─── Imagens embutidas na descrição (op_tasks) ─────────────────────────────
+-- Imagens na descrição (op_tasks)
 CREATE TABLE IF NOT EXISTS op_task_image (
   id INT NOT NULL AUTO_INCREMENT,
   op_task_id INT NOT NULL,
@@ -61,7 +57,7 @@ CREATE TABLE IF NOT EXISTS op_task_image (
   CONSTRAINT fk_op_task_image_op_task FOREIGN KEY (op_task_id) REFERENCES op_tasks (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ─── Notas do calendário ───────────────────────────────────────────────────
+-- Notas do calendário
 CREATE TABLE IF NOT EXISTS calendar_notes (
   id INT NOT NULL,
   `date` DATE NOT NULL,
@@ -74,7 +70,7 @@ CREATE TABLE IF NOT EXISTS calendar_notes (
   KEY idx_cal_notes_date (`date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ─── Configuração (webhook Google Chat, nota do planner) ───────────────────
+-- Config planner / webhook (legado)
 CREATE TABLE IF NOT EXISTS app_config (
   cfg_key VARCHAR(64) NOT NULL,
   cfg_value LONGTEXT,
@@ -82,7 +78,7 @@ CREATE TABLE IF NOT EXISTS app_config (
   PRIMARY KEY (cfg_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ─── Chat interno da equipe (polling no front; sem WebSocket) ─────────────
+-- Chat interno (polling no front)
 CREATE TABLE IF NOT EXISTS team_chat_message (
   id BIGINT NOT NULL AUTO_INCREMENT,
   username VARCHAR(120) NOT NULL,
@@ -93,7 +89,7 @@ CREATE TABLE IF NOT EXISTS team_chat_message (
   KEY idx_team_chat_message_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ─── Usuários (login do painel) ─────────────────────────────────────────
+-- Usuários (login)
 -- Senhas armazenadas como PBKDF2 (sha256) com salt por usuário.
 CREATE TABLE IF NOT EXISTS usuario (
   username VARCHAR(120) NOT NULL,

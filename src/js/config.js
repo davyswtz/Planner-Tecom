@@ -4,13 +4,9 @@
 
   window.APP_CONFIG = {
     ...prev,
-    appBuild: Object.prototype.hasOwnProperty.call(prev, 'appBuild') ? prev.appBuild : '2026-03-30-1',
-    // Webhooks por região (Google Chat). Deixe vazio no repositório.
-    defaultWebhookUrlsByRegion: Object.prototype.hasOwnProperty.call(prev, 'defaultWebhookUrlsByRegion')
-      ? prev.defaultWebhookUrlsByRegion
-      : { GOVAL: '', VALE_DO_ACO: '', CARATINGA: '', BACKUP: '' },
+    appBuild: Object.prototype.hasOwnProperty.call(prev, 'appBuild') ? prev.appBuild : '2026-04-08-3',
 
-    // Técnicos para autocomplete + menções no Chat.
+    // Técnicos para autocomplete nas tarefas operacionais.
     techsByRegion: {
       GOVAL: [
         { name: 'Diogo', chatUserId: '108550026877105275192' },
@@ -38,8 +34,7 @@
       // CARATINGA: [ { name: '...', chatUserId: '...' } ],
     },
 
-    /** Base da API PHP (bootstrap, login, tarefas…). '' = auto na hospedagem; false = desliga API remota. */
+    // URL da API PHP ('' = inferir na hospedagem; false = só dados locais).
     apiBaseUrl: Object.prototype.hasOwnProperty.call(prev, 'apiBaseUrl') ? prev.apiBaseUrl : '',
   };
 })();
-

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
   <meta name="theme-color" content="#0a0c0a"/>
   <meta name="color-scheme" content="dark"/>
-  <meta name="description" content="Painel interno de tarefas, rompimentos e integração Google Chat — Burrinho Projetos"/>
+  <meta name="description" content="Painel interno — dashboard, tarefas e configurações — Burrinho Projetos"/>
   <title>Burrinho Projetos</title>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -30,7 +30,7 @@
       <div class="logo-icon" aria-hidden="true">PS</div>
       <div>
         <h1 class="login-title">Burrinho Projetos</h1>
-        <p class="login-subtitle">Entre para acessar o painel de tarefas.</p>
+        <p class="login-subtitle">Entre para acessar o dashboard e as tarefas.</p>
       </div>
     </div>
     <form id="loginForm" class="login-form" autocomplete="on">
@@ -66,7 +66,7 @@
 
   <div class="sidebar-backdrop" id="sidebarBackdrop" hidden aria-hidden="true"></div>
 
-  <!-- ═══════════ SIDEBAR ═══════════ -->
+  <!-- SIDEBAR -->
   <aside class="sidebar" id="sidebar" role="navigation" aria-label="Menu principal">
 
     <div class="sidebar-top">
@@ -96,46 +96,7 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
           <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
         </svg>
-        <span class="nav-label">Rompimentos</span>
-      </button>
-
-      <button type="button" class="nav-item" data-page="troca-poste">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-          <line x1="12" y1="2" x2="12" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>
-        </svg>
-        <span class="nav-label">Troca de Poste</span>
-      </button>
-
-      <button type="button" class="nav-item" data-page="otimizacao-rede">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-          <path d="M4 12a8 8 0 0 1 16 0"/><path d="M7 12a5 5 0 0 1 10 0"/><circle cx="12" cy="12" r="1.5"/>
-        </svg>
-        <span class="nav-label">Otimização de Rede</span>
-      </button>
-
-      <button type="button" class="nav-item" data-page="certificacao-cemig">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-          <path d="M12 2L4 6v6c0 5 4 9 8 10 4-1 8-5 8-10V6l-8-4z"/><path d="M9 12l2 2 4-4"/>
-        </svg>
-        <span class="nav-label">Certificação Cemig</span>
-      </button>
-
-      <button type="button" class="nav-item" data-page="atendimento" aria-label="Atendimento ao cliente">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-          <path d="M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z"/>
-          <path d="M8 10h8"/>
-          <path d="M8 14h5"/>
-        </svg>
-        <span class="nav-label">Atendimento ao cliente</span>
-      </button>
-
-      <button type="button" class="nav-item" data-page="calendario">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-          <rect x="3" y="4" width="18" height="18" rx="2"/>
-          <line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/>
-          <line x1="3" y1="10" x2="21" y2="10"/>
-        </svg>
-        <span class="nav-label">Calendário</span>
+        <span class="nav-label">Tarefas</span>
       </button>
 
       <button type="button" class="nav-item" data-page="config">
@@ -157,7 +118,6 @@
       </button>
       <div class="user-pill" role="status" aria-label="Usuário atual">
         <div class="avatar-main" id="sidebarAvatarWrap" aria-hidden="true">
-          <img class="sidebar-user-avatar" id="sidebarUserAvatar" alt="" width="30" height="30" loading="lazy" decoding="async" />
           <span class="sidebar-user-initials" id="sidebarUserInitials">—</span>
         </div>
         <div class="user-info">
@@ -169,7 +129,7 @@
 
   </aside>
 
-  <!-- ═══════════ MAIN ═══════════ -->
+  <!-- MAIN -->
   <main class="main" role="main">
 
     <!-- Topbar -->
@@ -215,7 +175,7 @@
     <!-- Content area -->
     <div class="content">
 
-      <!-- ═══ PAGE: DASHBOARD ═══ -->
+      <!-- PAGE: DASHBOARD -->
       <section class="page active" id="page-dashboard" aria-label="Dashboard">
 
         <!-- Stat cards -->
@@ -326,7 +286,7 @@
       </section>
       <!-- /page-dashboard -->
 
-      <!-- ═══ PAGE: TAREFAS ═══ -->
+      <!-- PAGE: TAREFAS -->
       <section class="page" id="page-tarefas" aria-label="Tarefas operacionais">
 
         <!-- Categorias operacionais agora ficam no menu lateral; painel aqui apenas mostra filtros + kanban. -->
@@ -386,17 +346,6 @@
                       <input type="search" id="opSearchInput" placeholder="Buscar tarefas operacionais…" aria-label="Buscar tarefas operacionais"/>
                     </div>
 
-                    <div class="search-box" role="group" aria-label="Filtro de região">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                      <select id="opRegionSelectFilter" aria-label="Filtrar por região">
-                        <option value="">Todas as regiões</option>
-                        <option value="Goval">Goval</option>
-                        <option value="Vale do Aço">Vale do Aço</option>
-                        <option value="Caratinga">Caratinga</option>
-                        <option value="Backup">Backup</option>
-                      </select>
-                    </div>
-
                     <div class="search-box" role="group" aria-label="Ordenar por data">
                       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h10"/><path d="M8 18h7"/><path d="M3 6l1-1 1 1"/><path d="M4 5v14"/><path d="M3 18l1 1 1-1"/></svg>
                       <select id="opDateSortFilter" aria-label="Ordenar por data">
@@ -435,151 +384,19 @@
       </section>
       <!-- /page-tarefas -->
 
-      <!-- ═══ PAGE: ATENDIMENTO AO CLIENTE (layout redesenhado) ═══ -->
-      <section class="page" id="page-atendimento" aria-label="Atendimento ao cliente">
-        <div class="panel atd-list-wrap atd-list-wrap--shelves">
-          <div class="atd-list-toolbar" role="toolbar" aria-label="Painel de atendimento ao cliente">
-            <div class="panel-title">
-              Atendimento ao Cliente
-              <span class="atd-toolbar-hint">
-                Quadro no mesmo estilo das Tarefas operacionais: colunas Criada → Em andamento → Concluída → Finalizada.
-                Use os botões do cartão ou arraste o protocolo para mudar o status da lista.
-              </span>
-            </div>
-            <div class="atd-toolbar-right">
-              <div class="search-box" role="search">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input type="search" id="atdOpSearchInput" placeholder="Buscar protocolos, clientes, endereço…" aria-label="Buscar atendimentos"/>
-              </div>
-              <div class="search-box" role="group" aria-label="Filtrar por região">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                <select id="atdOpRegionSelectFilter" aria-label="Filtrar por região">
-                  <option value="">Todas as regiões</option>
-                  <option value="Goval">Goval</option>
-                  <option value="Vale do Aço">Vale do Aço</option>
-                  <option value="Caratinga">Caratinga</option>
-                  <option value="Backup">Backup</option>
-                </select>
-              </div>
-              <div class="search-box" role="group" aria-label="Ordenar por data">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h10"/><path d="M8 18h7"/><path d="M3 6l1-1 1 1"/><path d="M4 5v14"/><path d="M3 18l1 1 1-1"/></svg>
-                <select id="atdOpDateSortFilter" aria-label="Ordenar por data">
-                  <option value="all">Todas as datas</option>
-                  <option value="oldest">Mais antigos</option>
-                  <option value="newest">Mais novos</option>
-                </select>
-              </div>
-              <div class="search-box" role="search">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                <input type="search" id="atdOpTecnicoInput" placeholder="Filtrar por técnico…" aria-label="Filtrar por técnico"/>
-              </div>
-              <div class="search-box" role="search">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 16V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2h14a2 2 0 002-2z"/><polyline points="7 12 10 15 17 8"/></svg>
-                <input type="search" id="atdOpTaskIdInput" placeholder="Protocolo ou ID…" aria-label="ID da tarefa"/>
-              </div>
-              <button class="primary-btn" id="openAtendimentoTaskModalBtn" type="button" aria-label="Nova lista de atendimento">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                Nova lista
-              </button>
-            </div>
-          </div>
-
-          <div class="kanban-board atd-kanban-board" id="atendimentoBoard" role="region" aria-label="Quadro kanban de atendimento ao cliente">
-            <!-- conteúdo gerado via JS (UI.renderAtendimentoPage) -->
-          </div>
-        </div>
-      </section>
-
-      <!-- ═══ PAGE: CALENDÁRIO ═══ -->
-      <section class="page" id="page-calendario" aria-label="Calendário">
-        <div class="calendar-layout">
-          <div class="panel calendar-panel" role="region" aria-label="Calendário mensal">
-            <div class="panel-header">
-              <div class="calendar-head-left">
-                <span class="panel-title">Planejamento Mensal</span>
-                <span class="calendar-month-title" id="calendarMonthTitle">—</span>
-              </div>
-              <div class="calendar-head-actions">
-                <button class="icon-btn" id="calendarPrevBtn" title="Mês anterior" aria-label="Mês anterior">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
-                </button>
-                <button class="icon-btn" id="calendarTodayBtn" title="Ir para hoje" aria-label="Ir para hoje">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                </button>
-                <button class="icon-btn" id="calendarNextBtn" title="Próximo mês" aria-label="Próximo mês">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
-                </button>
-              </div>
-            </div>
-            <div class="calendar-weekdays" id="calendarWeekdays" aria-hidden="true"></div>
-            <div class="calendar-grid" id="calendarGrid" role="grid" aria-label="Dias do mês"></div>
-          </div>
-
-          <div class="panel calendar-day-panel" role="region" aria-label="Tarefas do dia selecionado">
-            <div class="panel-header">
-              <div>
-                <span class="panel-title">Dia Selecionado</span>
-                <div class="calendar-selected-date" id="calendarSelectedDateLabel">—</div>
-              </div>
-              <button class="sm-btn" id="calendarAddNoteBtn">Adicionar</button>
-            </div>
-            <div class="calendar-day-list" id="calendarDayList"></div>
-          </div>
-        </div>
-      </section>
-
-      <!-- ═══ PAGE: RELATÓRIOS ═══ -->
+      <!-- PAGE: RELATÓRIOS -->
       <!-- Página de Relatórios removida: funcionalidade descontinuada -->
 
       <!-- Página de Chat da equipe removida (função desativada) -->
 
-      <!-- ═══ PAGE: CONFIG (placeholder) ═══ -->
+      <!-- PAGE: CONFIG -->
       <section class="page" id="page-config" aria-label="Configurações">
         <div class="panel" style="padding:20px">
-          <div class="panel-head" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-            <div>
-              <div class="panel-title">Integrações</div>
-              <div class="panel-subtitle" style="color:var(--white4);font-size:13px;margin-top:2px">Gerencie conexões externas do planner.</div>
-            </div>
+          <div class="panel-head">
+            <div class="panel-title">Configurações</div>
+            <div class="panel-subtitle" style="color:var(--white4);font-size:13px;margin-top:2px">Preferências do aplicativo.</div>
           </div>
-
-          <div style="margin-top:14px;display:grid;gap:10px">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border:1px solid var(--border);border-radius:var(--radius);padding:14px;background:rgba(255,255,255,.02)">
-              <div style="min-width:220px">
-                <div style="font-weight:650;color:var(--white);display:flex;align-items:center;gap:8px">
-                  <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:8px;background:var(--green-muted);color:var(--green);flex-shrink:0" aria-hidden="true">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
-                  </span>
-                  Google Chat
-                </div>
-                <div style="color:var(--white4);font-size:12.5px;margin-top:4px">Envie atualizações de tarefas para um espaço via webhook.</div>
-              </div>
-              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                <button type="button" class="primary-btn" id="openWebhookBtn">
-                  Configurar
-                </button>
-                <button type="button" class="ghost-btn" id="disconnectWebhook" style="border-color:rgba(255,69,69,.35);color:var(--danger)">
-                  Desconectar
-                </button>
-              </div>
-            </div>
-
-            <!-- Seção de modo claro removida: tema único (escuro minimalista) -->
-
-            <div class="config-avatar-card">
-              <div class="config-avatar-head">
-                <div>
-                  <div class="config-avatar-title">Perfil</div>
-                  <div class="config-avatar-subtitle">Escolha um avatar e salve no seu usuário.</div>
-                </div>
-                <div class="avatar-picker-current" id="avatarPickerCurrent"></div>
-              </div>
-              <div class="avatar-picker-grid" id="avatarPickerGrid"></div>
-              <div class="config-avatar-actions">
-                <button type="button" class="ghost-btn" id="removeAvatarBtn">Remover avatar</button>
-              </div>
-            </div>
-          </div>
+          <p style="margin-top:14px;color:var(--white4);font-size:13px;line-height:1.5">Não há opções adicionais para configurar nesta versão.</p>
         </div>
       </section>
 
@@ -591,48 +408,7 @@
 </div>
 <!-- /app -->
 
-<!-- ═══ MODAL: ANOTAÇÃO NO CALENDÁRIO ═══ -->
-<div class="modal-overlay" id="calendarNoteModal" role="dialog" aria-modal="true" aria-labelledby="calendarNoteModalTitle">
-  <div class="modal">
-    <div class="modal-head">
-      <span class="modal-title" id="calendarNoteModalTitle">Nova anotação</span>
-      <button class="close-btn" id="closeCalendarNoteModal" aria-label="Fechar modal">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label for="cal-note-date">Data</label>
-        <input type="date" id="cal-note-date"/>
-      </div>
-      <div class="form-group">
-        <label for="cal-note-title">Título</label>
-        <input type="text" id="cal-note-title" placeholder="Ex.: Visita técnica, reunião, inspeção..." autocomplete="off"/>
-      </div>
-      <div class="form-group">
-        <label for="cal-note-desc">Descrição</label>
-        <textarea id="cal-note-desc" placeholder="Detalhes da atividade para essa data..." style="min-height:80px;resize:vertical"></textarea>
-      </div>
-      <div class="form-group">
-        <label for="cal-note-priority">Prioridade</label>
-        <select id="cal-note-priority">
-          <option value="Alta">Alta</option>
-          <option value="Média">Média</option>
-          <option value="Baixa">Baixa</option>
-        </select>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="ghost-btn" id="cancelCalendarNoteModal">Cancelar</button>
-      <button class="primary-btn" id="saveCalendarNoteBtn">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-        Salvar anotação
-      </button>
-    </div>
-  </div>
-</div>
-
-<!-- ═══ MODAL: NOVA/EDITAR TAREFA (Dashboard) ═══ -->
+<!-- MODAL: NOVA/EDITAR TAREFA (Dashboard) -->
 <div class="modal-overlay" id="taskModal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle">
   <div class="modal">
     <div class="modal-head">
@@ -646,17 +422,23 @@
         <label for="f-titulo">Título da tarefa</label>
         <input type="text" id="f-titulo" placeholder="Descreva o que precisa ser feito" autocomplete="off"/>
       </div>
+      <div class="form-group">
+        <label for="f-prazo">Prazo</label>
+        <input type="date" id="f-prazo"/>
+      </div>
+      <div class="form-group">
+        <label for="f-prioridade">Prioridade</label>
+        <select id="f-prioridade">
+          <option value="Alta">Alta</option>
+          <option value="Média">Média</option>
+          <option value="Baixa">Baixa</option>
+        </select>
+      </div>
       <div class="form-row">
         <div class="form-group">
           <label for="f-responsavel">Responsável</label>
           <input type="text" id="f-responsavel" placeholder="Nome do colaborador" autocomplete="off"/>
         </div>
-        <div class="form-group">
-          <label for="f-prazo">Prazo</label>
-          <input type="date" id="f-prazo"/>
-        </div>
-      </div>
-      <div class="form-row">
         <div class="form-group">
           <label for="f-status">Status</label>
           <select id="f-status">
@@ -664,14 +446,6 @@
             <option value="Em andamento">Em andamento</option>
             <option value="Concluída">Concluída</option>
             <option value="Atrasada">Atrasada</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="f-prioridade">Prioridade</label>
-          <select id="f-prioridade">
-            <option value="Alta">Alta</option>
-            <option value="Média">Média</option>
-            <option value="Baixa">Baixa</option>
           </select>
         </div>
       </div>
@@ -686,7 +460,7 @@
   </div>
 </div>
 
-<!-- ═══ MODAL: NOVA/EDITAR TAREFA OPERACIONAL ═══ -->
+<!-- MODAL: NOVA/EDITAR TAREFA OPERACIONAL -->
 <div class="modal-overlay" id="opTaskModal" role="dialog" aria-modal="true" aria-labelledby="opTaskModalTitle">
   <div class="modal">
     <div class="modal-head">
@@ -759,7 +533,6 @@
         </div>
         <div class="form-row">
           <div class="form-group" id="opAtdPrioridadeSlot"></div>
-          <div class="form-group" id="opAtdRegiaoSlot"></div>
         </div>
         <div class="form-group" id="opAtdParentTecnicoSlot"></div>
       </div>
@@ -775,7 +548,6 @@
             <label for="op-atd-ordem-servico">Ordem de serviço</label>
             <input type="text" id="op-atd-ordem-servico" placeholder="Opcional" autocomplete="off"/>
           </div>
-          <div class="form-group" id="opAtdChildRegiaoSlot"></div>
         </div>
         <div class="form-group" id="opAtdChildTecnicoSlot"></div>
         <div class="form-group op-atd-descricao-block">
@@ -786,18 +558,28 @@
 
       <div class="form-group" id="opTituloGroup">
         <label for="op-titulo">Nome da tarefa</label>
-        <input type="text" id="op-titulo" placeholder="Descreva a tarefa" autocomplete="off"/>
+        <input type="text" id="op-titulo" placeholder="Opcional" autocomplete="off"/>
+      </div>
+      <div class="form-group" id="opPrazoGroup">
+        <label for="op-prazo">Data de vencimento</label>
+        <input type="date" id="op-prazo"/>
+      </div>
+      <div class="form-row" id="opPriorityRegionRow">
+        <div class="form-group" id="opPrioridadeGroup">
+          <label for="op-prioridade">Prioridade</label>
+          <select id="op-prioridade">
+            <option value="">—</option>
+            <option value="Alta">Alta</option>
+            <option value="Média">Média</option>
+            <option value="Baixa">Baixa</option>
+          </select>
+        </div>
       </div>
       <div class="form-row" id="opMainRow">
         <div class="form-group" id="opResponsavelGroup">
-          <label for="op-responsavel">Técnico responsável</label>
-          <input type="text" id="op-responsavel" placeholder="Selecione ou digite o técnico" autocomplete="off" list="op-tecnicos-list"/>
+          <label for="op-responsavel">Responsável pela tarefa</label>
+          <input type="text" id="op-responsavel" name="op-responsavel-field" placeholder="Nome do responsável" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Responsável pela tarefa"/>
           <input type="hidden" id="op-responsavel-chatid" value=""/>
-          <datalist id="op-tecnicos-list"></datalist>
-        </div>
-        <div class="form-group" id="opPrazoGroup">
-          <label for="op-prazo">Data de vencimento</label>
-          <input type="date" id="op-prazo"/>
         </div>
       </div>
       <div class="form-row" id="opRompimentoExtraRow" style="display:none">
@@ -820,7 +602,6 @@
           </div>
         </div>
         <div class="form-row" id="opOtimRegiaoTecRow">
-          <div class="form-group" id="opOtimRegiaoSlot"></div>
           <div class="form-group" id="opOtimTecSlot"></div>
         </div>
         <div class="rompimento-location-block op-geo-optionais">
@@ -856,7 +637,6 @@
           <input type="text" id="op-cemig-protocolo" placeholder="Ex.: 2026-000123" autocomplete="off"/>
         </div>
         <div class="form-row" id="opCemigRegiaoTecRow">
-          <div class="form-group" id="opCemigRegiaoSlot"></div>
           <div class="form-group" id="opCemigTecSlot"></div>
         </div>
         <div class="form-group" id="opCemigPrazoSlot"></div>
@@ -886,27 +666,7 @@
         </div>
       </div>
 
-      <div class="form-row" id="opPriorityRegionRow">
-        <div class="form-group" id="opPrioridadeGroup">
-          <label for="op-prioridade">Prioridade</label>
-          <select id="op-prioridade">
-            <option value="">—</option>
-            <option value="Alta">Alta</option>
-            <option value="Média">Média</option>
-            <option value="Baixa">Baixa</option>
-          </select>
-        </div>
-        <div class="form-group" id="opRegiaoGroup">
-          <label for="op-regiao">Região</label>
-          <select id="op-regiao">
-            <option value="">Selecione a região</option>
-            <option value="Goval">Goval</option>
-            <option value="Vale do Aço">Vale do Aço</option>
-            <option value="Caratinga">Caratinga</option>
-            <option value="Backup">Backup</option>
-          </select>
-        </div>
-      </div>
+      <input type="hidden" id="op-regiao" value=""/>
     </div>
     <div class="modal-footer">
       <button class="ghost-btn danger-btn" id="deleteOpTaskBtn" style="display:none">Excluir</button>
@@ -925,61 +685,6 @@
     <button type="button" class="atd-status-dropdown-item" role="menuitem" data-status="Backlog">Backlog</button>
     <button type="button" class="atd-status-dropdown-item" role="menuitem" data-status="Em andamento">Em andamento</button>
     <button type="button" class="atd-status-dropdown-item" role="menuitem" data-status="Concluída">Concluída</button>
-  </div>
-</div>
-
-<!-- ═══ MODAL: WEBHOOK GOOGLE CHAT ═══ -->
-<div class="modal-overlay" id="webhookModal" role="dialog" aria-modal="true" aria-labelledby="webhookModalTitle">
-  <div class="modal">
-    <div class="modal-head">
-      <span class="modal-title" id="webhookModalTitle">Conectar ao Google Chat</span>
-      <button class="close-btn" id="closeWebhookModal" aria-label="Fechar modal">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label>URLs do Webhook (por região)</label>
-
-        <div class="wh-input-row" style="margin-bottom:8px">
-          <input type="text" id="f-webhookUrl-goval" placeholder="Goval — https://chat.googleapis.com/v1/spaces/…"/>
-          <button class="sm-btn" id="testWebhookBtn-goval">Testar</button>
-        </div>
-        <div class="wh-input-row" style="margin-bottom:8px">
-          <input type="text" id="f-webhookUrl-vale" placeholder="Vale do Aço — https://chat.googleapis.com/v1/spaces/…"/>
-          <button class="sm-btn" id="testWebhookBtn-vale">Testar</button>
-        </div>
-        <div class="wh-input-row">
-          <input type="text" id="f-webhookUrl-caratinga" placeholder="Caratinga — https://chat.googleapis.com/v1/spaces/…"/>
-          <button class="sm-btn" id="testWebhookBtn-caratinga">Testar</button>
-        </div>
-        <div class="wh-input-row" style="margin-top:8px">
-          <input type="text" id="f-webhookUrl-backup" placeholder="Backup — https://chat.googleapis.com/v1/spaces/…"/>
-          <button class="sm-btn" id="testWebhookBtn-backup">Testar</button>
-        </div>
-
-        <p class="hint">
-          Para obter a URL: abra o espaço no Google Chat → clique nos três pontos →
-          <strong style="color:var(--white2)">Apps e integrações</strong> →
-          <strong style="color:var(--white2)">Webhooks</strong> → Adicionar webhook.
-        </p>
-      </div>
-      <div class="form-group">
-        <label>Eventos para notificar</label>
-        <div class="checkbox-group">
-          <label class="checkbox-label"><input type="checkbox" id="ev-andamento" checked/> Em andamento</label>
-          <label class="checkbox-label"><input type="checkbox" id="ev-concluida" checked/> Concluída</label>
-          <label class="checkbox-label"><input type="checkbox" id="ev-finalizada" checked/> Finalizada</label>
-        </div>
-      </div>
-    </div>
-    <div class="modal-footer">
-      <button class="ghost-btn" id="cancelWebhookModal">Cancelar</button>
-      <button class="primary-btn" id="saveWebhookBtn">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
-        Conectar
-      </button>
-    </div>
   </div>
 </div>
 

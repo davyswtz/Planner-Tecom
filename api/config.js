@@ -1,7 +1,4 @@
-/**
- * Rota experimental (Node) — não faz parte do deploy HostGator.
- * Em produção use api/config.php e src/js/config.js (apiBaseUrl se precisar).
- */
+// Rota Node experimental (Vercel); produção HostGator usa api/config.php + src/js/config.js.
 import { loadData, parseBody, saveData, sendJson } from '../lib/store.js';
 
 export default async function handler(req, res) {

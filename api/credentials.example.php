@@ -1,10 +1,7 @@
 <?php
 declare(strict_types=1);
 
-/**
- * Copie para credentials.php e preencha (cPanel → MySQL® Databases).
- * @return array{host: string, database: string, user: string, password: string, port: string}
- */
+// Renomeie para credentials.php e preencha com o banco do cPanel.
 return [
     'host' => 'localhost',
     'database' => 'usuario_prefixo_burrinho',

@@ -1,10 +1,7 @@
 <?php
 declare(strict_types=1);
 
-/**
- * Extrai imagens em data URL de tags <img> na descrição, grava em op_task_image e substitui o src.
- * Retorna HTML final referenciando op_task_image.php?id=...
- */
+// data:image em <img> → grava em op_task_image e troca src para op_task_image.php?id=...
 function processOpTaskDescricaoImages(string $html, int $opTaskId, PDO $pdo): string
 {
     if ($html === '' || $opTaskId <= 0) {
@@ -48,9 +45,7 @@ function processOpTaskDescricaoImages(string $html, int $opTaskId, PDO $pdo): st
     );
 }
 
-/**
- * Remove registros de imagem que não aparecem mais no HTML da descrição.
- */
+// Apaga linhas em op_task_image que o HTML atual não referencia mais.
 function pruneOpTaskImagesNotInHtml(PDO $pdo, int $opTaskId, string $html): void
 {
     if ($opTaskId <= 0) {
