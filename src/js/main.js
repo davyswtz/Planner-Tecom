@@ -313,6 +313,9 @@ const Store = (() => {
     async getBootstrap() {
       return this.requestAny(['/bootstrap.php', '/bootstrap']);
     },
+    async getChanges() {
+      return this.requestAny(['/changes.php', '/changes']);
+    },
     async login(username, password) {
       // Uma única rota: evita uma ida HTTP extra em hosts que não têm `/login`.
       return this.request('/login.php', {
@@ -1317,6 +1320,31 @@ const WebhookService = {
     const enderecoSaved = String(task.localizacaoTexto || '').trim();
     const taskId = task.taskCode || `POS-${String(task.id || '').padStart(4, '0')}`;
 
+    // Troca de poste (andamento): mensagem curta e objetiva (pedido do time).
+    if (event === 'andamento') {
+      const coordsLine = coordsSaved || (() => {
+        const loc = this._trocaPosteTitleAsLocation(titulo);
+        return loc.mode === 'coords' ? loc.line : '—';
+      })();
+      const enderecoLine = enderecoSaved || (() => {
+        const loc = this._trocaPosteTitleAsLocation(titulo);
+        return loc.mode === 'texto' ? loc.line : 'Não informado';
+      })();
+      const enviadoPor = assinatura || 'Não informado';
+
+      return {
+        text: [
+          `*🔄 Troca de Poste - ${this._chatSafe(enderecoLine)}*`,
+          '📍Coordenadas: ',
+          this._chatSafe(coordsLine),
+          '',
+          `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
+          `👤 Enviado por: ${this._chatSafe(enviadoPor)}`,
+          `🆔: ${this._chatSafe(taskId)}`,
+        ].join('\n'),
+      };
+    }
+
     const statusLine = {
       andamento: '⚠️ Troca de poste em andamento na rede.',
       concluida: '✅ Troca de poste concluída.',
@@ -1530,9 +1558,10 @@ const WebhookService = {
 
     // Template específico: Atendimento ao Cliente (Tarefa Pai) entrando em andamento.
     if (opCat === 'atendimento-cliente' && event === 'andamento' && task?.isParentTask) {
-      const tecnico = String(task.responsavel || 'Não informado').trim().toUpperCase();
+      const nomeCliente = String(task.nomeCliente || '').trim();
       const protocolo = String(task.protocolo || '').trim();
-      const dataInstalacao = String(task.dataInstalacao || '').trim();
+      const dataEntrada = String(task.dataEntrada || '').trim();
+      const prazoFinal = String(task.prazo || '').trim();
       const enviadoPor = String(task.assinadaPor || '').trim();
       const taskId = String(task.taskCode || `ATD-${String(task.id || '').padStart(4, '0')}`).trim();
 
@@ -1542,78 +1571,122 @@ const WebhookService = {
         .map(t => String(t.titulo || '').trim())
         .filter(Boolean);
 
-      const minLines = 4;
-      const totalLines = Math.max(minLines, subtasks.length);
-      const listLines = Array.from({ length: totalLines }, (_, idx) => {
-        const title = subtasks[idx] || '';
-        return `*${idx + 1}° -* ${this._chatSafe(title)}`;
-      }).join('\n');
+      const listLines = subtasks.length
+        ? subtasks.map((title, idx) => `${idx + 1}° - ${this._chatSafe(title)}`).join('\n')
+        : '1° - ';
 
       return {
         text: [
-          '*ATENDIMENTO AO CLIENTE*',
-          `*👤 TÉCNICO RESPONSÁVEL:* ${this._chatSafe(tecnico)}`,
-          `*📄 PROTOCOLO:* ${this._chatSafe(protocolo)}`,
-          `*🗓️ DATA DE INSTALAÇÃO:* ${this._chatSafe(dataInstalacao)}`,
+          '*Atendimento ao Cliente*',
+          `👤 ${this._chatSafe(nomeCliente)}`,
+          `📄 Protocolo: ${this._chatSafe(protocolo)}`,
+          `🗓️ Data de entrada: ${this._chatSafe(dataEntrada)}`,
+          `⏰ Prazo final: ${this._chatSafe(prazoFinal)}`,
           '',
           listLines,
           '',
-          `*👤 ENVIADO POR:* ${this._chatSafe(enviadoPor)}`,
-          `*🆔 ID TAREFA:* ${this._chatSafe(taskId)}`,
+          `👤 Enviado por: ${this._chatSafe(enviadoPor)}`,
+          `🆔: ${this._chatSafe(taskId)}`,
+        ].join('\n'),
+      };
+    }
+
+    // Atendimento ao Cliente (Tarefa Pai) finalizada: mensagem curta (pedido do time).
+    if (opCat === 'atendimento-cliente' && event === 'finalizada' && task?.isParentTask) {
+      const history = Array.isArray(task?.historico) ? task.historico : [];
+      const lastAuthor = String(history[history.length - 1]?.autor || '').trim();
+      const por = lastAuthor || String(task.assinadaPor || '').trim();
+      return {
+        text: [
+          '🏁 Demanda finalizada',
+          `👤 Por: ${this._chatSafe(por)}`,
         ].join('\n'),
       };
     }
 
     if (opCat === 'atendimento-cliente' && event === 'andamento' && task?.parentTaskId) {
       const parent = Store.findOpTask(Number(task.parentTaskId));
-      const parentTitle = String(parent?.titulo || '').trim();
-      const parentCode = String(parent?.taskCode || '').trim();
       const childCode = String(task.taskCode || `ATD-${String(task.id || '').padStart(4, '0')}`).trim();
       const tecnico = String(task.responsavel || 'Não informado').trim();
-      const regiao = String(task.regiao || '').trim();
       const desc = String(task.descricao || '').trim();
+      const atividade = String(task.titulo || '').trim();
+      const cliente = String(parent?.nomeCliente || parent?.titulo || '').trim();
+
+      const siblings = Store.getOpTasks()
+        .filter(t => t && t.categoria === 'atendimento-cliente' && Number(t.parentTaskId) === Number(task.parentTaskId))
+        .sort((a, b) => Number(a.id) - Number(b.id));
+      const idx = siblings.findIndex(t => Number(t.id) === Number(task.id));
+      const ordinal = (idx >= 0 ? idx + 1 : 1);
 
       return {
         text: [
-          '*ATENDIMENTO AO CLIENTE — SUBTAREFA EM ANDAMENTO*',
-          `*🆔 ID SUBTAREFA:* ${this._chatSafe(childCode)}`,
-          `*📝 TÍTULO:* ${this._chatSafe(task.titulo || 'Não informado')}`,
-          `*👤 TÉCNICO:* ${this._chatSafe(tecnico)}`,
-          regiao ? `*🌎 REGIÃO:* ${this._chatSafe(regiao)}` : '',
-          desc ? `*📄 DESCRIÇÃO:* ${this._chatSafe(desc)}` : '',
-          (parentTitle || parentCode)
-            ? `*🔗 TAREFA PAI:* ${this._chatSafe(parentCode ? `${parentCode} - ${parentTitle}` : parentTitle)}`
-            : '',
-        ].filter(Boolean).join('\n'),
+          `${ordinal}°  Atividade: ${this._chatSafe(atividade)}`,
+          `📝 Cliente: ${this._chatSafe(cliente)}`,
+          `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
+          `🆔: ${this._chatSafe(childCode)}`,
+          '',
+          this._chatSafe(desc),
+        ].join('\n'),
+      };
+    }
+
+    // Atendimento ao Cliente (OS / tarefa filho) concluída: mensagem curta (pedido do time).
+    if (opCat === 'atendimento-cliente' && event === 'concluida' && task?.parentTaskId) {
+      const parentId = Number(task.parentTaskId);
+      const siblings = Store.getOpTasks()
+        .filter(t => t && t.categoria === 'atendimento-cliente' && Number(t.parentTaskId) === parentId)
+        .sort((a, b) => Number(a.id) - Number(b.id));
+      const idx = siblings.findIndex(t => Number(t.id) === Number(task.id));
+      const ordinal = (idx >= 0 ? idx + 1 : 1);
+
+      const atividade = String(task.titulo || '').trim();
+      const history = Array.isArray(task?.historico) ? task.historico : [];
+      const lastAuthor = String(history[history.length - 1]?.autor || '').trim();
+      const enviadoPor = lastAuthor || String(task.assinadaPor || '').trim();
+
+      return {
+        text: [
+          `✅ ${ordinal}° Atividade Concluída`,
+          `📌 ${this._chatSafe(atividade)}`,
+          `👤 Enviado por: ${this._chatSafe(enviadoPor)}`,
+        ].join('\n'),
       };
     }
 
     if (opCat === 'rompimentos' && event === 'andamento') {
-      const setor = task.setor || 'Não informado';
-      const regiao = task.regiao || 'Não informada';
+      const cto = String(task.setor || '').trim() || 'Não informado';
       const tecnico = this._resolveTechnicianDisplay(task);
-      const assinatura = String(task?.assinadaPor || '').trim();
-      const localizacao = task.coordenadas || 'Não informada';
-      const endereco = task.localizacaoTexto || 'Não informado';
-      const taskId = task.taskCode || `ROM-${String(task.id || '').padStart(4, '0')}`;
-      const head = this._rompimentoBoldLines([
-        '🚨 ALERTA CRÍTICO — ROMPIMENTO DETECTADO 🚨',
-        '',
-        '⚠️ ROMPIMENTO confirmado no sistema. Ação imediata necessária!',
-        '',
-        `📌 SETOR / CTO: ${setor}`,
-        `🌎 REGIÃO: ${regiao}`,
-        `👨‍🔧 TÉCNICO RESPONSÁVEL: ${tecnico}`,
-        assinatura ? `🖊️ ASSINATURA: ${assinatura}` : '',
-      ]);
-      const coordBlock = `*${this._chatSafe('📍 COORDENADAS')}*\n${this._chatSafe(localizacao)}`;
-      const tail = this._rompimentoBoldLines([
-        '',
-        `🏠 ENDEREÇO: ${endereco}`,
-        '',
-        `🆔 ID DA TAREFA: ${taskId}`,
-      ]);
-      return { text: `${head}\n\n${coordBlock}${tail}` };
+      const coordsRaw = String(task.coordenadas || '').trim();
+      const endereco = String(task.localizacaoTexto || '').trim() || 'Não informado';
+      const clientesAfetados = String(task.clientesAfetados || '').trim();
+      const taskId = String(task.taskCode || `ROM-${String(task.id || '').padStart(4, '0')}`).trim();
+
+      const coordsClickable = (() => {
+        // Deixa apenas "lat,lon" (Google Chat costuma tornar clicável sem precisar link explícito).
+        if (!coordsRaw) return '';
+        const normalized = coordsRaw.replace(/\s+/g, '');
+        const parts = normalized.split(',');
+        if (parts.length !== 2) return coordsRaw;
+        const lat = Number(parts[0]);
+        const lon = Number(parts[1]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return coordsRaw;
+        if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return coordsRaw;
+        return `${lat},${lon}`;
+      })();
+
+      return {
+        text: [
+          `*⚠️ ROMPIMENTO CTO - ${this._chatSafe(cto)}*`,
+          '',
+          `🗺️Endereço: ${this._chatSafe(endereco)}`,
+          '',
+          `📍 Localização inicial: ${this._chatSafe(coordsClickable)}`,
+          `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
+          '',
+          `Clientes afetados: ${this._chatSafe(clientesAfetados)}`,
+          `🆔: ${this._chatSafe(taskId)}`,
+        ].join('\n'),
+      };
     }
 
     if (opCat === 'rompimentos' && (event === 'concluida' || event === 'finalizada')) {
@@ -2258,6 +2331,13 @@ const UI = {
     if (!label) return '';
     const cls = this._regionBadgeClass(regiao) || 'reg-unknown';
     return `<span class="badge ${cls}">${label}</span>`;
+  },
+
+  /** Badge de subprocesso (Atendimento ao Cliente): cor fixa do tema. */
+  subProcessoBadge(subProcesso) {
+    const label = String(subProcesso || '').trim();
+    if (!label) return '';
+    return `<span class="badge sp-badge">${Utils.escapeHtml(label)}</span>`;
   },
 
   /** Classe da barra de relatório “rompimentos por região”. */
@@ -3030,45 +3110,57 @@ const UI = {
         ? colParents.map((parent) => {
           const isLate = parent.prazo && parent.prazo < tod && !doneForLate.includes(parent.status);
           const kids = byParentId.get(Number(parent.id)) || [];
-          const badgeParts = [this.regionBadge(parent.regiao), this.priorityBadge(parent.prioridade || 'Média')].filter(Boolean);
+          const badgeParts = [
+            this.regionBadge(parent.regiao),
+            this.subProcessoBadge(parent.subProcesso),
+          ].filter(Boolean);
           const badgesRow = badgeParts.length ? `<div class="kanban-card-badges">${badgeParts.join('')}</div>` : '';
           const nextStatuses = nextStatusMap[parent.status] || [];
           const actionBtns = nextStatuses.map((ns) =>
             `<button type="button" class="status-action-btn ${statusActionClass[ns] || 'to-andamento'}" data-op-id="${parent.id}" data-to-status="${Utils.escapeHtmlAttr(ns)}">${statusLabels[ns] || ns}</button>`,
           ).join('');
           const titleEsc = Utils.escapeHtml(parent.nomeCliente || parent.titulo || '(Sem título)');
-          const codeLine = String(parent.taskCode || parent.protocolo || '').trim();
           const statusLine = Utils.escapeHtml(String(parent.status || '—').trim());
           const subsCount = kids.length;
-          const subsHtml = subsCount
-            ? `<p class="atd-kanban-subs">${subsCount} ordem(ns) de serviço · ${kids.filter(c => c.status === 'Concluída' || c.status === 'Finalizada').length} resolvida(s)</p>`
-            : '';
           const assinatura = String(parent.assinadaPor || '').trim();
           const sigHtml = assinatura ? `<div class="kanban-card-signature">✍ ${Utils.escapeHtml(assinatura)}</div>` : '';
           const copyBtnHtml = Utils.taskCopyProtocolButtonHtml(Utils.opTaskDisplayRef(parent));
-          const codeHtml = codeLine ? `<div class="kanban-card-date">${Utils.escapeHtml(codeLine)}</div>` : '';
+          const cidade = Utils.escapeHtml(String(parent.regiao || '').trim() || '—');
+          const subProcesso = Utils.escapeHtml(String(parent.subProcesso || '').trim() || '—');
+          const dataEntrada = Utils.escapeHtml(String(parent.dataEntrada || '').trim() || '—');
+          const prazoFinal = parent.prazo ? Utils.escapeHtml(Utils.formatDate(parent.prazo)) : '—';
+          const doneCount = kids.filter(c => c.status === 'Concluída' || c.status === 'Finalizada' || c.status === 'Finalizado').length;
+          const osCountsHtml = `
+            <div class="atd-card-mid">
+              <div class="atd-card-oscounts">
+                <span>Demanda: <strong>${subsCount}</strong> O.S</span>
+                <span>Finalizadas: <strong>${doneCount}</strong></span>
+              </div>
+              <div class="atd-card-status">Status: <strong>${statusLine}</strong></div>
+            </div>
+          `;
+          const taskIdLabel = Utils.escapeHtml(Utils.opTaskDisplayRef(parent));
           return `
               <article class="kanban-card atd-kanban-parent-card ${this._lastMovedOpTask && this._lastMovedOpTask.id === parent.id && this._lastMovedOpTask.status === parent.status ? 'just-moved' : ''}" data-op-id="${parent.id}" draggable="true" aria-label="${titleEsc}">
                 ${badgesRow}
-                <div class="kanban-card-title-row">
+                <div class="atd-card-toprow">
                   ${copyBtnHtml}
-                  <div class="kanban-card-title">${titleEsc}</div>
-                </div>
-                <div class="atd-kanban-status-line">Status: <strong>${statusLine}</strong></div>
-                ${codeHtml}
-                <div class="kanban-card-meta">
-                  <div class="kanban-card-assignee">
-                    <div class="av-sm" style="background:${Utils.getAvatarColor(parent.responsavel)};color:#0a0c0a;width:20px;height:20px;font-size:8px" aria-hidden="true">${Utils.getInitials(parent.responsavel)}</div>
-                    ${Utils.escapeHtml(parent.responsavel || '—')}
+                  <div class="atd-card-topmeta">
+                    <div class="atd-card-topmeta-col"><span class="atd-card-topmeta-k">CIDADE</span> <span class="atd-card-topmeta-v">${cidade}</span></div>
                   </div>
-                  <div class="kanban-card-date ${isLate ? 'late' : ''}">${Utils.formatDate(parent.prazo)}</div>
                 </div>
+                <div class="atd-card-name">${titleEsc}</div>
+                <div class="atd-card-dates">
+                  <div class="atd-card-datepair"><span class="atd-card-date-k">DATA DE ENTRADA:</span> <span class="atd-card-date-v">${dataEntrada}</span></div>
+                  <div class="atd-card-datepair ${isLate ? 'late' : ''}"><span class="atd-card-date-k">PRAZO:</span> <span class="atd-card-date-v">${prazoFinal}</span></div>
+                </div>
+                ${osCountsHtml}
                 ${sigHtml}
-                ${subsHtml}
                 <div class="kanban-card-actions">${actionBtns}</div>
                 <div class="atd-kanban-card-foot">
                   <button type="button" class="atd-book-ico" data-atd-add-os="${parent.id}" title="Adicionar ordem de serviço" aria-label="Adicionar ordem de serviço">+</button>
                   <button type="button" class="atd-book-ico" data-atd-edit-parent="${parent.id}" title="Editar protocolo" aria-label="Editar protocolo">✎</button>
+                  <span class="atd-card-taskid">${taskIdLabel}</span>
                 </div>
               </article>
             `;
@@ -4472,6 +4564,7 @@ const Controllers = {
                 <span class="atd-modal-children-title">${title}</span>
                 <span class="atd-modal-children-meta">${who} · ${prazo}</span>
               </div>
+              <button type="button" class="atd-book-ico" data-atd-edit-child="${t.id}" title="Editar ordem de serviço" aria-label="Editar ordem de serviço">✎</button>
               ${Utils.taskCopyProtocolButtonHtml(Utils.opTaskDisplayRef(t), 'task-copy-id-btn--sm')}
               <span class="atd-modal-children-status">${status}</span>
             </li>
@@ -4482,6 +4575,16 @@ const Controllers = {
 
       if (!childrenList.dataset.boundStatusClick) {
         childrenList.addEventListener('click', (e) => {
+          const editBtn = e.target.closest?.('[data-atd-edit-child]');
+          if (editBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const id = Number(editBtn.dataset.atdEditChild || 0);
+            if (!id) return;
+            Controllers.opTask.openEditModal(id);
+            return;
+          }
+
           const wrap = e.target.closest('.atd-modal-children-check');
           const input = wrap?.querySelector('input[type=checkbox]');
           if (!input) return;
@@ -6429,14 +6532,56 @@ async function initApp() {
   // Clock
   UI.updateClock();
   setInterval(() => UI.updateClock(), 30000);
-  setInterval(async () => {
+
+  // Sync rápido entre computadores:
+  // - Em vez de baixar tudo toda hora, faz um GET leve (/changes.php) e só faz bootstrap quando houve mudança.
+  // - O bootstrap de 25s fica como fallback caso algum proxy/cache atrapalhe ou o changes falhe.
+  let lastRemoteSig = '';
+  const changesSig = (payload) => {
+    if (!payload || typeof payload !== 'object') return '';
+    const t = Number(payload.tasks) || 0;
+    const o = Number(payload.opTasks) || 0;
+    const c = Number(payload.calendarNotes) || 0;
+    const g = Number(payload.config) || 0;
+    return `${t}|${o}|${c}|${g}`;
+  };
+  const quickSyncTick = async () => {
+    if (!ApiService.enabled()) return;
+    if (!Controllers?.auth?._isAuthenticated?.()) return;
+    const ch = await ApiService.getChanges();
+    if (!ch || ch.ok !== true) return;
+    const sig = changesSig(ch);
+    if (!sig || sig === lastRemoteSig) return;
+    lastRemoteSig = sig;
     const updated = await bootstrapWithTimeout(6000);
     if (!updated) return;
     UI.renderDashboard();
     UI.refreshOperationalUi();
     UI.renderCalendarPage();
     UI.renderReportsPage();
+  };
+
+  const seedRemoteSigIfPossible = async () => {
+    if (!ApiService.enabled()) return;
+    if (!Controllers?.auth?._isAuthenticated?.()) return;
+    const ch = await ApiService.getChanges();
+    if (!ch || ch.ok !== true) return;
+    const sig = changesSig(ch);
+    if (sig) lastRemoteSig = sig;
+  };
+
+  setInterval(() => { void quickSyncTick(); }, 4000);
+  setInterval(async () => {
+    const updated = await bootstrapWithTimeout(6000);
+    if (!updated) return;
+    void seedRemoteSigIfPossible();
+    UI.renderDashboard();
+    UI.refreshOperationalUi();
+    UI.renderCalendarPage();
+    UI.renderReportsPage();
   }, 25000);
+
+  void seedRemoteSigIfPossible();
 
   UI.restoreLastPageIfAuthed();
   if (Controllers.auth._isAuthenticated() && Store.currentPage !== 'chat') {

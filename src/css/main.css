@@ -815,6 +815,7 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
 .reg-vale      { background: var(--region-vale-bg); color: var(--region-vale); }
 .reg-caratinga { background: var(--region-caratinga-bg); color: var(--region-caratinga); }
 .reg-unknown   { background: var(--region-unknown-bg); color: var(--white3); }
+.sp-badge      { background: rgba(140, 85, 255, .18); color: rgba(190, 160, 255, 1); }
 .p-high  { background: var(--prio-high-bg); color: var(--prio-high); }
 .p-med   { background: var(--prio-med-bg); color: var(--prio-med); }
 .p-low   { background: var(--prio-low-bg); color: var(--prio-low); }
@@ -1493,6 +1494,106 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
   padding-top: 8px;
   margin-top: 8px;
   border-top: 1px solid var(--border);
+}
+
+/* Atendimento · card pai (priorizar infos do desenho) */
+.atd-card-toprow{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.atd-card-topmeta{
+  flex:1;
+  display:grid;
+  grid-template-columns: 1fr;
+  gap: 2px;
+  min-width: 0;
+}
+.atd-card-topmeta-col{
+  display:flex;
+  align-items:baseline;
+  gap:6px;
+  min-width:0;
+  font-family: var(--font-mono);
+  font-size:10px;
+  color: var(--white4);
+}
+.atd-card-topmeta-k{
+  color: var(--white4);
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.atd-card-topmeta-v{
+  color: var(--white2);
+  overflow:hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.atd-card-name{
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--white);
+  line-height: 1.25;
+}
+.atd-card-dates{
+  margin-top: 6px;
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--white4);
+}
+.atd-card-datepair{
+  display:flex;
+  align-items:baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.atd-card-datepair.late .atd-card-date-v{
+  color: var(--danger);
+}
+.atd-card-date-k{
+  white-space: nowrap;
+}
+.atd-card-date-v{
+  color: var(--white2);
+}
+.atd-card-oscounts{
+  margin: 0;
+  display:flex;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--white4);
+  white-space: nowrap;
+}
+.atd-card-oscounts strong{
+  color: var(--white2);
+  font-weight: 700;
+}
+.atd-card-mid{
+  margin-top: 6px;
+  display:flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--white4);
+}
+.atd-card-status strong{
+  color: var(--white2);
+}
+.atd-card-taskid{
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--white4);
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
 }
 /* Atendimento · prateleiras (legado — mantido para referência se JS antigo) */
 .atd-shelves {
