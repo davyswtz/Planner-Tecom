@@ -1191,10 +1191,110 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
   #page-relatorios .toolbar-left select { min-width: 100%; }
 }
 
-/* ═══ TAREFAS PAGE — painel largura total (categorias via menu lateral) ═══ */
+/* ═══ TAREFAS PAGE ═══ */
 #page-tarefas .tasks-main-panel {
   min-width: 0;
   width: 100%;
+}
+
+/* ═══ PÁGINA RELATÓRIO (menu lateral) ═══ */
+#page-relatorio .relatorio-page-layout {
+  max-width: 720px;
+  min-width: 0;
+}
+#page-relatorio .relatorio-panel {
+  padding: 0;
+  overflow: hidden;
+}
+#page-relatorio .relatorio-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+#page-relatorio .relatorio-panel-sub {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--white4);
+  line-height: 1.4;
+  max-width: 36rem;
+}
+#page-relatorio .relatorio-panel-body {
+  padding: 14px 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  align-items: stretch;
+}
+#page-relatorio .relatorio-section-title {
+  margin: 0 0 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--white3);
+  font-family: var(--font-mono);
+}
+#page-relatorio .relatorio-section-note {
+  margin: -4px 0 8px;
+  font-size: 10px;
+  color: var(--white4);
+  line-height: 1.35;
+}
+#page-relatorio .relatorio-bar-row .report-bar-head {
+  font-size: 11px;
+}
+#page-relatorio .relatorio-bar-row .report-bar-track {
+  height: 7px;
+}
+#page-relatorio .relatorio-top3-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+#page-relatorio .relatorio-top3-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 11px;
+}
+#page-relatorio .relatorio-top3-rank {
+  flex-shrink: 0;
+  min-width: 1.5rem;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--white4);
+  opacity: 0.9;
+}
+#page-relatorio .relatorio-top3-count {
+  font-size: 10px;
+  color: var(--white4);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+#page-relatorio .relatorio-top3-count strong {
+  color: var(--green);
+}
+#page-relatorio .relatorio-region-counts {
+  font-size: 10px;
+  color: var(--white4);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+#page-relatorio .relatorio-em-and {
+  color: var(--info);
+  font-weight: 700;
+}
+#page-relatorio .relatorio-bars--top3 {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .tasks-tabs {

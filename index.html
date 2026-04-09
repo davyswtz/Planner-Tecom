@@ -138,6 +138,13 @@
         <span class="nav-label">Calendário</span>
       </button>
 
+      <button type="button" class="nav-item" data-page="relatorio" aria-label="Relatório de rompimentos">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+        </svg>
+        <span class="nav-label">Relatório</span>
+      </button>
+
       <button type="button" class="nav-item" data-page="config">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
           <circle cx="12" cy="12" r="3"/>
@@ -437,6 +444,35 @@
 
       </section>
       <!-- /page-tarefas -->
+
+      <!-- ═══ PAGE: RELATÓRIO (rompimentos) ═══ -->
+      <section class="page" id="page-relatorio" aria-label="Relatório de rompimentos">
+        <div class="relatorio-page-layout">
+          <div class="panel relatorio-panel" role="region">
+            <div class="panel-header relatorio-panel-head">
+              <div>
+                <span class="panel-title">Relatório · Rompimentos</span>
+                <p class="relatorio-panel-sub">Por região com totais e em andamento; em seguida o top 3 de técnicos com mais rompimentos resolvidos.</p>
+              </div>
+              <button type="button" class="icon-btn" id="refreshRelatorioBtn" title="Atualizar relatório" aria-label="Atualizar relatório">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+              </button>
+            </div>
+            <div class="relatorio-panel-body">
+              <section class="relatorio-section" aria-labelledby="relatorio-region-title">
+                <h2 class="relatorio-section-title" id="relatorio-region-title">Por região</h2>
+                <p class="relatorio-section-note">Total de rompimentos e em andamento (inclui Validação, envio pendente e adequação, quando houver)</p>
+                <div class="relatorio-bars" id="rompReportRegionBars"></div>
+              </section>
+              <section class="relatorio-section" aria-labelledby="relatorio-top3-title">
+                <h2 class="relatorio-section-title" id="relatorio-top3-title">Top 3 — técnicos que mais resolveram</h2>
+                <p class="relatorio-section-note">Rompimentos em status concluída, finalizada ou finalizado (atribuídos ao responsável).</p>
+                <div class="relatorio-bars relatorio-bars--top3" id="rompReportTop3TecBars"></div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <!-- ═══ PAGE: ATENDIMENTO AO CLIENTE (layout redesenhado) ═══ -->
       <section class="page" id="page-atendimento" aria-label="Atendimento ao cliente">

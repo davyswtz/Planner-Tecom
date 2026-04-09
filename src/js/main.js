@@ -2311,6 +2311,87 @@ const ReportsService = {
     return list.map(i => ({ ...i, pct: Math.round((i.total / max) * 100) }));
   },
 
+  /**
+   * Normaliza rótulo de região para Goval / Vale do Aço / Caratinga / Outras.
+   * @param {string} regiao
+   */
+  _normalizeRompRegionBucket(regiao) {
+    const r = String(regiao || '')
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    if (r === 'goval') return 'Goval';
+    if (r === 'vale do aco' || r === 'vale do aço') return 'Vale do Aço';
+    if (r === 'caratinga') return 'Caratinga';
+    return 'Outras';
+  },
+
+  /**
+   * Contagem de rompimentos nas três regiões principais (+ Outras se houver).
+   * @param {OpTask[]} opTasks — preferir lista completa de opTasks (Store)
+   */
+  _rompimentoEmAndamentoStatuses: new Set(['Em andamento', 'Validação', 'Envio pendente', 'Necessário adequação']),
+
+  getRompimentosRegionMainBuckets(opTasks) {
+    const rows = (Array.isArray(opTasks) ? opTasks : []).filter(t => t && t.categoria === 'rompimentos');
+    const counts = { Goval: 0, 'Vale do Aço': 0, Caratinga: 0, Outras: 0 };
+    const emAnd = { Goval: 0, 'Vale do Aço': 0, Caratinga: 0, Outras: 0 };
+    rows.forEach((t) => {
+      const b = this._normalizeRompRegionBucket(t.regiao);
+      counts[b] += 1;
+      if (this._rompimentoEmAndamentoStatuses.has(String(t.status || '').trim())) emAnd[b] += 1;
+    });
+    const main = [
+      { label: 'Goval', count: counts.Goval, emAndamento: emAnd.Goval },
+      { label: 'Vale do Aço', count: counts['Vale do Aço'], emAndamento: emAnd['Vale do Aço'] },
+      { label: 'Caratinga', count: counts.Caratinga, emAndamento: emAnd.Caratinga },
+    ];
+    if (counts.Outras > 0) main.push({ label: 'Outras', count: counts.Outras, emAndamento: emAnd.Outras });
+    const max = Math.max(...main.map(i => i.count), 1);
+    return main.map(i => ({ ...i, pct: Math.round((i.count / max) * 100) }));
+  },
+
+  /**
+   * Por técnico: total de rompimentos e quantos já resolvidos (concluída/finalizada/finalizado).
+   * @param {OpTask[]} opTasks
+   */
+  getRompimentosByTecnicoResolvedAndTotal(opTasks) {
+    const rows = (Array.isArray(opTasks) ? opTasks : []).filter(t => t && t.categoria === 'rompimentos');
+    const doneStatuses = new Set(['Concluída', 'Finalizada', 'Finalizado']);
+    const map = new Map();
+    rows.forEach((t) => {
+      const tec = String(t.responsavel || 'Não informado').trim() || 'Não informado';
+      if (!map.has(tec)) map.set(tec, { label: tec, total: 0, resolvidos: 0 });
+      const item = map.get(tec);
+      item.total += 1;
+      const st = String(t.status || '').trim();
+      if (doneStatuses.has(st)) item.resolvidos += 1;
+    });
+    const list = [...map.values()].sort((a, b) =>
+      b.resolvidos - a.resolvidos || b.total - a.total || a.label.localeCompare(b.label, 'pt-BR'),
+    );
+    const max = Math.max(...list.map(i => i.resolvidos), 1);
+    return list.map(i => ({ ...i, pct: Math.round((i.resolvidos / max) * 100) }));
+  },
+
+  /**
+   * Até 3 técnicos com maior número de rompimentos resolvidos (para relatório resumido).
+   * @param {OpTask[]} opTasks
+   * @returns {{ label: string, resolvidos: number, pct: number, rank: number }[]}
+   */
+  getRompimentosTop3TecnicosResolvidos(opTasks) {
+    const all = this.getRompimentosByTecnicoResolvedAndTotal(opTasks).filter((i) => i.resolvidos > 0);
+    const top = all.slice(0, 3);
+    const max = Math.max(...top.map((i) => i.resolvidos), 1);
+    return top.map((i, idx) => ({
+      label: i.label,
+      resolvidos: i.resolvidos,
+      pct: Math.round((i.resolvidos / max) * 100),
+      rank: idx + 1,
+    }));
+  },
+
   toCsv(tasks) {
     const header = ['ID', 'Tarefa', 'Origem', 'Responsável', 'Prazo', 'Status', 'Prioridade', 'Atrasada'];
     const rows = tasks.map(t => [
@@ -3041,6 +3122,7 @@ const UI = {
       'certificacao-cemig': { title: 'Certificação Cemig', crumb: 'Projetos de rede' },
       atendimento: { title: 'Atendimento ao cliente', crumb: 'Central de atendimento' },
       calendario: { title: 'Calendário', crumb: 'Agenda' },
+      relatorio: { title: 'Relatório', crumb: 'Rompimentos' },
       config: { title: 'Configurações', crumb: 'Sistema' },
     };
     const meta = titles[page] || { title: page, crumb: '' };
@@ -3066,6 +3148,7 @@ const UI = {
     }
     if (page === 'atendimento') this.renderAtendimentoPage();
     if (page === 'calendario') this.renderCalendarPage();
+    if (page === 'relatorio') this.renderRelatorioPage();
   },
 
   /**
@@ -3088,6 +3171,7 @@ const UI = {
       'certificacao-cemig',
       'atendimento',
       'calendario',
+      'relatorio',
       'config',
     ]);
     if (!saved || !allowed.has(saved)) return;
@@ -3345,6 +3429,50 @@ const UI = {
   renderOpPage() {
     this.renderOpStats();
     this.renderKanban();
+  },
+
+  /** Página do menu lateral «Relatório»: rompimentos por região e por técnico. */
+  renderRelatorioPage() {
+    const regionEl = document.getElementById('rompReportRegionBars');
+    const top3El = document.getElementById('rompReportTop3TecBars');
+    if (!regionEl || !top3El) return;
+
+    const opTasks = Store.getOpTasks();
+    const byRegion = ReportsService.getRompimentosRegionMainBuckets(opTasks);
+    const top3 = ReportsService.getRompimentosTop3TecnicosResolvidos(opTasks);
+
+    regionEl.innerHTML = byRegion.length
+      ? byRegion.map((item) => {
+        const cls = this._regionReportBarClass(item.label);
+        const em = item.emAndamento ?? 0;
+        const right =
+          em > 0
+            ? `<span class="relatorio-region-counts">${item.count} total · <strong class="relatorio-em-and">${em}</strong> em and.</span>`
+            : `<span class="relatorio-region-counts">${item.count} total</span>`;
+        return `
+            <div class="report-bar-row relatorio-bar-row">
+              <div class="report-bar-head"><span>${Utils.escapeHtml(item.label)}</span>${right}</div>
+              <div class="report-bar-track">
+                <div class="report-bar-fill ${cls}" style="width:${item.pct}%"></div>
+              </div>
+            </div>
+          `;
+      }).join('')
+      : '<div class="calendar-empty">Sem rompimentos cadastrados.</div>';
+
+    top3El.innerHTML = top3.length
+      ? top3.map((item) => `
+            <div class="report-bar-row relatorio-bar-row">
+              <div class="report-bar-head relatorio-top3-head">
+                <span class="relatorio-top3-name"><span class="relatorio-top3-rank">${item.rank}º</span>${Utils.escapeHtml(item.label)}</span>
+                <span class="relatorio-top3-count"><strong>${item.resolvidos}</strong> resolv.</span>
+              </div>
+              <div class="report-bar-track">
+                <div class="report-bar-fill s-concluida" style="width:${item.pct}%"></div>
+              </div>
+            </div>
+          `).join('')
+      : '<div class="calendar-empty">Nenhum rompimento resolvido registrado por responsável.</div>';
   },
 };
 
@@ -6580,12 +6708,14 @@ async function initApp() {
     else if (p === 'tarefas' || p === 'atendimento') UI.refreshOperationalUi();
     else if (p === 'calendario') UI.renderCalendarPage();
     else if (p === 'relatorios') UI.renderReportsPage();
+    else if (p === 'relatorio') UI.renderRelatorioPage();
   });
 
   UI.renderAgenda();
   UI.renderDashboard();
   UI.renderCalendarPage();
   UI.renderReportsPage();
+  UI.renderRelatorioPage();
 
   // Clock
   UI.updateClock();
@@ -6621,6 +6751,7 @@ async function initApp() {
         UI.refreshOperationalUi();
         UI.renderCalendarPage();
         UI.renderReportsPage();
+        UI.renderRelatorioPage();
         return;
       }
 
@@ -6643,6 +6774,7 @@ async function initApp() {
         UI.refreshOperationalUi();
         UI.renderCalendarPage();
         UI.renderReportsPage();
+        UI.renderRelatorioPage();
       }
 
       // Se o servidor acusar mudanca mas nao vier diff (ex.: config/calendario),
@@ -6654,6 +6786,7 @@ async function initApp() {
         UI.refreshOperationalUi();
         UI.renderCalendarPage();
         UI.renderReportsPage();
+        UI.renderRelatorioPage();
       }
     } finally {
       syncInFlight = false;
@@ -6680,6 +6813,7 @@ async function initApp() {
     UI.refreshOperationalUi();
     UI.renderCalendarPage();
     UI.renderReportsPage();
+    UI.renderRelatorioPage();
   }, 25000);
 
   void seedRemoteSigIfPossible();
@@ -6706,6 +6840,7 @@ async function initApp() {
         UI.refreshOperationalUi();
         UI.renderCalendarPage();
         UI.renderReportsPage();
+        UI.renderRelatorioPage();
         ToastService.show('Dados atualizados', 'success');
       } else {
         ToastService.show('Sem conexão com a API', 'error');
@@ -6720,6 +6855,7 @@ async function initApp() {
   document.getElementById('refreshOpBtn')?.addEventListener('click', () => manualRefresh('refreshOpBtn'));
   document.getElementById('refreshAtdBtn')?.addEventListener('click', () => manualRefresh('refreshAtdBtn'));
   document.getElementById('refreshCalendarBtn')?.addEventListener('click', () => manualRefresh('refreshCalendarBtn'));
+  document.getElementById('refreshRelatorioBtn')?.addEventListener('click', () => manualRefresh('refreshRelatorioBtn'));
 
   UI.restoreLastPageIfAuthed();
   if (Controllers.auth._isAuthenticated() && Store.currentPage !== 'chat') {
