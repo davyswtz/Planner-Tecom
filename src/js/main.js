@@ -719,7 +719,18 @@ const Store = (() => {
         nextTaskId = tasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
       }
       if (Array.isArray(payload.opTasks)) {
-        mergeLocalFieldsById(opTasks, payload.opTasks, ['chatThreadKey']);
+        mergeLocalFieldsById(opTasks, payload.opTasks, [
+          'chatThreadKey',
+          'chatThreadWebhookUrl',
+          'nomeCliente',
+          'protocolo',
+          'dataEntrada',
+          'subProcesso',
+          'dataInstalacao',
+          'ordemServico',
+          'assinadaPor',
+          'assinadaEm',
+        ]);
         opTasks.splice(0, opTasks.length, ...payload.opTasks);
         nextOpTaskId = opTasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
       }
@@ -1610,11 +1621,29 @@ const WebhookService = {
 
     // Template específico: Atendimento ao Cliente (Tarefa Pai) entrando em andamento.
     if (opCat === 'atendimento-cliente' && event === 'andamento' && task?.isParentTask) {
-      const nomeCliente = String(task.nomeCliente || '').trim();
+      const histAtd = Array.isArray(task?.historico) ? task.historico : [];
+      const nomeCliente = String(task.nomeCliente || task.titulo || '').trim();
       const protocolo = String(task.protocolo || '').trim();
-      const dataEntrada = String(task.dataEntrada || '').trim();
-      const prazoFinal = String(task.prazo || '').trim();
-      const enviadoPor = String(task.assinadaPor || '').trim();
+      const dataEntradaIso = String(task.dataEntrada || '').trim();
+      const deDay = dataEntradaIso.slice(0, 10);
+      const dataEntrada = (/^\d{4}-\d{2}-\d{2}$/.test(deDay) ? Utils.formatDate(deDay) : '') ||
+        (() => {
+          const c = String(task.criadaEm || '').trim();
+          const day = c.slice(0, 10);
+          return /^\d{4}-\d{2}-\d{2}$/.test(day) ? Utils.formatDate(day) : '';
+        })();
+      // “Data de saída” no formulário (op-atd-data-instalacao) → task.dataInstalacao; campo “prazo” costuma ficar vazio no pai ATD.
+      const saidaIso = String(task.dataInstalacao || '').trim();
+      const saidaDay = saidaIso.slice(0, 10);
+      const prazoSaidaFmt = /^\d{4}-\d{2}-\d{2}$/.test(saidaDay) ? Utils.formatDate(saidaDay) : '';
+      const prazoRaw = String(task.prazo || '').trim();
+      const prazoDay = prazoRaw.slice(0, 10);
+      const prazoLegadoFmt =
+        /^\d{4}-\d{2}-\d{2}$/.test(prazoDay) ? Utils.formatDate(prazoDay) : String(prazoRaw || '').trim();
+      const prazoFinal = prazoSaidaFmt || prazoLegadoFmt;
+      const enviadoPor =
+        String(task.assinadaPor || '').trim() ||
+        String(histAtd[0]?.autor || '').trim();
       const taskId = String(task.taskCode || `ATD-${String(task.id || '').padStart(4, '0')}`).trim();
 
       const subtasks = Store.getOpTasks()
@@ -1633,7 +1662,7 @@ const WebhookService = {
           `👤 ${this._chatSafe(nomeCliente)}`,
           `📄 Protocolo: ${this._chatSafe(protocolo)}`,
           `🗓️ Data de entrada: ${this._chatSafe(dataEntrada)}`,
-          `⏰ Prazo final: ${this._chatSafe(prazoFinal)}`,
+          `⏰ Prazo de saída: ${this._chatSafe(prazoFinal)}`,
           '',
           listLines,
           '',

@@ -45,12 +45,14 @@ try {
     $sql = 'INSERT INTO op_tasks (
               id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
               coordenadas, localizacao_texto, descricao, categoria, prazo, prioridade, status,
-              is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key
+              is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key,
+              nome_cliente, protocolo, data_entrada, data_instalacao, assinada_por, assinada_em
             )
             VALUES (
               :id, :taskCode, :titulo, :setor, :regiao, :responsavel, :clientesAfetados,
               :coordenadas, :localizacao_texto, :descricao, :categoria, :prazo, :prioridade, :status,
-              :is_parent_task, :parent_task_id, :criadaEm, :historico, :chat_thread_key
+              :is_parent_task, :parent_task_id, :criadaEm, :historico, :chat_thread_key,
+              :nome_cliente, :protocolo, :data_entrada, :data_instalacao, :assinada_por, :assinada_em
             )
             ON DUPLICATE KEY UPDATE
               taskCode = VALUES(taskCode),
@@ -71,6 +73,12 @@ try {
               criadaEm = VALUES(criadaEm),
               historico = VALUES(historico),
               chat_thread_key = VALUES(chat_thread_key),
+              nome_cliente = VALUES(nome_cliente),
+              protocolo = VALUES(protocolo),
+              data_entrada = VALUES(data_entrada),
+              data_instalacao = VALUES(data_instalacao),
+              assinada_por = VALUES(assinada_por),
+              assinada_em = VALUES(assinada_em),
               updated_at = NOW()';
     $stmt = $pdo->prepare($sql);
     $stmt->execute([
@@ -93,6 +101,12 @@ try {
         ':criadaEm' => (string) ($data['criadaEm'] ?? date('c')),
         ':historico' => json_encode($data['historico'] ?? [], JSON_UNESCAPED_UNICODE),
         ':chat_thread_key' => (string) ($data['chatThreadKey'] ?? ''),
+        ':nome_cliente' => (string) ($data['nomeCliente'] ?? ''),
+        ':protocolo' => (string) ($data['protocolo'] ?? ''),
+        ':data_entrada' => (string) ($data['dataEntrada'] ?? ''),
+        ':data_instalacao' => (string) ($data['dataInstalacao'] ?? ''),
+        ':assinada_por' => (string) ($data['assinadaPor'] ?? ''),
+        ':assinada_em' => (string) ($data['assinadaEm'] ?? ''),
     ]);
 
     $finalDesc = processOpTaskDescricaoImages($descricaoRaw, $id, $pdo);

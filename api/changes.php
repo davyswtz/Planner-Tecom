@@ -43,7 +43,10 @@ try {
 
         $opSql = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
           coordenadas, localizacao_texto AS localizacaoTexto, descricao, categoria, prazo, prioridade, status,
-          is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey, updated_at
+          is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
+          nome_cliente AS nomeCliente, protocolo, data_entrada AS dataEntrada,
+          data_instalacao AS dataInstalacao,
+          assinada_por AS assinadaPor, assinada_em AS assinadaEm, updated_at
           FROM op_tasks WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC';
         $stmtO = $pdo->prepare($opSql);
         $stmtO->execute([':since' => $since]);
