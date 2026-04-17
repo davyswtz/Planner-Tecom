@@ -3446,7 +3446,48 @@ const UI = {
   },
 
   /* ── Page navigation ────────────────────────────────────── */
+  _protectedPages: new Set([
+    'correcao-atenuacao',
+    'troca-etiqueta',
+    'qualidade-potencia',
+  ]),
+  _protectedPassword: '91166734',
+  _protectedSessionKey(page) {
+    return `planner.protected.${String(page || '').trim()}.unlocked.v1`;
+  },
+  _isProtectedUnlocked(page) {
+    try {
+      return sessionStorage.getItem(this._protectedSessionKey(page)) === '1';
+    } catch {
+      return false;
+    }
+  },
+  _setProtectedUnlocked(page) {
+    try {
+      sessionStorage.setItem(this._protectedSessionKey(page), '1');
+    } catch {
+      /* ignore */
+    }
+  },
+  _ensureProtectedAccess(page) {
+    if (!this._protectedPages.has(page)) return true;
+    if (this._isProtectedUnlocked(page)) return true;
+    const entered = window.prompt('Tela protegida. Digite a senha para acessar:') ?? '';
+    if (String(entered).trim() === this._protectedPassword) {
+      this._setProtectedUnlocked(page);
+      return true;
+    }
+    ToastService?.show?.('Senha incorreta.', 'error');
+    return false;
+  },
   navigateTo(page) {
+    const prevPage = Store.currentPage;
+    if (!this._ensureProtectedAccess(page)) {
+      // mantém a tela atual sem alterar navegação
+      // (se não houver página atual válida, cai no dashboard)
+      if (!prevPage || typeof prevPage !== 'string') return;
+      return;
+    }
     // Oculta todas as páginas
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
 
@@ -3494,7 +3535,6 @@ const UI = {
       'troca-poste',
       'otimizacao-rede',
       'certificacao-cemig',
-      'troca-etiqueta',
       'qualidade-potencia',
       'manutencao-corretiva',
     ]);
@@ -3506,6 +3546,7 @@ const UI = {
       this.renderOpPage();
     }
     if (page === 'correcao-atenuacao') this.renderAtenuacaoDashboardPage();
+    if (page === 'troca-etiqueta') this.renderTrocaEtiquetaPage();
     if (page === 'atendimento') this.renderAtendimentoPage();
     if (page === 'calendario') this.renderCalendarPage();
     if (page === 'relatorio') this.renderRelatorioPage();
@@ -3540,6 +3581,8 @@ const UI = {
     ]);
     if (!saved || !allowed.has(saved)) return;
     if (!document.getElementById(`page-${saved}`)) return;
+    // Não restaura automaticamente página protegida sem senha
+    if (this._protectedPages.has(saved) && !this._isProtectedUnlocked(saved)) return;
     this.navigateTo(saved);
   },
 
@@ -3805,11 +3848,457 @@ const UI = {
     this.renderKanban();
   },
 
+  /* ── Troca de etiqueta (kanban CTO visual) ───────────────── */
+  _teState: {
+    filterTech: 'todos',
+    filterPriority: 'todas',
+    modalOpen: false,
+  },
+  _teEscape(s) { return Utils.escapeHtml(String(s ?? '')); },
+  _teInitials(name) { return Utils.getInitials(String(name || '—')); },
+  _tePriorityMeta(p) {
+    const k = String(p || '').trim().toLowerCase();
+    if (k === 'urgente') return { key: 'urgente', label: 'Urgente', a: '#E24B4A', b: '#FCEBEB' };
+    if (k === 'alto') return { key: 'alto', label: 'Alto', a: '#EF9F27', b: '#FAEEDA' };
+    if (k === 'medio') return { key: 'medio', label: 'Médio', a: '#1D9E75', b: '#E1F5EE' };
+    if (k === 'estavel') return { key: 'estavel', label: 'Estável', a: '#639922', b: '#EAF3DE' };
+    return { key: 'alto', label: 'Alto', a: '#EF9F27', b: '#FAEEDA' };
+  },
+  _teStatusKey(status) {
+    const s = String(status || '').trim().toLowerCase();
+    if (s.includes('and')) return 'andamento';
+    if (s.includes('conc')) return 'concluida';
+    return 'pendente';
+  },
+  _teStatusLabel(key) {
+    if (key === 'andamento') return 'Em andamento';
+    if (key === 'concluida') return 'Concluídas';
+    return 'Pendentes';
+  },
+  _teAll() {
+    const all = Store.getOpTasksByCategory('troca-etiqueta') || [];
+    return all.map(t => ({
+      id: Number(t.id) || 0,
+      ctoId: String(t.ctoId || t.titulo || '').trim() || `CTO-${String(Number(t.id) || 0).padStart(2, '0')}`,
+      endereco: String(t.endereco || t.regiao || t.setor || '').trim() || '—',
+      motivo: String(t.motivo || t.subProcesso || '').trim() || 'Padrão novo',
+      tecnico: String(t.responsavel || t.tecnico || '').trim() || '—',
+      prioridade: String(t.prioridade || '').trim().toLowerCase() || 'alto',
+      status: String(t.status || 'Pendente'),
+    }));
+  },
+  _teFiltered(items) {
+    const st = this._teState;
+    const tech = String(st.filterTech || 'todos').toLowerCase();
+    const pr = String(st.filterPriority || 'todas').toLowerCase();
+    return items.filter(it => {
+      const matchTech = tech === 'todos' || String(it.tecnico || '').toLowerCase().includes(tech);
+      const matchPr = pr === 'todas' || String(it.prioridade || '').toLowerCase() === pr;
+      return matchTech && matchPr;
+    });
+  },
+  _teCounts(items) {
+    let total = items.length, pend = 0, and = 0, conc = 0;
+    items.forEach(it => {
+      const k = this._teStatusKey(it.status);
+      if (k === 'andamento') and++;
+      else if (k === 'concluida') conc++;
+      else pend++;
+    });
+    return { total, pend, and, conc };
+  },
+  _teRenderMetrics(root, counts) {
+    root.innerHTML = `
+      <div class="te-metrics">
+        <div class="te-metric"><div class="te-metric-label">Total</div><div class="te-metric-value">${counts.total}</div></div>
+        <div class="te-metric" data-te-m="pend"><div class="te-metric-label">Pendentes</div><div class="te-metric-value">${counts.pend}</div></div>
+        <div class="te-metric" data-te-m="and"><div class="te-metric-label">Em andamento</div><div class="te-metric-value">${counts.and}</div></div>
+        <div class="te-metric" data-te-m="conc"><div class="te-metric-label">Concluídas</div><div class="te-metric-value">${counts.conc}</div></div>
+      </div>
+    `;
+  },
+  _teCtoCardHTML(it) {
+    const meta = this._tePriorityMeta(it.prioridade);
+    const statusKey = this._teStatusKey(it.status);
+    const urgent = meta.key === 'urgente';
+    const done = statusKey === 'concluida';
+    const border = urgent ? '#E24B4A' : done ? '#639922' : meta.a;
+    const opacity = done ? '0.55' : '1';
+    const badgeBg = meta.b;
+    const badgeFg = meta.a;
+    const label = this._teEscape(it.ctoId);
+    const endereco = this._teEscape(it.endereco);
+    const motivo = this._teEscape(it.motivo);
+    const status = urgent ? 'Urgente' : statusKey === 'andamento' ? 'Em andamento' : statusKey === 'concluida' ? 'Concluída' : 'Pendente';
+    const initials = this._teEscape(this._teInitials(it.tecnico));
+    const tech = this._teEscape(it.tecnico);
+    return `
+      <div class="te-cto-wrap" draggable="true" data-te-id="${it.id}">
+        <div class="te-cto-box" style="border-color:${border};opacity:${opacity}">
+          <div class="te-cto-screws" aria-hidden="true">
+            <span class="te-cto-screw"></span>
+            <span class="te-cto-screw"></span>
+          </div>
+          <div class="te-cto-serrated" aria-hidden="true"></div>
+
+          <div class="te-cto-label" style="background:#e8e0c8">
+            <div class="te-cto-label-top">
+              <span class="te-cto-id">${label}</span>
+            </div>
+            <div class="te-cto-addr">${endereco}</div>
+            <div class="te-cto-badges">
+              <span class="te-cto-badge" style="border-color:${badgeFg};color:${badgeFg}">${this._teEscape(status)}</span>
+            </div>
+          </div>
+
+          <div class="te-cto-latch" aria-hidden="true">
+            <span class="te-cto-latch-knob"></span>
+            <span class="te-cto-latch-bar"></span>
+          </div>
+
+          <div class="te-cto-bottom" aria-hidden="true">
+            <span class="te-cto-connector"></span>
+            <span class="te-cto-connector"></span>
+          </div>
+        </div>
+
+        <div class="te-cto-strip">
+          <div class="te-cto-strip-left">
+            <span class="te-cto-avatar">${initials}</span>
+            <span class="te-cto-tech-name">${tech}</span>
+          </div>
+          <span class="te-cto-strip-badge" style="background:${badgeBg};color:${badgeFg};border-color:${badgeFg}">${motivo}</span>
+        </div>
+      </div>
+    `;
+  },
+  _teRenderBoard(root, items) {
+    const cols = {
+      pendente: items.filter(it => this._teStatusKey(it.status) === 'pendente'),
+      andamento: items.filter(it => this._teStatusKey(it.status) === 'andamento'),
+      concluida: items.filter(it => this._teStatusKey(it.status) === 'concluida'),
+    };
+    root.innerHTML = `
+      <div class="te-board">
+        ${['pendente','andamento','concluida'].map(k => `
+          ${(() => {
+            const collapseKey = `te|${k}`;
+            const collapsed = this._isKanbanCollapsedKey ? this._isKanbanCollapsedKey(collapseKey) : false;
+            const toggleTitle = collapsed ? 'Expandir' : 'Recolher';
+            const toggleAria = collapsed ? 'false' : 'true';
+            return `
+          <div class="te-col te-col-${k}" data-te-col="${k}">
+            <div class="te-col-head">
+              <button type="button" class="kanban-col-toggle te-col-toggle" data-te-collapse="${this._teEscape(collapseKey)}" aria-expanded="${toggleAria}" title="${toggleTitle}">
+                <span class="kanban-col-toggle-chevron" aria-hidden="true">
+                  <svg class="kanban-col-toggle-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                </span>
+              </button>
+              <div class="te-col-title">${this._teEscape(this._teStatusLabel(k))}</div>
+              <div class="te-col-count">${cols[k].length}</div>
+            </div>
+            <div class="te-col-body${collapsed ? ' te-col-body--collapsed' : ''}">
+              ${cols[k].map(it => this._teCtoCardHTML(it)).join('') || `<div class="te-empty">Sem ordens</div>`}
+            </div>
+          </div>
+            `;
+          })()}
+        `).join('')}
+      </div>
+    `;
+  },
+  _teRenderTopbar(root) {
+    const st = this._teState;
+    root.innerHTML = `
+      <div class="te-topbar">
+        <div class="te-topbar-left">
+          <div class="te-topbar-title">Troca de etiqueta</div>
+          <div class="te-topbar-sub">Ordens e status no kanban</div>
+        </div>
+        <div class="te-topbar-actions">
+          <div class="te-filter">
+            <button class="te-filter-btn${st.filterPriority==='todas'?' active':''}" data-te-pr="todas">Todas</button>
+            <button class="te-filter-btn${st.filterPriority==='urgente'?' active':''}" data-te-pr="urgente">Urgente</button>
+            <button class="te-filter-btn${st.filterPriority==='alto'?' active':''}" data-te-pr="alto">Alto</button>
+            <button class="te-filter-btn${st.filterPriority==='medio'?' active':''}" data-te-pr="medio">Médio</button>
+            <button class="te-filter-btn${st.filterPriority==='estavel'?' active':''}" data-te-pr="estavel">Estável</button>
+          </div>
+          <div class="te-filter tech">
+            <button class="te-filter-btn${st.filterTech==='todos'?' active':''}" data-te-tech="todos">Todos técnicos</button>
+            <button class="te-filter-btn" data-te-tech="prompt">Filtrar técnico…</button>
+          </div>
+          <button class="te-primary" id="teNewBtn" type="button">+ Nova ordem</button>
+        </div>
+      </div>
+    `;
+  },
+  _teRenderModal(root) {
+    root.insertAdjacentHTML('beforeend', `
+      <div class="te-modal" id="teModal" aria-hidden="true">
+        <div class="te-modal-panel" role="dialog" aria-modal="true" aria-label="Nova ordem">
+          <div class="te-modal-head">
+            <div class="te-modal-title">Nova ordem</div>
+            <button class="te-btn" id="teCloseModalBtn" type="button">Fechar</button>
+          </div>
+          <div class="te-modal-body">
+            <div class="form-group">
+              <label for="teCtoId">ID da CTO</label>
+              <input class="te-input" id="teCtoId" type="text" placeholder="CTO-07" />
+            </div>
+            <div class="form-group">
+              <label for="teEndereco">Endereço completo</label>
+              <input class="te-input" id="teEndereco" type="text" placeholder="Rua …, nº …, bairro …" />
+            </div>
+            <div class="te-row2">
+              <div class="form-group">
+                <label for="teMotivo">Motivo</label>
+                <select class="te-select" id="teMotivo">
+                  <option value="Danificada">Danificada</option>
+                  <option value="Desbotada">Desbotada</option>
+                  <option value="Padrão novo" selected>Padrão novo</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="teTecnico">Técnico</label>
+                <input class="te-input" id="teTecnico" type="text" placeholder="Nome do técnico" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="tePrioridade">Prioridade</label>
+              <select class="te-select" id="tePrioridade">
+                <option value="urgente">Urgente</option>
+                <option value="alto" selected>Alto</option>
+                <option value="medio">Médio</option>
+                <option value="estavel">Estável</option>
+              </select>
+            </div>
+          </div>
+          <div class="te-modal-foot">
+            <button class="te-btn" id="teCancelBtn" type="button">Cancelar</button>
+            <button class="te-primary" id="teConfirmBtn" type="button">Adicionar</button>
+          </div>
+        </div>
+      </div>
+    `);
+  },
+  async _teResolveCoordsToAddress(lat, lng) {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}&zoom=18&addressdetails=1`;
+    const response = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!response.ok) throw new Error('Falha na consulta');
+    const payload = await response.json();
+    const addr = payload?.address || {};
+    const rua = addr.road || addr.pedestrian || addr.residential || addr.path || '';
+    const bairro = addr.suburb || addr.neighbourhood || addr.city_district || addr.quarter || '';
+    return [rua, bairro].filter(Boolean).join(' - ');
+  },
+  _teApplyCtoLookupToEndereco() {
+    const ctoEl = document.getElementById('teCtoId');
+    const endEl = document.getElementById('teEndereco');
+    if (!ctoEl || !endEl) return;
+    const raw = String(ctoEl.value || '').trim();
+    if (!raw) return;
+    // não sobrescreve se o usuário já editou manualmente (exceto se foi auto preenchido)
+    const manualLock = endEl.dataset.teManual === '1';
+    if (manualLock) return;
+
+    const q = raw;
+    CtoLocationRegistry.load().then(async () => {
+      const hit = CtoLocationRegistry.findByQuery(q);
+      if (!hit) return;
+      try {
+        const txt = await this._teResolveCoordsToAddress(hit.lat, hit.lng);
+        if (txt) {
+          endEl.value = txt;
+          endEl.dataset.teAutofill = '1';
+          endEl.dataset.teManual = '0';
+        }
+      } catch {
+        /* ignore */
+      }
+    }).catch(() => {});
+  },
+  _teOpenModal() {
+    const m = document.getElementById('teModal');
+    if (!m) return;
+    m.classList.add('open');
+    m.setAttribute('aria-hidden', 'false');
+    document.getElementById('teCtoId')?.focus?.();
+  },
+  _teCloseModal() {
+    const m = document.getElementById('teModal');
+    if (!m) return;
+    m.classList.remove('open');
+    m.setAttribute('aria-hidden', 'true');
+  },
+  _teSetStatus(id, colKey) {
+    const status = colKey === 'andamento' ? 'Em andamento' : colKey === 'concluida' ? 'Concluída' : 'Pendente';
+    Store.updateOpTask(id, { status });
+  },
+  _bindTrocaEtiquetaEventsOnce(root) {
+    if (!root || root.dataset.boundTe) return;
+    root.dataset.boundTe = '1';
+
+    const rerender = () => this.renderTrocaEtiquetaPage();
+
+    root.addEventListener('click', (e) => {
+      const t = e.target;
+      const colToggle = t?.closest?.('[data-te-collapse]');
+      if (colToggle) {
+        e.preventDefault();
+        const key = String(colToggle.getAttribute('data-te-collapse') || '').trim();
+        if (key && this._toggleKanbanCollapsedKey) this._toggleKanbanCollapsedKey(key);
+        this.renderTrocaEtiquetaPage();
+        return;
+      }
+      if (t?.closest?.('#teNewBtn')) {
+        e.preventDefault();
+        this._teOpenModal();
+        return;
+      }
+      if (t?.closest?.('#teCloseModalBtn') || t?.closest?.('#teCancelBtn')) {
+        e.preventDefault();
+        this._teCloseModal();
+        return;
+      }
+      if (t?.closest?.('#teConfirmBtn')) {
+        e.preventDefault();
+        const ctoId = String(document.getElementById('teCtoId')?.value || '').trim() || 'CTO-00';
+        const endereco = String(document.getElementById('teEndereco')?.value || '').trim() || '—';
+        const motivo = String(document.getElementById('teMotivo')?.value || 'Padrão novo');
+        const tecnico = String(document.getElementById('teTecnico')?.value || '').trim() || '—';
+        const prioridade = String(document.getElementById('tePrioridade')?.value || 'alto').trim().toLowerCase();
+        Store.addOpTask({
+          categoria: 'troca-etiqueta',
+          ctoId,
+          titulo: ctoId,
+          endereco,
+          motivo,
+          responsavel: tecnico,
+          prioridade,
+          status: 'Pendente',
+        });
+        this._teCloseModal();
+        rerender();
+        ToastService.show('Ordem criada.', 'success');
+        return;
+      }
+
+      const prBtn = t?.closest?.('[data-te-pr]');
+      if (prBtn) {
+        e.preventDefault();
+        this._teState.filterPriority = String(prBtn.dataset.tePr || 'todas');
+        rerender();
+        return;
+      }
+      const techBtn = t?.closest?.('[data-te-tech]');
+      if (techBtn) {
+        e.preventDefault();
+        const k = String(techBtn.dataset.teTech || 'todos');
+        if (k === 'prompt') {
+          const v = window.prompt('Filtrar por técnico (deixe vazio para todos):') ?? '';
+          this._teState.filterTech = String(v).trim() ? String(v).trim() : 'todos';
+        } else {
+          this._teState.filterTech = k;
+        }
+        rerender();
+      }
+    });
+
+    // Autofill endereço pela CTO (igual Rompimento): debounce leve
+    let teCtoDebounce = null;
+    root.addEventListener('input', (e) => {
+      const el = e.target;
+      if (el?.id === 'teEndereco') {
+        // qualquer edição manual trava o autofill
+        el.dataset.teManual = '1';
+      }
+      if (el?.id !== 'teCtoId') return;
+      const endEl = document.getElementById('teEndereco');
+      if (endEl && endEl.dataset.teAutofill === '1') {
+        // se estava auto preenchido, permitir novo autofill ao trocar CTO
+        endEl.dataset.teManual = '0';
+      }
+      if (teCtoDebounce) clearTimeout(teCtoDebounce);
+      teCtoDebounce = setTimeout(() => {
+        this._teApplyCtoLookupToEndereco();
+      }, 350);
+    });
+
+    // Drag & drop
+    let draggedId = 0;
+    root.addEventListener('dragstart', (e) => {
+      const card = e.target?.closest?.('[data-te-id]');
+      if (!card) return;
+      draggedId = Number(card.dataset.teId || 0);
+      try { e.dataTransfer.setData('text/plain', String(draggedId)); } catch {}
+      e.dataTransfer.effectAllowed = 'move';
+      card.classList.add('te-dragging');
+    });
+    root.addEventListener('dragend', (e) => {
+      const card = e.target?.closest?.('[data-te-id]');
+      card?.classList?.remove?.('te-dragging');
+      draggedId = 0;
+      root.querySelectorAll('.te-col').forEach(c => c.classList.remove('te-drag-over'));
+    });
+    root.addEventListener('dragover', (e) => {
+      const col = e.target?.closest?.('[data-te-col]');
+      if (!col) return;
+      e.preventDefault();
+      col.classList.add('te-drag-over');
+      e.dataTransfer.dropEffect = 'move';
+    });
+    root.addEventListener('dragleave', (e) => {
+      const col = e.target?.closest?.('[data-te-col]');
+      if (!col) return;
+      if (e.relatedTarget && col.contains(e.relatedTarget)) return;
+      col.classList.remove('te-drag-over');
+    });
+    root.addEventListener('drop', (e) => {
+      const col = e.target?.closest?.('[data-te-col]');
+      if (!col) return;
+      e.preventDefault();
+      col.classList.remove('te-drag-over');
+      const id = draggedId || Number(e.dataTransfer.getData('text/plain') || 0);
+      if (!id) return;
+      const colKey = String(col.dataset.teCol || 'pendente');
+      this._teSetStatus(id, colKey);
+      rerender();
+    });
+
+    // Fecha modal clicando fora
+    root.addEventListener('click', (e) => {
+      const modal = e.target?.closest?.('#teModal');
+      if (modal && e.target === modal) this._teCloseModal();
+    });
+  },
+  renderTrocaEtiquetaPage() {
+    const root = document.getElementById('teRoot');
+    if (!root) return;
+    this._bindTrocaEtiquetaEventsOnce(root);
+
+    const all = this._teAll();
+    const filtered = this._teFiltered(all);
+    const counts = this._teCounts(filtered);
+
+    root.innerHTML = `
+      <div class="te-layout">
+        <div id="teTopbar"></div>
+        <div id="teMetrics"></div>
+        <div id="teBoard"></div>
+      </div>
+    `;
+    this._teRenderTopbar(root.querySelector('#teTopbar'));
+    this._teRenderMetrics(root.querySelector('#teMetrics'), counts);
+    this._teRenderBoard(root.querySelector('#teBoard'), filtered);
+    this._teRenderModal(root);
+  },
+
   /* ── Correção de Atenuação (Dashboard flat) ───────────────── */
   _atn2State: {
     search: '',
     region: 'todas',
     tech: 'todos',
+    type: 'todas',
     modalOpen: false,
     spin: false,
     items: [],
@@ -3970,16 +4459,21 @@ const UI = {
   _atn2FilterItems(items, st) {
     const q = String(st.search || '').trim().toLowerCase();
     const regSel = String(st.region || 'todas').trim().toLowerCase();
-    const techSel = String(st.tech || 'todos').trim().toLowerCase();
+    const typeSel = String(st.type || 'todas').trim().toLowerCase();
     return items.filter(it => {
       const name = String(it.name || '').toLowerCase();
-      const tech = String(it.tech || '').toLowerCase();
       const idx = name.indexOf('·');
       const region = idx >= 0 ? name.slice(idx + 1).trim().toLowerCase() : 'não informado';
-      const matchQ = !q || name.includes(q) || tech.includes(q) || region.includes(q);
+      const prio = String(it.priority || '').trim().toLowerCase();
+      const matchQ = !q || name.includes(q) || region.includes(q);
       const matchReg = regSel === 'todas' || region === regSel;
-      const matchTech = techSel === 'todos' || tech === techSel;
-      return matchQ && matchReg && matchTech;
+      const matchType =
+        typeSel === 'todas' ||
+        (typeSel === 'critico' && prio === 'critica') ||
+        (typeSel === 'alto' && prio === 'alta') ||
+        (typeSel === 'medio' && prio === 'media') ||
+        (typeSel === 'estavel' && prio === 'leve');
+      return matchQ && matchReg && matchType;
     });
   },
   _atn2Counts(filtered) {
@@ -4085,8 +4579,12 @@ const UI = {
               <select class="atn2-select" id="atn2Region">
                 ${regions.map(r => `<option value="${this._atn2Escape(r)}"${String(st.region) === String(r) ? ' selected' : ''}>${r === 'todas' ? 'Todas as regiões' : this._atn2Escape(r)}</option>`).join('')}
               </select>
-              <select class="atn2-select" id="atn2Tech">
-                ${techs.map(t => `<option value="${this._atn2Escape(t)}"${String(st.tech) === String(t) ? ' selected' : ''}>${t === 'todos' ? 'Todos os técnicos' : this._atn2Escape(t)}</option>`).join('')}
+              <select class="atn2-select" id="atn2Type" aria-label="Filtrar por tipo">
+                <option value="todas"${String(st.type) === 'todas' ? ' selected' : ''}>Todos os tipos</option>
+                <option value="critico"${String(st.type) === 'critico' ? ' selected' : ''}>Crítico</option>
+                <option value="alto"${String(st.type) === 'alto' ? ' selected' : ''}>Alto</option>
+                <option value="medio"${String(st.type) === 'medio' ? ' selected' : ''}>Médio</option>
+                <option value="estavel"${String(st.type) === 'estavel' ? ' selected' : ''}>Estável</option>
               </select>
             </div>
           </div>
@@ -4322,8 +4820,8 @@ const UI = {
         this._atn2State.region = String(el.value || 'todas');
         rerender();
       }
-      if (el?.id === 'atn2Tech') {
-        this._atn2State.tech = String(el.value || 'todos');
+      if (el?.id === 'atn2Type') {
+        this._atn2State.type = String(el.value || 'todas');
         rerender();
       }
     });
@@ -4422,7 +4920,7 @@ const UI = {
         if (modalOpen) return;
         const ae = document.activeElement;
         const aeId = ae && typeof ae.id === 'string' ? ae.id : '';
-        if (aeId && (aeId === 'atn2Search' || aeId === 'atn2Region' || aeId === 'atn2Tech' || aeId.startsWith('atn2Modal'))) return;
+        if (aeId && (aeId === 'atn2Search' || aeId === 'atn2Region' || aeId === 'atn2Type' || aeId.startsWith('atn2Modal'))) return;
         this.renderAtenuacaoDashboardPage();
       }, 1000);
     }
