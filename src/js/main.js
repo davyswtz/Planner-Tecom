@@ -230,6 +230,7 @@ const Store = (() => {
 
   const ApiService = {
     baseUrl: resolveApiBaseUrl(),
+    _disabledOnce: false,
     enabled() {
       return Boolean(this.baseUrl);
     },
@@ -269,6 +270,18 @@ const Store = (() => {
         if (!text) return { ok: false, error: 'empty_response', status: response.status };
         const head = text.slice(0, 24).toLowerCase();
         if (head.startsWith('<!') || head.startsWith('<?') || head.startsWith('<htm') || head.startsWith('<html')) {
+          // FIX: ambiente local via Live Server/estático (sem PHP) costuma devolver HTML + 404/405.
+          // Nesses casos, desativa a API automaticamente para evitar spam de erros e manter o app funcional (modo localStorage).
+          if (!this._disabledOnce && (response.status === 404 || response.status === 405 || response.status === 501)) {
+            this._disabledOnce = true;
+            this.baseUrl = '';
+            try {
+              ToastService.show('API PHP não está disponível nesse servidor (Live Server). Rodando em modo local (sem sincronizar).', 'warning');
+            } catch {
+              /* ignore */
+            }
+            return { ok: false, error: 'api_disabled', status: response.status };
+          }
           return { ok: false, error: 'html_response', status: response.status };
         }
         let parsed = null;
@@ -1507,6 +1520,62 @@ const WebhookService = {
     return { text: sections.join('\n\n') };
   },
 
+  /**
+   * Google Chat — Troca de etiqueta: mensagem ao entrar em andamento (pedido do time).
+   * Formato:
+   * 🏷️TROCA DE ETIQUETA
+   *
+   * 📍Localizações:
+   * (ELEMENTO 1)- (LOCALIZAÇÃO CLICÁVEL)
+   *
+   * 👨‍🔧 Técnico Responsável:
+   * 👤 Enviado por:
+   * 🆔 :
+   * @param {'andamento'|'concluida'|'finalizada'} event
+   */
+  _buildTrocaEtiquetaMessage(event, task) {
+    const tecnico = this._resolveTechnicianDisplay(task);
+    const enviadoPor = String(task?.assinadaPor || '').trim() || '—';
+    const code = String(task?.taskCode || '').trim();
+    const synthetic = (typeof Utils !== 'undefined' && typeof Utils.syntheticOpTaskCode === 'function')
+      ? String(Utils.syntheticOpTaskCode(task) || '').trim()
+      : '';
+    const taskId = String(code || synthetic || `ETQ-${String(task?.id || '').padStart(4, '0')}`).trim();
+
+    const ctoId = String(task?.ctoId || task?.titulo || '').trim() || `CTO-${String(Number(task?.id) || 0).padStart(2, '0')}`;
+    const coordsRaw = String(task?.coordenadas || '').trim();
+    const coordsClickable = (() => {
+      // Mantém apenas "lat,lon" (Google Chat costuma tornar clicável).
+      if (!coordsRaw) return '—';
+      const normalized = coordsRaw.replace(/\s+/g, '');
+      const parts = normalized.split(',');
+      if (parts.length !== 2) return coordsRaw;
+      const lat = Number(parts[0]);
+      const lon = Number(parts[1]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return coordsRaw;
+      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return coordsRaw;
+      return `${lat},${lon}`;
+    })();
+
+    const title =
+      event === 'concluida'
+        ? '*✅ TROCA DE ETIQUETA — CONCLUÍDA*'
+        : '*🏷️TROCA DE ETIQUETA*';
+
+    return {
+      text: [
+        title,
+        '',
+        '📍Localizações:',
+        `(${this._chatSafe(ctoId)}): ${this._chatSafe(coordsClickable)}`,
+        '',
+        `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
+        `👤 Enviado por: ${this._chatSafe(enviadoPor)}`,
+        `🆔 : ${this._chatSafe(taskId)}`,
+      ].join('\n'),
+    };
+  },
+
   _formatDurationFromStart(task) {
     const history = Array.isArray(task?.historico) ? task.historico : [];
     if (!history.length) return 'Não foi possível calcular';
@@ -1562,6 +1631,9 @@ const WebhookService = {
     const key = this._normalizeRegionKey(regionSource);
     const picked = key ? String(byRegion[key] || '').trim() : '';
     if (picked) return picked;
+    // FIX: se a região não estiver mapeada, usa BACKUP (quando configurado) antes do default.
+    const backup = String(byRegion.BACKUP || '').trim();
+    if (backup) return backup;
     return String(config?.url || '').trim();
   },
 
@@ -1574,8 +1646,18 @@ const WebhookService = {
   async send(event, task, category = null) {
     const config = Store.getWebhookConfig();
     const webhookUrl = this._resolveWebhookUrlForTask(task, config);
-    if (!webhookUrl) return;
-    if (config?.events && config.events[event] === false) return;
+    if (config?.events && config.events[event] === false) {
+      // FIX: feedback mínimo quando evento está desativado
+      if (event === 'andamento') ToastService.show('Webhook de "Em andamento" está desativado nas integrações.', 'warning');
+      return;
+    }
+    if (!webhookUrl) {
+      // FIX: não falhar silenciosamente quando falta webhook da região
+      const reg = String(task?.regiao || '').trim();
+      const regLabel = reg || 'sem região';
+      if (event === 'andamento') ToastService.show(`Sem webhook configurado para ${regLabel}.`, 'warning');
+      return;
+    }
 
     const message = this._buildMessage(event, task, category);
 
@@ -1668,6 +1750,10 @@ const WebhookService = {
 
     if (opCat === 'troca-poste') {
       return this._buildTrocaPosteMessage(event, task);
+    }
+
+    if (opCat === 'troca-etiqueta') {
+      return this._buildTrocaEtiquetaMessage(event, task);
     }
 
     // Template específico: Atendimento ao Cliente (Tarefa Pai) entrando em andamento.
@@ -2079,30 +2165,24 @@ const OpTaskService = {
 
   /** Kanban Certificação Cemig — ordem do fluxo */
   _cemigColumns: [
-    { status: 'Backlog', key: 'col-cemig-backlog', label: 'Backlog' },
+    { status: 'Pendente', key: 'col-cemig-pendente', label: 'Pendentes' },
     { status: 'Agendado', key: 'col-cemig-agendado', label: 'Agendado' },
-    { status: 'Em andamento', key: 'col-cemig-andamento', label: 'Em andamento' },
     { status: 'Validação', key: 'col-cemig-validacao', label: 'Validação' },
-    { status: 'Envio pendente', key: 'col-cemig-envio', label: 'Envio pendente' },
-    { status: 'Necessário adequação', key: 'col-cemig-adequacao', label: 'Necessário adequação' },
-    { status: 'Finalizado', key: 'col-cemig-final', label: 'Finalizado' },
+    { status: 'Necessário adequação', key: 'col-cemig-adequacao', label: 'Precisa de adequação' },
+    { status: 'Concluída', key: 'col-cemig-concluida', label: 'Concluído' },
   ],
   _cemigNext: {
-    'Backlog': ['Agendado'],
-    'Agendado': ['Em andamento'],
-    'Em andamento': ['Validação'],
-    'Validação': ['Envio pendente'],
-    'Envio pendente': ['Necessário adequação'],
-    'Necessário adequação': ['Finalizado'],
-    'Finalizado': [],
+    'Pendente': ['Agendado'],
+    'Agendado': ['Validação'],
+    'Validação': ['Necessário adequação', 'Concluída'],
+    'Necessário adequação': ['Validação', 'Concluída'],
+    'Concluída': [],
   },
   _cemigActionLabels: {
     'Agendado': 'Agendar',
-    'Em andamento': 'Iniciar',
     'Validação': 'Em validação',
-    'Envio pendente': 'Envio pendente',
     'Necessário adequação': 'Adequação',
-    'Finalizado': 'Finalizar',
+    'Concluída': 'Concluir',
   },
 
   /**
@@ -2114,7 +2194,9 @@ const OpTaskService = {
     const task = Store.updateOpTaskStatus(id, newStatus);
     if (!task) return;
 
-    const event = this._statusToEvent[newStatus];
+    // FIX: normalizar status (evita falhar por espaços/variações)
+    const statusKey = String(newStatus || '').trim();
+    const event = this._statusToEvent[statusKey];
     if (event) {
       const categoryLabel = this._categoryLabels[task.categoria] || task.categoria;
       WebhookService.send(event, task, categoryLabel);
@@ -2811,225 +2893,6 @@ const CalendarV2 = (() => {
   };
 })();
 
-/* ─────────────────────────────────────────────────────────────
-   REPORTS SERVICE — Consolidação e exportação
-───────────────────────────────────────────────────────────── */
-const ReportsService = {
-  _sourceLabel(task) {
-    if (task.source === 'dashboard') return 'Dashboard';
-    return task.sourceLabel || 'Operacional';
-  },
-
-  _normalize(task) {
-    const status = task.effectiveStatus || task.status;
-    const isDone = ['Concluída', 'Finalizada', 'Finalizado'].includes(status);
-    const isLate = status === 'Atrasada' || (!!task.prazo && task.prazo < Utils.todayIso() && !isDone && status !== 'Cancelada');
-    return {
-      ...task,
-      status,
-      sourceTag: task.source === 'dashboard' ? 'dashboard' : (task.categoria || 'operacional'),
-      sourceText: this._sourceLabel(task),
-      isLate,
-      isDone,
-    };
-  },
-
-  _periodStart(period) {
-    if (period === 'all') return null;
-    if (period === 'today') return Utils.todayIso();
-    if (period === 'week') return Utils.addDaysIso(-7);
-    if (period === 'month') return Utils.addDaysIso(-30);
-    return null;
-  },
-
-  getFilteredTasks(period = 'week', category = 'all', filters = {}) {
-    const regionFilter = String(filters.region || 'all').trim().toLowerCase();
-    const techFilter = String(filters.tech || 'all').trim().toLowerCase();
-    const start = this._periodStart(period);
-    return TaskService.getAllDashboardTasks()
-      .map(t => this._normalize(t))
-      .filter(t => {
-        const matchPeriod = !start || (t.prazo && t.prazo >= start && t.prazo <= Utils.todayIso());
-        const matchCategory =
-          category === 'all' ||
-          (category === 'dashboard' && t.source === 'dashboard') ||
-          (category === 'rompimentos' && t.categoria === 'rompimentos') ||
-          (category === 'troca-poste' && t.categoria === 'troca-poste') ||
-          (category === 'atendimento-cliente' && t.categoria === 'atendimento-cliente') ||
-          (category === 'otimizacao-rede' && t.categoria === 'otimizacao-rede') ||
-          (category === 'certificacao-cemig' && t.categoria === 'certificacao-cemig') ||
-          (category === 'manutencao-corretiva' && t.categoria === 'manutencao-corretiva');
-        const matchRegion = regionFilter === 'all' || String(t.regiao || '').trim().toLowerCase() === regionFilter;
-        const matchTech = techFilter === 'all' || String(t.responsavel || '').trim().toLowerCase().includes(techFilter);
-        return matchPeriod && matchCategory && matchRegion && matchTech;
-      });
-  },
-
-  getMetrics(tasks) {
-    const total = tasks.length;
-    const done = tasks.filter(t => t.isDone).length;
-    const progress = tasks.filter(t =>
-      t.status === 'Em andamento' ||
-      t.status === 'Validação' ||
-      t.status === 'Envio pendente' ||
-      t.status === 'Necessário adequação'
-    ).length;
-    const late = tasks.filter(t => t.isLate).length;
-    const doneRate = total ? Math.round((done / total) * 100) : 0;
-    return { total, done, progress, late, doneRate };
-  },
-
-  getStatusDistribution(tasks) {
-    const statuses = ['Pendente', 'Criada', 'Backlog', 'A iniciar', 'Em andamento', 'Concluída', 'Finalizada', 'Atrasada', 'Cancelada'];
-    const counts = statuses.map(status => ({
-      status,
-      count: tasks.filter(t => t.status === status).length,
-    })).filter(s => s.count > 0);
-    const max = Math.max(...counts.map(c => c.count), 1);
-    return counts.map(c => ({ ...c, pct: Math.round((c.count / max) * 100) }));
-  },
-
-  getLateRows(tasks) {
-    return tasks
-      .filter(t => t.isLate)
-      .sort((a, b) => (a.prazo || '').localeCompare(b.prazo || ''))
-      .map(t => {
-        const diffDays = t.prazo
-          ? Math.max(1, Math.floor((new Date(Utils.todayIso()) - new Date(t.prazo)) / 86400000))
-          : 0;
-        return { ...t, diffDays };
-      });
-  },
-
-  getRompimentosByRegion(tasks) {
-    const rows = tasks.filter(t => t.categoria === 'rompimentos');
-    const map = new Map();
-    rows.forEach(t => {
-      const region = String(t.regiao || 'Não informada').trim() || 'Não informada';
-      map.set(region, (map.get(region) || 0) + 1);
-    });
-    const list = [...map.entries()].map(([label, count]) => ({ label, count }));
-    const max = Math.max(...list.map(i => i.count), 1);
-    return list.sort((a, b) => b.count - a.count).map(i => ({ ...i, pct: Math.round((i.count / max) * 100) }));
-  },
-
-  getRompimentosByTecnicoDone(tasks) {
-    const rows = tasks.filter(t => t.categoria === 'rompimentos');
-    const map = new Map();
-    rows.forEach(t => {
-      const tec = String(t.responsavel || 'Não informado').trim() || 'Não informado';
-      if (!map.has(tec)) map.set(tec, { label: tec, concluida: 0, finalizada: 0, total: 0 });
-      const item = map.get(tec);
-      if (t.status === 'Concluída') item.concluida += 1;
-      if (t.status === 'Finalizada') item.finalizada += 1;
-      item.total = item.concluida + item.finalizada;
-    });
-    const list = [...map.values()]
-      .filter(i => i.total > 0)
-      .sort((a, b) => b.total - a.total || b.finalizada - a.finalizada);
-    const max = Math.max(...list.map(i => i.total), 1);
-    return list.map(i => ({ ...i, pct: Math.round((i.total / max) * 100) }));
-  },
-
-  /**
-   * Normaliza rótulo de região para Goval / Vale do Aço / Caratinga / Outras.
-   * @param {string} regiao
-   */
-  _normalizeRompRegionBucket(regiao) {
-    const r = String(regiao || '')
-      .trim()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase();
-    if (r === 'goval') return 'Goval';
-    if (r === 'vale do aco' || r === 'vale do aço') return 'Vale do Aço';
-    if (r === 'caratinga') return 'Caratinga';
-    return 'Outras';
-  },
-
-  /**
-   * Contagem de rompimentos nas três regiões principais (+ Outras se houver).
-   * @param {OpTask[]} opTasks — preferir lista completa de opTasks (Store)
-   */
-  _rompimentoEmAndamentoStatuses: new Set(['Em andamento', 'Validação', 'Envio pendente', 'Necessário adequação']),
-
-  getRompimentosRegionMainBuckets(opTasks) {
-    const rows = (Array.isArray(opTasks) ? opTasks : []).filter(t => t && t.categoria === 'rompimentos');
-    const counts = { Goval: 0, 'Vale do Aço': 0, Caratinga: 0, Outras: 0 };
-    const emAnd = { Goval: 0, 'Vale do Aço': 0, Caratinga: 0, Outras: 0 };
-    rows.forEach((t) => {
-      const b = this._normalizeRompRegionBucket(t.regiao);
-      counts[b] += 1;
-      if (this._rompimentoEmAndamentoStatuses.has(String(t.status || '').trim())) emAnd[b] += 1;
-    });
-    const main = [
-      { label: 'Goval', count: counts.Goval, emAndamento: emAnd.Goval },
-      { label: 'Vale do Aço', count: counts['Vale do Aço'], emAndamento: emAnd['Vale do Aço'] },
-      { label: 'Caratinga', count: counts.Caratinga, emAndamento: emAnd.Caratinga },
-    ];
-    if (counts.Outras > 0) main.push({ label: 'Outras', count: counts.Outras, emAndamento: emAnd.Outras });
-    const max = Math.max(...main.map(i => i.count), 1);
-    return main.map(i => ({ ...i, pct: Math.round((i.count / max) * 100) }));
-  },
-
-  /**
-   * Por técnico: total de rompimentos e quantos já resolvidos (concluída/finalizada/finalizado).
-   * @param {OpTask[]} opTasks
-   */
-  getRompimentosByTecnicoResolvedAndTotal(opTasks) {
-    const rows = (Array.isArray(opTasks) ? opTasks : []).filter(t => t && t.categoria === 'rompimentos');
-    const doneStatuses = new Set(['Concluída', 'Finalizada', 'Finalizado']);
-    const map = new Map();
-    rows.forEach((t) => {
-      const tec = String(t.responsavel || 'Não informado').trim() || 'Não informado';
-      if (!map.has(tec)) map.set(tec, { label: tec, total: 0, resolvidos: 0 });
-      const item = map.get(tec);
-      item.total += 1;
-      const st = String(t.status || '').trim();
-      if (doneStatuses.has(st)) item.resolvidos += 1;
-    });
-    const list = [...map.values()].sort((a, b) =>
-      b.resolvidos - a.resolvidos || b.total - a.total || a.label.localeCompare(b.label, 'pt-BR'),
-    );
-    const max = Math.max(...list.map(i => i.resolvidos), 1);
-    return list.map(i => ({ ...i, pct: Math.round((i.resolvidos / max) * 100) }));
-  },
-
-  /**
-   * Até 3 técnicos com maior número de rompimentos resolvidos (para relatório resumido).
-   * @param {OpTask[]} opTasks
-   * @returns {{ label: string, resolvidos: number, pct: number, rank: number }[]}
-   */
-  getRompimentosTop3TecnicosResolvidos(opTasks) {
-    const all = this.getRompimentosByTecnicoResolvedAndTotal(opTasks).filter((i) => i.resolvidos > 0);
-    const top = all.slice(0, 3);
-    const max = Math.max(...top.map((i) => i.resolvidos), 1);
-    return top.map((i, idx) => ({
-      label: i.label,
-      resolvidos: i.resolvidos,
-      pct: Math.round((i.resolvidos / max) * 100),
-      rank: idx + 1,
-    }));
-  },
-
-  toCsv(tasks) {
-    const header = ['ID', 'Tarefa', 'Origem', 'Responsável', 'Prazo', 'Status', 'Prioridade', 'Atrasada'];
-    const rows = tasks.map(t => [
-      t.id,
-      t.titulo,
-      t.sourceText,
-      t.responsavel,
-      t.prazo || '',
-      t.status,
-      t.prioridade || '',
-      t.isLate ? 'Sim' : 'Não',
-    ]);
-    return [header, ...rows]
-      .map(cols => cols.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))
-      .join('\n');
-  },
-};
-
 /** Ordem dos itens do menu lateral (persistência local). */
 const SIDEBAR_NAV_ORDER_KEY = 'planner.sidebar.navOrder.v1';
 
@@ -3432,12 +3295,11 @@ const UI = {
 
     const statusActionClass = isCemig
       ? {
+        'Pendente': 'cemig-advance',
         'Agendado': 'cemig-advance',
-        'Em andamento': 'cemig-advance',
         'Validação': 'cemig-advance',
-        'Envio pendente': 'cemig-advance',
         'Necessário adequação': 'cemig-advance',
-        'Finalizado': 'cemig-advance',
+        'Concluída': 'cemig-advance',
       }
       : {
         'Em andamento': 'to-andamento',
@@ -3445,10 +3307,19 @@ const UI = {
         'Finalizada':   'to-finalizada',
       };
 
-    const doneForLate = isCemig ? ['Finalizado'] : ['Concluída', 'Finalizada'];
+    const doneForLate = isCemig ? ['Concluída'] : ['Concluída', 'Finalizada'];
 
     const kanbanColKey = (t) => {
       if (category === 'otimizacao-rede' && ['Backlog', 'A iniciar'].includes(t.status)) return 'Criada';
+      if (isCemig) {
+        const st = String(t.status || '').trim();
+        // Compatibilidade com tarefas antigas: mapeia status descontinuados para as colunas novas.
+        if (st === 'Backlog') return 'Pendente';
+        if (st === 'Em andamento') return 'Validação';
+        if (st === 'Envio pendente') return 'Validação';
+        if (st === 'Finalizado') return 'Concluída';
+        return st;
+      }
       return t.status;
     };
 
@@ -3556,7 +3427,6 @@ const UI = {
         this.renderOpPage();
         setTimeout(() => { this._lastMovedOpTask = null; }, 520);
         UI.renderCalendarPage();
-        UI.renderReportsPage();
         ToastService.show(`Tarefa movida para "${toStatus}"`, 'success');
         return;
       }
@@ -3617,7 +3487,6 @@ const UI = {
         this.renderOpPage();
         setTimeout(() => { this._lastMovedOpTask = null; }, 520);
         UI.renderCalendarPage();
-        UI.renderReportsPage();
         ToastService.show(`Tarefa movida para "${targetStatus}"`, 'success');
       });
     });
@@ -3809,118 +3678,6 @@ const UI = {
     }).join('');
   },
 
-  /* ── Reports ────────────────────────────────────────────── */
-  renderReportsPage() {
-    const periodEl = document.getElementById('reportPeriodFilter');
-    const categoryEl = document.getElementById('reportCategoryFilter');
-    const regionEl = document.getElementById('reportRegionFilter');
-    const techEl = document.getElementById('reportTechFilter');
-    if (!periodEl || !categoryEl || !regionEl || !techEl) return;
-
-    // Popula o filtro de técnicos com base no período/categoria/região atuais.
-    const techBase = ReportsService.getFilteredTasks(periodEl.value, categoryEl.value, { region: regionEl.value, tech: 'all' });
-    const techNames = [...new Set(techBase.map(t => String(t.responsavel || '').trim()).filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b, 'pt-BR'));
-    const currentTech = techEl.value || 'all';
-    techEl.innerHTML = `<option value="all">Todos os técnicos</option>${techNames.map(name => `<option value="${name}">${name}</option>`).join('')}`;
-    techEl.value = techNames.includes(currentTech) ? currentTech : 'all';
-
-    const tasks = ReportsService.getFilteredTasks(periodEl.value, categoryEl.value, { region: regionEl.value, tech: techEl.value });
-    const metrics = ReportsService.getMetrics(tasks);
-    const statusDist = ReportsService.getStatusDistribution(tasks);
-    const lateRows = ReportsService.getLateRows(tasks);
-    const rompByRegion = ReportsService.getRompimentosByRegion(tasks);
-    const rompByTec = ReportsService.getRompimentosByTecnicoDone(tasks);
-    const statusClassMap = {
-      'Pendente': 's-pendente',
-      'Criada': 's-criada',
-      'Backlog': 's-backlog',
-      'A iniciar': 's-pendente',
-      'Em andamento': 's-andamento',
-      'Concluída': 's-concluida',
-      'Finalizada': 's-finalizada',
-      'Atrasada': 's-atrasada',
-      'Cancelada': 's-cancelada',
-    };
-
-    document.getElementById('r-total').textContent = metrics.total;
-    document.getElementById('r-done').textContent = metrics.done;
-    document.getElementById('r-progress').textContent = metrics.progress;
-    document.getElementById('r-late').textContent = metrics.late;
-    document.getElementById('r-done-rate').textContent = `${metrics.doneRate}% de conclusão`;
-
-    const reportBars = document.getElementById('reportBars');
-    reportBars.innerHTML = statusDist.length
-      ? statusDist.map(item => {
-          const safeCls = statusClassMap[item.status] || 's-info';
-          return `
-            <div class="report-bar-row">
-              <div class="report-bar-head"><span>${item.status}</span><span>${item.count}</span></div>
-              <div class="report-bar-track">
-                <div class="report-bar-fill ${safeCls}" style="width:${item.pct}%"></div>
-              </div>
-            </div>
-          `;
-        }).join('')
-      : '<div class="calendar-empty">Sem dados para o filtro selecionado.</div>';
-
-    const regionBars = document.getElementById('reportRompimentoRegionBars');
-    if (regionBars) {
-      regionBars.innerHTML = rompByRegion.length
-        ? rompByRegion.map(item => `
-            <div class="report-bar-row">
-              <div class="report-bar-head"><span>${item.label}</span><span>${item.count}</span></div>
-              <div class="report-bar-track">
-                <div class="report-bar-fill ${this._regionReportBarClass(item.label)}" style="width:${item.pct}%"></div>
-              </div>
-            </div>
-          `).join('')
-        : '<div class="calendar-empty">Sem rompimentos no filtro selecionado.</div>';
-    }
-
-    const tecBars = document.getElementById('reportRompimentoTecBars');
-    if (tecBars) {
-      tecBars.innerHTML = rompByTec.length
-        ? rompByTec.map(item => `
-            <div class="report-bar-row">
-              <div class="report-bar-head"><span>${item.label}</span><span>${item.total}</span></div>
-              <div class="report-bar-track">
-                <div class="report-bar-fill s-concluida" style="width:${item.pct}%"></div>
-              </div>
-              <div class="report-bar-head"><span style="font-size:10px;color:var(--white4)">Concluídas: ${item.concluida}</span><span style="font-size:10px;color:var(--white4)">Finalizadas: ${item.finalizada}</span></div>
-            </div>
-          `).join('')
-        : '<div class="calendar-empty">Nenhum técnico com rompimento resolvido no filtro.</div>';
-    }
-
-    const lateTbody = document.getElementById('reportLateTableBody');
-    lateTbody.innerHTML = lateRows.length
-      ? lateRows.map(row => `
-          <tr>
-            <td><span class="report-late-title-cell">${Utils.taskCopyProtocolButtonHtml(Utils.unifiedTaskDisplayRef(row), 'task-copy-id-btn--sm')}${row.source === 'operacional' ? Utils.opTaskStatusPickerButtonHtml(row.id, 'op-status-picker-btn--sm') : ''}<span>${row.titulo}</span></span></td>
-            <td>${row.sourceText}</td>
-            <td>${row.responsavel}</td>
-            <td class="date-cell date-late">${Utils.formatDate(row.prazo)}</td>
-            <td class="date-cell date-late">${row.diffDays}</td>
-          </tr>
-        `).join('')
-      : '<tr class="empty-row"><td colspan="5">Nenhuma tarefa atrasada no período.</td></tr>';
-
-    const rompTecTbody = document.getElementById('reportRompimentoTecTableBody');
-    if (rompTecTbody) {
-      rompTecTbody.innerHTML = rompByTec.length
-        ? rompByTec.map(row => `
-            <tr>
-              <td>${row.label}</td>
-              <td>${row.concluida}</td>
-              <td>${row.finalizada}</td>
-              <td><strong>${row.total}</strong></td>
-            </tr>
-          `).join('')
-        : '<tr class="empty-row"><td colspan="4">Nenhum rompimento resolvido para os filtros selecionados.</td></tr>';
-    }
-  },
-
   /* ── Clock ──────────────────────────────────────────────── */
   updateClock() {
     const d    = new Date();
@@ -3989,7 +3746,6 @@ const UI = {
       'qualidade-potencia': { title: 'Qualidade de potência', crumb: 'Atividade de manutenção' },
       'manutencao-corretiva': { title: 'Manutenção corretiva', crumb: 'Atividade de manutenção' },
       calendario: { title: 'Calendário', crumb: 'Agenda' },
-      relatorio: { title: 'Relatório', crumb: 'Rompimentos' },
       config: { title: 'Configurações', crumb: 'Sistema' },
     };
     const meta = titles[page] || { title: page, crumb: '' };
@@ -4028,7 +3784,6 @@ const UI = {
     if (page === 'troca-etiqueta') this.renderTrocaEtiquetaPage();
     if (page === 'atendimento') this.renderAtendimentoPage();
     if (page === 'calendario') this.renderCalendarPage();
-    if (page === 'relatorio') this.renderRelatorioPage();
   },
 
   /**
@@ -4055,7 +3810,6 @@ const UI = {
       'qualidade-potencia',
       'manutencao-corretiva',
       'calendario',
-      'relatorio',
       'config',
     ]);
     if (!saved || !allowed.has(saved)) return;
@@ -4231,7 +3985,6 @@ const UI = {
         UI.refreshOperationalUi();
         setTimeout(() => { this._lastMovedOpTask = null; }, 520);
         UI.renderCalendarPage();
-        UI.renderReportsPage();
         ToastService.show(`Lista movida para "${toStatus}"`, 'success');
         return;
       }
@@ -4306,7 +4059,6 @@ const UI = {
         UI.refreshOperationalUi();
         setTimeout(() => { this._lastMovedOpTask = null; }, 520);
         UI.renderCalendarPage();
-        UI.renderReportsPage();
         ToastService.show(`Lista movida para "${targetStatus}"`, 'success');
       });
     });
@@ -4541,6 +4293,16 @@ const UI = {
               </div>
             </div>
             <div class="form-group">
+              <label for="teRegiao">Região</label>
+              <select class="te-select" id="teRegiao">
+                <option value="">Selecione a região</option>
+                <option value="Goval">Goval</option>
+                <option value="Vale do Aço">Vale do Aço</option>
+                <option value="Caratinga">Caratinga</option>
+                <option value="Backup">Backup</option>
+              </select>
+            </div>
+            <div class="form-group">
               <label for="tePrioridade">Prioridade</label>
               <select class="te-select" id="tePrioridade">
                 <option value="urgente">Urgente</option>
@@ -4609,7 +4371,56 @@ const UI = {
   },
   _teSetStatus(id, colKey) {
     const status = colKey === 'andamento' ? 'Em andamento' : colKey === 'concluida' ? 'Concluída' : 'Pendente';
+    const before = Store.findOpTask(id);
+    const beforeKey = before ? this._teStatusKey(before.status) : '';
+
     Store.updateOpTask(id, { status });
+
+    // Dispara webhook ao entrar em andamento ou ao concluir via drag.
+    try {
+      const after = Store.findOpTask(id);
+      const afterKey = after ? this._teStatusKey(after.status) : '';
+      const shouldSendAndamento = beforeKey === 'pendente' && afterKey === 'andamento';
+      const shouldSendConcluida = beforeKey !== 'concluida' && afterKey === 'concluida';
+
+      if (shouldSendAndamento || shouldSendConcluida) {
+        (async () => {
+          try {
+            const fresh0 = Store.findOpTask(id);
+            if (!fresh0) return;
+
+            // Garante CTO.
+            const ctoId = String(fresh0?.ctoId || fresh0?.titulo || '').trim();
+            if (ctoId && !fresh0?.ctoId) Store.updateOpTask(id, { ctoId });
+
+            // Puxa coordenadas da CTO e salva na tarefa antes do envio.
+            let coords = String(fresh0?.coordenadas || '').trim();
+            if (!coords && ctoId && typeof CtoLocationRegistry !== 'undefined' && CtoLocationRegistry) {
+              try { await CtoLocationRegistry.load(); } catch { /* ignore */ }
+              try {
+                const hit = (typeof CtoLocationRegistry.findByQuery === 'function')
+                  ? CtoLocationRegistry.findByQuery(ctoId)
+                  : null;
+                if (hit && Number.isFinite(Number(hit.lat)) && Number.isFinite(Number(hit.lng))) {
+                  coords = `${Number(hit.lat)},${Number(hit.lng)}`;
+                  Store.updateOpTask(id, { coordenadas: coords });
+                }
+              } catch {
+                /* ignore */
+              }
+            }
+
+            const fresh = Store.findOpTask(id);
+            const event = shouldSendConcluida ? 'concluida' : 'andamento';
+            WebhookService.send(event, fresh, null);
+          } catch {
+            /* ignore */
+          }
+        })();
+      }
+    } catch {
+      /* não quebra o drop */
+    }
   },
   _bindTrocaEtiquetaEventsOnce(root) {
     if (!root || root.dataset.boundTe) return;
@@ -4643,6 +4454,7 @@ const UI = {
         const endereco = String(document.getElementById('teEndereco')?.value || '').trim() || '—';
         const motivo = String(document.getElementById('teMotivo')?.value || 'Padrão novo');
         const tecnico = String(document.getElementById('teTecnico')?.value || '').trim() || '—';
+        const regiao = String(document.getElementById('teRegiao')?.value || '').trim();
         const prioridade = String(document.getElementById('tePrioridade')?.value || 'alto').trim().toLowerCase();
         Store.addOpTask({
           categoria: 'troca-etiqueta',
@@ -4651,6 +4463,7 @@ const UI = {
           endereco,
           motivo,
           responsavel: tecnico,
+          regiao,
           prioridade,
           status: 'Pendente',
         });
@@ -4658,6 +4471,21 @@ const UI = {
         rerender();
         ToastService.show('Ordem criada.', 'success');
         return;
+      }
+
+      // FIX: ao clicar em uma tarefa "Criada/Pendente" na Troca de etiqueta, permitir editar no modal padrão.
+      const card = t?.closest?.('[data-te-id]');
+      if (card && !t?.closest?.('#teModal')) {
+        const id = Number(card.dataset.teId || 0);
+        const task = id ? Store.findOpTask(id) : null;
+        if (task && String(task.categoria || '') === 'troca-etiqueta') {
+          const stKey = this._teStatusKey(task.status);
+          if (stKey === 'pendente') {
+            e.preventDefault();
+            Controllers.opTask.openEditModal(id);
+            return;
+          }
+        }
       }
 
       const prBtn = t?.closest?.('[data-te-pr]');
@@ -5802,49 +5630,7 @@ const UI = {
     });
   },
 
-  /** Página do menu lateral «Relatório»: rompimentos por região e por técnico. */
-  renderRelatorioPage() {
-    const regionEl = document.getElementById('rompReportRegionBars');
-    const top3El = document.getElementById('rompReportTop3TecBars');
-    if (!regionEl || !top3El) return;
-
-    const opTasks = Store.getOpTasks();
-    const byRegion = ReportsService.getRompimentosRegionMainBuckets(opTasks);
-    const top3 = ReportsService.getRompimentosTop3TecnicosResolvidos(opTasks);
-
-    regionEl.innerHTML = byRegion.length
-      ? byRegion.map((item) => {
-        const cls = this._regionReportBarClass(item.label);
-        const em = item.emAndamento ?? 0;
-        const right =
-          em > 0
-            ? `<span class="relatorio-region-counts">${item.count} total · <strong class="relatorio-em-and">${em}</strong> em and.</span>`
-            : `<span class="relatorio-region-counts">${item.count} total</span>`;
-        return `
-            <div class="report-bar-row relatorio-bar-row">
-              <div class="report-bar-head"><span>${Utils.escapeHtml(item.label)}</span>${right}</div>
-              <div class="report-bar-track">
-                <div class="report-bar-fill ${cls}" style="width:${item.pct}%"></div>
-              </div>
-            </div>
-          `;
-      }).join('')
-      : '<div class="calendar-empty">Sem rompimentos cadastrados.</div>';
-
-    top3El.innerHTML = top3.length
-      ? top3.map((item) => `
-            <div class="report-bar-row relatorio-bar-row">
-              <div class="report-bar-head relatorio-top3-head">
-                <span class="relatorio-top3-name"><span class="relatorio-top3-rank">${item.rank}º</span>${Utils.escapeHtml(item.label)}</span>
-                <span class="relatorio-top3-count"><strong>${item.resolvidos}</strong> resolv.</span>
-              </div>
-              <div class="report-bar-track">
-                <div class="report-bar-fill s-concluida" style="width:${item.pct}%"></div>
-              </div>
-            </div>
-          `).join('')
-      : '<div class="calendar-empty">Nenhum rompimento resolvido registrado por responsável.</div>';
-  },
+  // Tela de relatório removida.
 };
 
 /** Base local de CTO/setores: JSONs em `src/data/` (formato `{ nome, lat, lng, aliases? }`); inclui export de viabilidade Ipatinga (KML→pontos). */
@@ -6541,7 +6327,6 @@ const Controllers = {
       ModalService.close('taskModal');
       UI.renderDashboard();
       UI.renderCalendarPage();
-      UI.renderReportsPage();
     },
 
     toggleDone(id, source = 'dashboard') {
@@ -6560,7 +6345,6 @@ const Controllers = {
       }
       UI.renderDashboard();
       UI.renderCalendarPage();
-      UI.renderReportsPage();
     },
 
     init() {
@@ -6765,12 +6549,19 @@ const Controllers = {
     },
     /** Recoloca Região e Técnico após o modo Otimização de Rede. */
     _restoreOtimRedeLayout() {
+      const body = document.getElementById('opTaskModalBody');
+      const tituloGroup = document.getElementById('opTituloGroup');
+      const mainRow = document.getElementById('opMainRow');
       const priorityRow = document.getElementById('opPriorityRegionRow');
       const prioridade = document.getElementById('opPrioridadeGroup');
       const regiao = document.getElementById('opRegiaoGroup');
-      const mainRow = document.getElementById('opMainRow');
       const responsavel = document.getElementById('opResponsavelGroup');
       const prazo = document.getElementById('opPrazoGroup');
+      // Volta o "Nome" para o lugar padrão (acima da linha principal), caso tenha sido movido para o bloco do OTIM.
+      if (body && tituloGroup && tituloGroup.parentElement !== body) {
+        if (mainRow) body.insertBefore(tituloGroup, mainRow);
+        else body.insertBefore(tituloGroup, body.firstChild);
+      }
       if (priorityRow && prioridade && regiao && regiao.parentElement !== priorityRow) {
         priorityRow.appendChild(prioridade);
         priorityRow.appendChild(regiao);
@@ -6788,6 +6579,10 @@ const Controllers = {
       if (!regiao || !prioridade || !extraRow || !mainRow) return;
       if (isRompimento) {
         mainRow.before(regiao);
+        // FIX: prioridade deve ser o último campo no Rompimento (após "clientes afetados")
+        const clientesGroup = document.getElementById('op-clientes-afetados')?.closest('.form-group');
+        if (clientesGroup) clientesGroup.after(prioridade);
+        else extraRow.appendChild(prioridade);
       } else {
         prioridade.after(regiao);
       }
@@ -6848,6 +6643,21 @@ const Controllers = {
 
       this._syncCoordsBlockUi(isRompimento, isTrocaPoste);
 
+      // FIX: em Rompimentos/Troca de poste o título é automático; remover campo da experiência do usuário.
+      const tituloInput = document.getElementById('op-titulo');
+      if (tituloInput) {
+        if (isRompimento || isTrocaPoste) {
+          tituloInput.value = '';
+          tituloInput.disabled = true;
+          tituloInput.setAttribute('aria-hidden', 'true');
+          tituloInput.setAttribute('tabindex', '-1');
+        } else {
+          tituloInput.disabled = false;
+          tituloInput.removeAttribute('aria-hidden');
+          tituloInput.removeAttribute('tabindex');
+        }
+      }
+
       // Troca de poste: região + prioridade acima do técnico; região à esquerda (primeira).
       if (isTrocaPoste) {
         const priorityRow = document.getElementById('opPriorityRegionRow');
@@ -6876,6 +6686,24 @@ const Controllers = {
         const respG = document.getElementById('opResponsavelGroup');
         if (regSlot && regiao) regSlot.appendChild(regiao);
         if (tecSlot && respG) tecSlot.appendChild(respG);
+
+        // Organização do formulário OTIM: Nome + Região/Técnico no topo, depois Protocolo/OS, depois Descrição (com imagens).
+        const otimWrap = document.getElementById('opOtimRedeWrap');
+        const tituloGroup = document.getElementById('opTituloGroup');
+        const protoRow = otimWrap?.querySelector?.('.form-row');
+        const regTecRow = document.getElementById('opOtimRegiaoTecRow');
+        if (otimWrap && tituloGroup) {
+          // move "Nome" para dentro do bloco dedicado da Otimização de Rede
+          if (tituloGroup.parentElement !== otimWrap) {
+            otimWrap.insertBefore(tituloGroup, otimWrap.firstChild);
+          }
+        }
+        if (otimWrap && regTecRow && protoRow) {
+          // garante que Região/Técnico apareçam logo após o Nome
+          if (regTecRow.parentElement === otimWrap && regTecRow !== protoRow.nextSibling) {
+            otimWrap.insertBefore(regTecRow, protoRow);
+          }
+        }
       } else if (isCemig) {
         this._toggleGroup('opMainRow', false);
         this._toggleGroup('opOtimRedeWrap', false);
@@ -7486,7 +7314,7 @@ const Controllers = {
 
       const presetStatus = this._newTaskPreset?.status || null;
       const defaultStatus = category === 'certificacao-cemig'
-        ? (presetStatus || 'Backlog')
+        ? (presetStatus || 'Pendente')
         : this._isAtendimentoCategory(category)
           ? (isParentTask ? (presetStatus || 'Backlog') : 'A iniciar')
           : 'Criada';
@@ -7818,7 +7646,6 @@ const Controllers = {
       UI.refreshOperationalUi();
       UI.renderDashboard();
       UI.renderCalendarPage();
-      UI.renderReportsPage();
     },
 
     save() {
@@ -7861,7 +7688,6 @@ const Controllers = {
 
       UI.refreshOperationalUi();
       UI.renderCalendarPage();
-      UI.renderReportsPage();
     },
 
     init() {
@@ -7940,7 +7766,6 @@ const Controllers = {
           UI.refreshOperationalUi();
           UI.renderDashboard();
           UI.renderCalendarPage();
-          UI.renderReportsPage();
           setTimeout(() => { UI._lastMovedOpTask = null; }, 520);
           Controllers.opTask._refreshAtdChildrenList();
           Controllers.opTask._closeGlobalStatusPicker();
@@ -8157,134 +7982,6 @@ const Controllers = {
     },
   },
 
-  /* ── Reports ──────────────────────────────────────────── */
-  reports: {
-    _layoutKey: 'planner.reports.layout.v1',
-    _applyReportLayoutOrder() {
-      const grid = document.getElementById('reportLayoutGrid');
-      if (!grid) return;
-      let order = [];
-      try {
-        const raw = localStorage.getItem(this._layoutKey);
-        if (raw) order = JSON.parse(raw);
-      } catch {
-        order = [];
-      }
-      if (!Array.isArray(order) || !order.length) return;
-      const nodes = new Map();
-      grid.querySelectorAll('[data-report-widget]').forEach(el => {
-        nodes.set(el.getAttribute('data-report-widget'), el);
-      });
-      const frag = document.createDocumentFragment();
-      order.forEach(id => {
-        const el = nodes.get(id);
-        if (el) frag.appendChild(el);
-      });
-      // Mantém os que não estavam no saved order (novos widgets)
-      nodes.forEach((el, id) => {
-        if (!order.includes(id)) frag.appendChild(el);
-      });
-      grid.appendChild(frag);
-    },
-    _persistReportLayoutOrder() {
-      const grid = document.getElementById('reportLayoutGrid');
-      if (!grid) return;
-      const order = Array.from(grid.querySelectorAll('[data-report-widget]'))
-        .map(el => el.getAttribute('data-report-widget'))
-        .filter(Boolean);
-      try { localStorage.setItem(this._layoutKey, JSON.stringify(order)); } catch {}
-    },
-    _exportCsv() {
-      const period = document.getElementById('reportPeriodFilter').value;
-      const category = document.getElementById('reportCategoryFilter').value;
-      const region = document.getElementById('reportRegionFilter')?.value || 'all';
-      const tech = document.getElementById('reportTechFilter')?.value || 'all';
-      const tasks = ReportsService.getFilteredTasks(period, category, { region, tech });
-      const csv = ReportsService.toCsv(tasks);
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `relatorio-burrinho-projetos-${Utils.todayIso()}.csv`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      ToastService.show('Relatório exportado em CSV', 'success');
-    },
-
-    init() {
-      const periodEl = document.getElementById('reportPeriodFilter');
-      const categoryEl = document.getElementById('reportCategoryFilter');
-      const regionEl = document.getElementById('reportRegionFilter');
-      const techEl = document.getElementById('reportTechFilter');
-      const refreshEl = document.getElementById('reportRefreshBtn');
-      const exportEl = document.getElementById('reportExportBtn');
-      if (!periodEl || !categoryEl || !regionEl || !techEl || !refreshEl || !exportEl) return;
-
-      [periodEl, categoryEl, regionEl, techEl].forEach(el => {
-        el.addEventListener('change', () => UI.renderReportsPage());
-      });
-      refreshEl.addEventListener('click', () => UI.renderReportsPage());
-      exportEl.addEventListener('click', () => this._exportCsv());
-
-      // Drag & drop do layout
-      const grid = document.getElementById('reportLayoutGrid');
-      if (grid) {
-        this._applyReportLayoutOrder();
-        let draggingEl = null;
-
-        const setDropTarget = (target, on) => {
-          if (!target) return;
-          target.classList.toggle('drop-target', Boolean(on));
-        };
-
-        grid.addEventListener('dragstart', e => {
-          const el = e.target.closest('[data-report-widget]');
-          if (!el) return;
-          draggingEl = el;
-          el.classList.add('dragging');
-          e.dataTransfer.effectAllowed = 'move';
-          try { e.dataTransfer.setData('text/plain', el.getAttribute('data-report-widget') || ''); } catch {}
-        });
-
-        grid.addEventListener('dragend', () => {
-          if (draggingEl) draggingEl.classList.remove('dragging');
-          draggingEl = null;
-          grid.querySelectorAll('.drop-target').forEach(n => n.classList.remove('drop-target'));
-          this._persistReportLayoutOrder();
-        });
-
-        grid.addEventListener('dragover', e => {
-          if (!draggingEl) return;
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-          const over = e.target.closest('[data-report-widget]');
-          if (!over || over === draggingEl) return;
-          setDropTarget(over, true);
-        });
-
-        grid.addEventListener('dragleave', e => {
-          const over = e.target.closest('[data-report-widget]');
-          if (!over) return;
-          setDropTarget(over, false);
-        });
-
-        grid.addEventListener('drop', e => {
-          if (!draggingEl) return;
-          e.preventDefault();
-          const over = e.target.closest('[data-report-widget]');
-          if (!over || over === draggingEl) return;
-
-          const rect = over.getBoundingClientRect();
-          const before = (e.clientY - rect.top) < rect.height / 2;
-          if (before) grid.insertBefore(draggingEl, over);
-          else grid.insertBefore(draggingEl, over.nextSibling);
-        });
-      }
-    },
-  },
-
   /* ── Calendar ─────────────────────────────────────────── */
   calendar: {
     _openNoteModal(prefillDate) {
@@ -8419,13 +8116,21 @@ const Controllers = {
         const vale  = document.getElementById('f-webhookUrl-vale')?.value?.trim() || '';
         const cara  = document.getElementById('f-webhookUrl-caratinga')?.value?.trim() || '';
         const backup = document.getElementById('f-webhookUrl-backup')?.value?.trim() || '';
-        if (!goval || !vale || !cara || !backup) {
-          ToastService.show('Preencha as 4 URLs (Goval, Vale do Aço, Caratinga e Backup)', 'danger');
+        // FIX: não exigir todas as regiões — salvar com 1+ URLs preenchidas.
+        const urlsByRegion = {
+          ...(goval ? { GOVAL: goval } : {}),
+          ...(vale ? { VALE_DO_ACO: vale } : {}),
+          ...(cara ? { CARATINGA: cara } : {}),
+          ...(backup ? { BACKUP: backup } : {}),
+        };
+        const mainUrl = goval || vale || cara || backup || '';
+        if (!mainUrl) {
+          ToastService.show('Informe pelo menos 1 URL de webhook para conectar.', 'danger');
           return;
         }
         const res = await Store.setWebhookConfig({
-          url: goval,
-          urlsByRegion: { GOVAL: goval, VALE_DO_ACO: vale, CARATINGA: cara, BACKUP: backup },
+          url: mainUrl,
+          urlsByRegion,
           events: {
             andamento:  document.getElementById('ev-andamento').checked,
             concluida:  document.getElementById('ev-concluida').checked,
@@ -9157,7 +8862,6 @@ async function initApp() {
   Controllers.filters.init();
   Controllers.categoryTabs.init();
   Controllers.opFolders.init();
-  Controllers.reports.init();
   Controllers.calendar.init();
   Controllers.webhook.init();
   Controllers.notes.init();
@@ -9172,15 +8876,11 @@ async function initApp() {
     if (p === 'dashboard') UI.renderDashboard();
     else if (p === 'tarefas' || p === 'atendimento') UI.refreshOperationalUi();
     else if (p === 'calendario') UI.renderCalendarPage();
-    else if (p === 'relatorios') UI.renderReportsPage();
-    else if (p === 'relatorio') UI.renderRelatorioPage();
   });
 
   UI.renderAgenda();
   UI.renderDashboard();
   UI.renderCalendarPage();
-  UI.renderReportsPage();
-  UI.renderRelatorioPage();
 
   // Clock
   UI.updateClock();
@@ -9215,8 +8915,6 @@ async function initApp() {
         UI.renderDashboard();
         UI.refreshOperationalUi();
         UI.renderCalendarPage();
-        UI.renderReportsPage();
-        UI.renderRelatorioPage();
         return;
       }
 
@@ -9238,8 +8936,6 @@ async function initApp() {
         UI.renderDashboard();
         UI.refreshOperationalUi();
         UI.renderCalendarPage();
-        UI.renderReportsPage();
-        UI.renderRelatorioPage();
       }
 
       // Se o servidor acusar mudanca mas nao vier diff (ex.: config/calendario),
@@ -9250,8 +8946,6 @@ async function initApp() {
         UI.renderDashboard();
         UI.refreshOperationalUi();
         UI.renderCalendarPage();
-        UI.renderReportsPage();
-        UI.renderRelatorioPage();
       }
     } finally {
       syncInFlight = false;
@@ -9277,8 +8971,6 @@ async function initApp() {
     UI.renderDashboard();
     UI.refreshOperationalUi();
     UI.renderCalendarPage();
-    UI.renderReportsPage();
-    UI.renderRelatorioPage();
   }, 25000);
 
   void seedRemoteSigIfPossible();
@@ -9304,8 +8996,6 @@ async function initApp() {
         UI.renderDashboard();
         UI.refreshOperationalUi();
         UI.renderCalendarPage();
-        UI.renderReportsPage();
-        UI.renderRelatorioPage();
         ToastService.show('Dados atualizados', 'success');
       } else {
         ToastService.show('Sem conexão com a API', 'error');
@@ -9320,7 +9010,6 @@ async function initApp() {
   document.getElementById('refreshOpBtn')?.addEventListener('click', () => manualRefresh('refreshOpBtn'));
   document.getElementById('refreshAtdBtn')?.addEventListener('click', () => manualRefresh('refreshAtdBtn'));
   document.getElementById('refreshCalendarBtn')?.addEventListener('click', () => manualRefresh('refreshCalendarBtn'));
-  document.getElementById('refreshRelatorioBtn')?.addEventListener('click', () => manualRefresh('refreshRelatorioBtn'));
 
   UI.restoreLastPageIfAuthed();
   if (Controllers.auth._isAuthenticated() && Store.currentPage !== 'chat') {

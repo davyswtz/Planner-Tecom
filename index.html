@@ -207,13 +207,13 @@
   <aside class="sidebar" id="sidebar" role="navigation" aria-label="Menu principal">
 
     <div class="sidebar-top">
-      <div class="planner-sidebar-brand" aria-label="TelePlan">
+      <div class="planner-sidebar-brand" aria-label="FTD">
         <div class="planner-logo-mark" aria-hidden="true">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 4h16v16H4z"/><path d="M4 9h16M9 4v16"/></svg>
         </div>
         <div class="planner-sidebar-titles">
-          <span class="logo-text planner-logo-name">TelePlan</span>
-          <div class="planner-sidebar-meta"><span id="plannerSidebarBuild">—</span><span class="planner-sidebar-meta-sep"> · </span><span>Planner Telecom</span></div>
+          <span class="logo-text planner-logo-name">FTD</span>
+          <div class="planner-sidebar-meta">Planner Telecom</div>
         </div>
       </div>
       <button class="collapse-btn" id="collapseBtn" title="Recolher menu" aria-label="Recolher menu">
@@ -314,13 +314,6 @@
           <path d="M8 14h5"/>
         </svg>
         <span class="nav-label">Atendimento ao cliente</span>
-      </button>
-
-      <button type="button" class="nav-item" data-page="relatorio" aria-label="Relatório de rompimentos">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-          <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
-        </svg>
-        <span class="nav-label">Relatório</span>
       </button>
 
       <button type="button" class="nav-item" data-page="config">
@@ -502,9 +495,8 @@
               </div>
               <div class="planner-mini-grid">
                 <div class="planner-mini"><div class="planner-mini-lbl">Técnicos online</div><div class="planner-mini-val" id="plannerMiniTech">0</div></div>
-                <div class="planner-mini"><div class="planner-mini-lbl">SLA geral</div><div class="planner-mini-val" id="plannerMiniSla">0%</div></div>
-                <div class="planner-mini"><div class="planner-mini-lbl">Tempo médio</div><div class="planner-mini-val" id="plannerMiniTmp">42 min</div></div>
-                <div class="planner-mini"><div class="planner-mini-lbl">Uptime</div><div class="planner-mini-val" id="plannerMiniUp">99.8%</div></div>
+                <div class="planner-mini"><div class="planner-mini-lbl">SLA geral (rompimentos)</div><div class="planner-mini-val" id="plannerMiniSla">0%</div></div>
+                <div class="planner-mini"><div class="planner-mini-lbl">Tempo médio (rompimentos)</div><div class="planner-mini-val" id="plannerMiniTmp">—</div></div>
               </div>
             </div>
           </div>
@@ -530,14 +522,15 @@
                 <div class="planner-team-row"><div class="planner-team-av planner-team-av--on" id="plannerTeamAv3">—</div><div class="planner-team-name" id="plannerTeamName3">—</div><span class="planner-team-count" id="plannerTeamCount3">0</span><span class="planner-team-dot" id="plannerTeamDot3"></span></div>
               </div>
             </div>
-            <div class="planner-card" role="region" aria-label="Infraestrutura">
-              <h2 class="planner-card-title">Infraestrutura</h2>
+            <div class="planner-card" role="region" aria-label="Troca de poste">
+              <h2 class="planner-card-title">Troca de poste</h2>
               <div class="planner-infra-row"><span class="planner-infra-lbl">Nós ativos</span><span class="planner-infra-val planner-infra-val--pos"><span id="plannerInfraNosOn">0</span> / <span id="plannerInfraNosTotal">340</span></span></div>
               <div class="planner-infra-bar-wrap"><div class="planner-infra-bar"><span data-planner-infra-nos-bar></span></div></div>
-              <div class="planner-infra-row"><span class="planner-infra-lbl">Tráfego/dia</span><span class="planner-infra-val planner-infra-val--neu" id="plannerInfraTraf">18 TB</span></div>
-              <div class="planner-infra-row"><span class="planner-infra-lbl">Latência</span><span class="planner-infra-val planner-infra-val--neu" id="plannerInfraLat">2.4 ms</span></div>
-              <div class="planner-infra-row"><span class="planner-infra-lbl">Uptime</span><span class="planner-infra-val planner-infra-val--pos" id="plannerInfraUp">99.8%</span></div>
-              <div class="planner-infra-row"><span class="planner-infra-lbl">Nós offline</span><span class="planner-infra-val planner-infra-val--neg" id="plannerInfraOff">0</span></div>
+              <div class="planner-infra-row"><span class="planner-infra-lbl">Troca de poste (total)</span><span class="planner-infra-val planner-infra-val--neu" id="plannerTpTotal">0</span></div>
+              <div class="planner-infra-row"><span class="planner-infra-lbl">Goval</span><span class="planner-infra-val planner-infra-val--neu" id="plannerTpGoval">0</span></div>
+              <div class="planner-infra-row"><span class="planner-infra-lbl">Vale do Aço</span><span class="planner-infra-val planner-infra-val--neu" id="plannerTpVale">0</span></div>
+              <div class="planner-infra-row"><span class="planner-infra-lbl">Caratinga</span><span class="planner-infra-val planner-infra-val--neu" id="plannerTpCaratinga">0</span></div>
+              <div class="planner-infra-row"><span class="planner-infra-lbl">Backup</span><span class="planner-infra-val planner-infra-val--neu" id="plannerTpBackup">0</span></div>
             </div>
           </div>
 
@@ -657,35 +650,6 @@
 
       </section>
       <!-- /page-tarefas -->
-
-      <!-- ═══ PAGE: RELATÓRIO (rompimentos) ═══ -->
-      <section class="page" id="page-relatorio" aria-label="Relatório de rompimentos">
-        <div class="relatorio-page-layout">
-          <div class="panel relatorio-panel" role="region">
-            <div class="panel-header relatorio-panel-head">
-              <div>
-                <span class="panel-title">Relatório · Rompimentos</span>
-                <p class="relatorio-panel-sub">Por região com totais e em andamento; em seguida o top 3 de técnicos com mais rompimentos resolvidos.</p>
-              </div>
-              <button type="button" class="icon-btn" id="refreshRelatorioBtn" title="Atualizar relatório" aria-label="Atualizar relatório">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
-              </button>
-            </div>
-            <div class="relatorio-panel-body">
-              <section class="relatorio-section" aria-labelledby="relatorio-region-title">
-                <h2 class="relatorio-section-title" id="relatorio-region-title">Por região</h2>
-                <p class="relatorio-section-note">Total de rompimentos e em andamento (inclui Validação, envio pendente e adequação, quando houver)</p>
-                <div class="relatorio-bars" id="rompReportRegionBars"></div>
-              </section>
-              <section class="relatorio-section" aria-labelledby="relatorio-top3-title">
-                <h2 class="relatorio-section-title" id="relatorio-top3-title">Top 3 — técnicos que mais resolveram</h2>
-                <p class="relatorio-section-note">Rompimentos em status concluída, finalizada ou finalizado (atribuídos ao responsável).</p>
-                <div class="relatorio-bars relatorio-bars--top3" id="rompReportTop3TecBars"></div>
-              </section>
-            </div>
-          </div>
-        </div>
-      </section>
 
       <!-- ═══ PAGE: ATENDIMENTO AO CLIENTE (layout redesenhado) ═══ -->
       <section class="page" id="page-atendimento" aria-label="Atendimento ao cliente">

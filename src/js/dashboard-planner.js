@@ -5,6 +5,19 @@
 (function () {
   'use strict';
 
+  // Evita duplo-disparo (pointerdown + click) no toggle.
+  let __lateToggleLastTs = 0;
+  function __triggerLateToggle(source, e, fn) {
+    const now = Date.now();
+    if (now - __lateToggleLastTs < 450) {
+      try { console.info('[planner] toggleLate ignored (double-fire)', { source, ts: now }); } catch { /* ignore */ }
+      return;
+    }
+    __lateToggleLastTs = now;
+    try { console.info('[planner] toggleLate accepted', { source, ts: now }); } catch { /* ignore */ }
+    fn();
+  }
+
   const DADOS = {
     atividade: [
       { tipo: 'danger', texto: 'Rompimento detectado no Bairro Industrial. Técnico João S. acionado.', hora: '01:38' },
@@ -107,18 +120,25 @@
         });
       }
 
+      // Listener direto (caso o botão exista no DOM).
       document.getElementById('plannerKpiToggleLate')?.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        this._kpiLateMode = !this._kpiLateMode;
-        try {
-          localStorage.setItem(this._kpiLateModeKey, this._kpiLateMode ? '1' : '0');
-        } catch {
-          /* ignore */
-        }
-        this._kpiAnimated = false;
-        this.syncFromStore();
+        __triggerLateToggle('click:direct', e, () => this._toggleLateMode());
       });
+
+      // Fallback robusto: delegação no documento (cobre casos onde algum overlay
+      // ou re-render substitui o botão e o listener direto não pega).
+      if (!document.documentElement.dataset.plannerLateToggleBound) {
+        document.documentElement.dataset.plannerLateToggleBound = '1';
+        document.addEventListener('click', (e) => {
+          const btn = e.target?.closest?.('#plannerKpiToggleLate');
+          if (!btn) return;
+          e.preventDefault();
+          e.stopPropagation();
+          __triggerLateToggle('click:delegated', e, () => this._toggleLateMode());
+        }, true);
+      }
 
       document.getElementById('plannerSettingsBtn')?.addEventListener('click', () => {
         if (typeof UI !== 'undefined' && UI.navigateTo) UI.navigateTo('config');
@@ -137,6 +157,21 @@
           attributes: true,
           attributeFilter: ['class'],
         });
+      }
+    },
+
+    _toggleLateMode() {
+      this._kpiLateMode = !this._kpiLateMode;
+      try {
+        localStorage.setItem(this._kpiLateModeKey, this._kpiLateMode ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+      this._kpiAnimated = false;
+      this.syncFromStore();
+      if (typeof UI !== 'undefined' && typeof UI.renderDashboard === 'function') UI.renderDashboard();
+      if (typeof ToastService !== 'undefined' && ToastService?.show) {
+        ToastService.show(this._kpiLateMode ? 'Mostrando: Atrasadas' : 'Mostrando: Rompimentos', 'info');
       }
     },
 
@@ -428,37 +463,132 @@
       if (totN) totN.textContent = String(inf.nosTotal);
       const bar = document.querySelector('[data-planner-infra-nos-bar]');
       if (bar) bar.style.width = `${pct(inf.nosAtivos, inf.nosTotal)}%`;
-      const tr = document.getElementById('plannerInfraTraf');
-      if (tr) tr.textContent = inf.trafegoDia;
-      const lat = document.getElementById('plannerInfraLat');
-      if (lat) lat.textContent = inf.latencia;
-      const up = document.getElementById('plannerInfraUp');
-      if (up) {
-        up.textContent = inf.uptime;
-        up.className = 'planner-infra-val planner-infra-val--pos';
-      }
-      const off = document.getElementById('plannerInfraOff');
-      if (off) {
-        off.textContent = String(inf.nosOffline);
-        off.className = 'planner-infra-val planner-infra-val--neg';
-      }
+
+      // Troca de poste por região (tarefa operacional)
+      const tpAll = (typeof Store !== 'undefined' && Store.getOpTasks)
+        ? Store.getOpTasks().filter(t => String(t?.categoria || '').trim() === 'troca-poste')
+        : [];
+      const countBy = { Goval: 0, 'Vale do Aço': 0, Caratinga: 0, Backup: 0, Outras: 0 };
+      tpAll.forEach(t => {
+        const r = String(t?.regiao || '').trim();
+        if (r === 'Goval') countBy.Goval++;
+        else if (r === 'Vale do Aço' || r === 'Vale do Aco') countBy['Vale do Aço']++;
+        else if (r === 'Caratinga') countBy.Caratinga++;
+        else if (r === 'Backup') countBy.Backup++;
+        else countBy.Outras++;
+      });
+      const tpTotalEl = document.getElementById('plannerTpTotal');
+      if (tpTotalEl) tpTotalEl.textContent = String(tpAll.length);
+      const tpGovalEl = document.getElementById('plannerTpGoval');
+      if (tpGovalEl) tpGovalEl.textContent = String(countBy.Goval);
+      const tpValeEl = document.getElementById('plannerTpVale');
+      if (tpValeEl) tpValeEl.textContent = String(countBy['Vale do Aço']);
+      const tpCarEl = document.getElementById('plannerTpCaratinga');
+      if (tpCarEl) tpCarEl.textContent = String(countBy.Caratinga);
+      const tpBackEl = document.getElementById('plannerTpBackup');
+      if (tpBackEl) tpBackEl.textContent = String(countBy.Backup);
 
       const techSet = new Set(
         TaskService.getFilteredTasks().map(t => String(t.responsavel || '').trim()).filter(Boolean),
       );
       const mt = document.getElementById('plannerMiniTech');
-      if (mt) mt.textContent = String(techSet.size);
+      // Técnicos online: preferir técnicos com rompimentos em andamento; fallback = técnicos do filtro geral.
+      const opTasks = (typeof Store !== 'undefined' && Store.getOpTasks) ? Store.getOpTasks() : [];
+      const rompimentos = opTasks.filter(t => String(t?.categoria || '').trim() === 'rompimentos');
+      const progressStatuses = new Set(['Em andamento', 'Validação', 'Envio pendente', 'Necessário adequação']);
+      const techOnlineSet = new Set(
+        rompimentos
+          .filter(t => progressStatuses.has(String(t?.status || '').trim()))
+          .map(t => String(t?.responsavel || '').trim())
+          .filter(Boolean),
+      );
+      const online = techOnlineSet.size || techSet.size;
+      if (mt) mt.textContent = String(online);
       const ms = document.getElementById('plannerMiniSla');
-      if (ms) ms.textContent = `${sla.geral}%`;
-      const mu = document.getElementById('plannerMiniUp');
-      if (mu) mu.textContent = inf.uptime;
+      // SLA geral (rompimentos): % de itens dentro do prazo (concluídos até o prazo, ou ainda no prazo).
+      const doneStatuses = new Set(['Concluída', 'Finalizada', 'Finalizado']);
+      const okYmd = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) && !String(d || '').startsWith('0000');
+      const todayIso = Utils.todayIso();
+      const slaBase = rompimentos.filter(t => okYmd(String(t?.prazo || '').slice(0, 10)));
+      const slaTotal = slaBase.length;
+      const slaOk = slaBase.filter(t => {
+        const prazo = String(t.prazo).slice(0, 10);
+        const st = String(t.status || '').trim();
+        if (doneStatuses.has(st)) {
+          // tenta usar histórico para pegar data real de conclusão; se não houver, assume ok.
+          const hist = Array.isArray(t?.historico) ? t.historico : [];
+          const end = [...hist].reverse().find(h => doneStatuses.has(String(h?.status || '').trim()) && h?.timestamp)?.timestamp;
+          if (!end) return true;
+          const endDay = String(end).slice(0, 10);
+          return !endDay || endDay <= prazo;
+        }
+        return todayIso <= prazo;
+      }).length;
+      const slaPct = slaTotal ? Math.round((100 * slaOk) / slaTotal) : 0;
+      if (ms) ms.textContent = `${slaPct}%`;
+
+      // Tempo médio de resolução (rompimentos): média entre início (Em andamento) e fim (Concluída/Finalizada/Finalizado).
+      const avgEl = document.getElementById('plannerMiniTmp');
+      const durationsMin = rompimentos.map(t => {
+        const hist = Array.isArray(t?.historico) ? t.historico : [];
+        if (!hist.length) return null;
+        const start = hist.find(h => String(h?.status || '').trim() === 'Em andamento' && h?.timestamp)?.timestamp;
+        const end = [...hist].reverse().find(h => doneStatuses.has(String(h?.status || '').trim()) && h?.timestamp)?.timestamp;
+        if (!start || !end) return null;
+        const a = new Date(start);
+        const b = new Date(end);
+        const diff = b.getTime() - a.getTime();
+        if (!Number.isFinite(diff) || diff <= 0) return null;
+        return Math.round(diff / 60000);
+      }).filter(v => Number.isFinite(v));
+      if (avgEl) {
+        if (durationsMin.length) {
+          const avg = Math.round(durationsMin.reduce((s, v) => s + v, 0) / durationsMin.length);
+          avgEl.textContent = `${avg} min`;
+        } else {
+          avgEl.textContent = '—';
+        }
+      }
     },
   };
 
   window.PlannerDashboard = PlannerDashboard;
 
+  // Fallback final: captura clique mesmo se o init não tiver bindado por algum motivo.
+  // (Ex.: erro anterior no init, re-render inesperado, etc.)
+  if (typeof document !== 'undefined' && !document.documentElement.dataset.plannerLateToggleGlobalBound) {
+    document.documentElement.dataset.plannerLateToggleGlobalBound = '1';
+
+    // Usa pointerdown porque "click" pode não disparar (drag/scroll/overlay).
+    document.addEventListener('pointerdown', (e) => {
+      const btn = e.target?.closest?.('#plannerKpiToggleLate');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        __triggerLateToggle('pointerdown:global', e, () => window.PlannerDashboard?._toggleLateMode?.());
+      } catch {
+        /* ignore */
+      }
+    }, true);
+
+    // Fallback para navegadores antigos/ambientes sem Pointer Events.
+    document.addEventListener('mousedown', (e) => {
+      const btn = e.target?.closest?.('#plannerKpiToggleLate');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        __triggerLateToggle('mousedown:global', e, () => window.PlannerDashboard?._toggleLateMode?.());
+      } catch {
+        /* ignore */
+      }
+    }, true);
+  }
+
   function boot() {
     if (!document.getElementById('page-dashboard')) return;
+    try { console.info('[planner] dashboard-planner boot', { ts: Date.now() }); } catch { /* ignore */ }
     PlannerDashboard.init();
     PlannerDashboard.syncFromStore();
   }

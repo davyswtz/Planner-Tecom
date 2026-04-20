@@ -442,9 +442,9 @@ body.planner-dash-mode .topbar-notif-badge {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex: 1;
-  min-width: 200px;
-  max-width: 420px;
+  flex: 1 1 640px;
+  min-width: min(640px, 100%);
+  max-width: 980px;
   padding: 0 14px;
   height: 44px;
   border-radius: var(--pl-radius-sm, 8px);
@@ -501,6 +501,8 @@ body.planner-dash-mode .planner-dash-search {
   align-items: flex-start;
   gap: 10px;
   margin-bottom: 10px;
+  position: relative;
+  z-index: 1;
 }
 
 .planner-kpi-toggle {
@@ -517,6 +519,10 @@ body.planner-dash-mode .planner-dash-search {
   cursor: pointer;
   flex-shrink: 0;
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease, color 0.15s ease;
+  position: relative;
+  z-index: 5;
+  pointer-events: auto;
+  touch-action: manipulation;
 }
 .planner-kpi-toggle:hover {
   background: rgba(255, 255, 255, 0.06);
