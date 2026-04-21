@@ -4957,6 +4957,7 @@ const UI = {
     if (!root) return;
     if (!items.length) {
       root.innerHTML = `<div class="calendar-empty" style="padding:18px 10px;margin:0">Nenhuma caixa encontrada com os filtros atuais.</div>`;
+      root.classList.remove('atn2-list--scroll7');
       return;
     }
     root.innerHTML = items.map(it => {
@@ -4967,12 +4968,25 @@ const UI = {
       const prioPill = `<span class="atn2-pill" style="background:${meta.badgeBg};border-color:${meta.badgeBg};color:${meta.badgeText}">${this._atn2Escape(meta.label)}</span>`;
       const initials = String(it.techInitials || '').trim() || Utils.getInitials(String(it.tech || '—'));
       const avatar = `<span class="atn2-avatar" style="${this._atn2TechAvatarStyle(it.techColor)}">${this._atn2Escape(initials)}</span>`;
+      const statusPickerBtn = `
+        <button
+          type="button"
+          class="atn2-status-picker-btn"
+          draggable="false"
+          data-atn2-status-picker="${Number(it.id) || 0}"
+          title="Alterar status"
+          aria-label="Alterar status"
+        >${Utils.OP_STATUS_PICKER_SVG}</button>
+      `;
       return `
         <div class="atn2-cto" data-atn2-item="${Number(it.id) || 0}">
           <span class="atn2-cto-leftbar" style="background:${meta.border}"></span>
           <div class="atn2-cto-top">
             <div class="atn2-cto-name">${this._atn2Escape(it.name)}</div>
-            <div class="atn2-cto-dbm" style="color:${meta.value}">${this._atn2Escape(dbm)}</div>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+              ${statusPickerBtn}
+              <div class="atn2-cto-dbm" style="color:${meta.value}">${this._atn2Escape(dbm)}</div>
+            </div>
           </div>
           <div class="atn2-cto-bottom">
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${prioPill}${statusPill}</div>
@@ -4981,6 +4995,9 @@ const UI = {
         </div>
       `;
     }).join('');
+    // Após 7 itens, aplica modo "scroll" via CSS (mais estável e responsivo).
+    if (items.length > 7) root.classList.add('atn2-list--scroll7');
+    else root.classList.remove('atn2-list--scroll7');
   },
 
   _atn2RenderLanes(root, lanes) {
@@ -5035,6 +5052,82 @@ const UI = {
     m.setAttribute('aria-hidden', 'true');
   },
 
+  _atn2CloseStatusDropdown() {
+    const dd = document.getElementById('atn2StatusDropdown');
+    if (!dd) return;
+    dd.hidden = true;
+    delete dd.dataset.opId;
+  },
+  _atn2EnsureStatusDropdown() {
+    // IMPORTANTE: o dropdown precisa ficar fora do layout da página (ex.: containers com transform),
+    // senão `position: fixed` pode ficar relativo ao painel e o cálculo por viewport "desloca".
+    let dd = document.getElementById('atn2StatusDropdown');
+    let panel = document.getElementById('atn2StatusDropdownPanel');
+    if (dd && panel) return { dd, panel };
+
+    dd = document.createElement('div');
+    dd.className = 'atd-status-dropdown';
+    dd.id = 'atn2StatusDropdown';
+    dd.hidden = true;
+
+    panel = document.createElement('div');
+    panel.className = 'atd-status-dropdown-panel';
+    panel.id = 'atn2StatusDropdownPanel';
+    panel.setAttribute('role', 'menu');
+    panel.setAttribute('aria-label', 'Alterar status');
+    dd.appendChild(panel);
+
+    document.body.appendChild(dd);
+    return { dd, panel };
+  },
+  _atn2PositionStatusDropdown(anchorEl) {
+    const dd = document.getElementById('atn2StatusDropdown');
+    if (!dd || !anchorEl) return;
+    const rect = anchorEl.getBoundingClientRect();
+    const ddW = dd.offsetWidth || 188;
+    const ddH = dd.offsetHeight || 160;
+    // Alinha pelo centro do botão para não "escapar" em listas longas.
+    let left = rect.left + (rect.width / 2) - (ddW / 2);
+    if (left < 8) left = 8;
+    if (left + ddW > window.innerWidth - 8) left = Math.max(8, window.innerWidth - ddW - 8);
+    let top = rect.bottom + 6;
+    if (top + ddH > window.innerHeight - 8) top = Math.max(8, rect.top - ddH - 6);
+    if (top < 8) top = 8;
+    dd.style.left = `${Math.round(left)}px`;
+    dd.style.top = `${Math.round(top)}px`;
+  },
+  _atn2OpenStatusDropdown(anchorEl, opTaskId) {
+    const id = Number(opTaskId);
+    if (!Number.isFinite(id) || id <= 0) return;
+    const task = Store.findOpTask(id);
+    if (!task || !anchorEl) return;
+
+    const { dd, panel } = this._atn2EnsureStatusDropdown();
+
+    if (!dd.hidden && Number(dd.dataset.opId || 0) === id) {
+      this._atn2CloseStatusDropdown();
+      return;
+    }
+
+    const cur = String(task.status || '').trim();
+    const picks = [
+      { value: 'Pendente', label: 'Pendente' },
+      { value: 'Em andamento', label: 'Em andamento' },
+      { value: 'Concluída', label: 'Concluído' },
+    ];
+    panel.innerHTML = picks.map(p => {
+      const isCur = String(p.value) === cur;
+      return `<button type="button" class="atd-status-dropdown-item${isCur ? ' is-current-op-status' : ''}" role="menuitem" data-atn2-pick-status="${Utils.escapeHtmlAttr(p.value)}">${Utils.escapeHtml(p.label)}${isCur ? ' \u2713' : ''}</button>`;
+    }).join('');
+
+    dd.dataset.opId = String(id);
+    dd.hidden = false;
+    requestAnimationFrame(() => {
+      this._atn2PositionStatusDropdown(anchorEl);
+      panel.querySelector('.atd-status-dropdown-item')?.focus?.();
+    });
+  },
+
   _bindAtenuacaoDashboardEventsOnce(root) {
     if (!root || root.dataset.boundAtn2) return;
     root.dataset.boundAtn2 = '1';
@@ -5043,6 +5136,15 @@ const UI = {
 
     root.addEventListener('click', (e) => {
       const t = e.target;
+      const statusBtn = t?.closest?.('[data-atn2-status-picker]');
+      if (statusBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        this._atn2EnsureStatusDropdown();
+        const oid = Number(statusBtn.getAttribute('data-atn2-status-picker') || 0);
+        if (oid) this._atn2OpenStatusDropdown(statusBtn, oid);
+        return;
+      }
       const card = t?.closest?.('[data-atn2-item]');
       if (card) {
         e.preventDefault();
@@ -5099,6 +5201,52 @@ const UI = {
         return;
       }
     });
+
+    const ddPanel = this._atn2EnsureStatusDropdown().panel;
+    if (ddPanel && !ddPanel.dataset.boundPick) {
+      ddPanel.addEventListener('click', (e) => {
+        const pickBtn = e.target.closest('[data-atn2-pick-status]');
+        if (!pickBtn || !ddPanel.contains(pickBtn)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const dd = document.getElementById('atn2StatusDropdown');
+        const tid = Number(dd?.dataset?.opId || 0);
+        const nextStatus = pickBtn.getAttribute('data-atn2-pick-status');
+        if (!tid || !nextStatus) return;
+        const curTask = Store.findOpTask(tid);
+        if (curTask && String(curTask.status || '') === String(nextStatus)) {
+          this._atn2CloseStatusDropdown();
+          return;
+        }
+        OpTaskService.changeStatus(tid, nextStatus);
+        UI.refreshOperationalUi();
+        UI.renderDashboard();
+        UI.renderCalendarPage();
+        rerender();
+        this._atn2CloseStatusDropdown();
+        ToastService.show(`Status: ${nextStatus}`, 'success');
+      });
+      ddPanel.dataset.boundPick = '1';
+
+      document.addEventListener(
+        'pointerdown',
+        (e) => {
+          const dd = document.getElementById('atn2StatusDropdown');
+          if (!dd || dd.hidden) return;
+          if (dd.contains(e.target)) return;
+          if (e.target.closest('[data-atn2-status-picker]')) return;
+          this._atn2CloseStatusDropdown();
+        },
+        true,
+      );
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const dd = document.getElementById('atn2StatusDropdown');
+        if (!dd || dd.hidden) return;
+        this._atn2CloseStatusDropdown();
+      });
+    }
 
     root.addEventListener('input', (e) => {
       const el = e.target;
@@ -5248,6 +5396,9 @@ const UI = {
         }
         const modalOpen = document.getElementById('atn2Modal')?.classList?.contains?.('open');
         if (modalOpen) return;
+        const dd = document.getElementById('atn2StatusDropdown');
+        const ddOpen = dd && !dd.hidden;
+        if (ddOpen) return;
         const ae = document.activeElement;
         const aeId = ae && typeof ae.id === 'string' ? ae.id : '';
         if (aeId && (aeId === 'atn2Search' || aeId === 'atn2Region' || aeId === 'atn2Type' || aeId.startsWith('atn2Modal'))) return;

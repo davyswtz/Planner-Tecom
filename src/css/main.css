@@ -2322,6 +2322,19 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
   scrollbar-width: thin;
   scrollbar-color: var(--color-border) transparent;
 }
+
+/* Quando passa de 7 itens, fixa uma janela de rolagem sem quebrar o layout flex. */
+#page-correcao-atenuacao .atn2-list.atn2-list--scroll7 {
+  flex: 0 0 auto;
+  /* Responsivo: nunca estoura a viewport e mantém boa leitura em telas menores. */
+  max-height: min(52vh, 440px);
+}
+
+@media (max-width: 767px) {
+  #page-correcao-atenuacao .atn2-list.atn2-list--scroll7 {
+    max-height: min(56vh, 380px);
+  }
+}
 #page-correcao-atenuacao .atn2-list::-webkit-scrollbar { width: 8px; height: 8px; }
 #page-correcao-atenuacao .atn2-list::-webkit-scrollbar-track { background: transparent; }
 #page-correcao-atenuacao .atn2-list::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 8px; }
@@ -2340,12 +2353,15 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
   border: 1px solid rgba(255, 255, 255, 0.10);
   border-radius: 6px;
   background: var(--color-bg-card);
-  padding: 10px 12px;
+  padding: 12px 14px;
   cursor: pointer;
   transition: background var(--transition), border-color var(--transition);
   position: relative;
   overflow: hidden;
-  margin-bottom: 6px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 #page-correcao-atenuacao .atn2-cto:hover { background: var(--color-bg-surface); }
 #page-correcao-atenuacao .atn2-cto:hover { border-color: rgba(255, 255, 255, 0.18); }
@@ -2359,18 +2375,64 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
 }
 #page-correcao-atenuacao .atn2-cto-top {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
 }
-#page-correcao-atenuacao .atn2-cto-name { font-size: 13px; font-weight: 500; color: var(--color-text-primary); }
-#page-correcao-atenuacao .atn2-cto-dbm { font-size: 13px; font-weight: 600; }
+#page-correcao-atenuacao .atn2-cto-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#page-correcao-atenuacao .atn2-cto-dbm {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.1;
+  font-family: var(--font-mono);
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+#page-correcao-atenuacao .atn2-status-picker-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--white3);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition), border-color var(--transition), transform var(--transition), color var(--transition);
+}
+#page-correcao-atenuacao .atn2-status-picker-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: var(--white2);
+}
+#page-correcao-atenuacao .atn2-status-picker-btn:active { transform: scale(0.96); }
+#page-correcao-atenuacao .atn2-status-picker-btn:focus-visible {
+  outline: 2px solid rgba(34, 197, 94, 0.7);
+  outline-offset: 2px;
+}
 #page-correcao-atenuacao .atn2-cto-bottom {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 6px;
+  gap: 10px;
   justify-content: space-between;
+  flex-wrap: wrap;
 }
 #page-correcao-atenuacao .atn2-pill {
   display: inline-flex;
@@ -4007,11 +4069,11 @@ input[type=number]::-webkit-inner-spin-button { margin: 0; }
 /* Dropdown de status ao lado da checklist de ordens (dentro do modal operacional) */
 .atd-status-dropdown {
   position: fixed;
-  z-index: 250;
+  z-index: 9999;
   min-width: 188px;
 }
 .atd-status-dropdown-panel {
-  background: var(--black2);
+  background: #0b0f14;
   border-radius: var(--radius);
   border: 1px solid var(--border2);
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.85);
@@ -4025,7 +4087,7 @@ input[type=number]::-webkit-inner-spin-button { margin: 0; }
   border-radius: var(--radius);
   padding: 8px 12px;
   background: transparent;
-  color: var(--white2);
+  color: #fff;
   font-size: 12px;
   font-family: var(--font-display);
   cursor: pointer;
