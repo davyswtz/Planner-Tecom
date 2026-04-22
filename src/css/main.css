@@ -1739,7 +1739,9 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
 /* ═══ Correção de atenuação — Dashboard (flat) ═══ */
 #page-correcao-atenuacao .atn2-page {
   height: 100vh;
-  overflow: hidden;
+  /* Permite rolagem da página inteira (antes ficava travada em overflow:hidden) */
+  overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   padding: 16px;
@@ -1836,6 +1838,12 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
   white-space: nowrap;
   cursor: pointer;
   transition: background var(--transition), transform var(--transition);
+}
+#page-correcao-atenuacao .atn2-primary.atn2-primary--sm {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 11px;
+  font-size: 12px;
 }
 #page-correcao-atenuacao .atn2-primary:hover { background: var(--green-dim); }
 #page-correcao-atenuacao .atn2-primary:active { transform: scale(.98); }
@@ -1935,6 +1943,37 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
   display: flex;
   gap: 12px;
 }
+
+/* Layout (conforme desenho): card grande à esquerda + 2 cards empilhados à direita */
+#page-correcao-atenuacao .atn2-layout-3 {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr);
+  gap: 12px;
+}
+#page-correcao-atenuacao .atn2-side-stack {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto;
+  gap: 12px;
+}
+
+@media (max-width: 1100px) {
+  #page-correcao-atenuacao .atn2-layout-3 { grid-template-columns: 1fr; }
+  #page-correcao-atenuacao .atn2-side-stack { grid-template-rows: auto; }
+}
+
+/* Resumo (card ao lado do feed) */
+#page-correcao-atenuacao .atn2-sev-grid { display: grid; gap: 10px; }
+#page-correcao-atenuacao .atn2-sev-row { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 10px; }
+#page-correcao-atenuacao .atn2-sev-dot { width: 8px; height: 8px; border-radius: 999px; background: rgba(255,255,255,.25); }
+#page-correcao-atenuacao .atn2-sev-dot--crit { background: #ef4444; }
+#page-correcao-atenuacao .atn2-sev-dot--med { background: #f59e0b; }
+#page-correcao-atenuacao .atn2-sev-dot--lev { background: #22c55e; }
+#page-correcao-atenuacao .atn2-sev-label { color: var(--color-text-primary); font-size: 12px; font-weight: 550; }
+#page-correcao-atenuacao .atn2-sev-val { font-family: var(--font-mono); font-weight: 900; }
+#page-correcao-atenuacao .atn2-sev-sub { margin-top: 10px; color: var(--color-text-muted); font-size: 10.5px; line-height: 1.3; }
 
 /* ═══ Troca de etiqueta — Kanban CTO visual ═══ */
 #page-troca-etiqueta .te-page,
@@ -2231,14 +2270,7 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
   #page-troca-etiqueta .te-col { width: 100%; flex: 0 0 auto; }
   #page-troca-etiqueta .te-row2 { grid-template-columns: 1fr; }
 }
-#page-correcao-atenuacao .atn2-left {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  min-height: 0;
-}
+#page-correcao-atenuacao .atn2-left { display: none; }
 #page-correcao-atenuacao .atn2-right {
   width: 280px;
   flex-shrink: 0;
@@ -2248,20 +2280,24 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
   min-height: 0;
 }
 #page-correcao-atenuacao .atn2-panel-head {
+  /* Reescrito (pendências): header estável e responsivo */
   padding: 12px 14px;
   border-bottom: 1px solid var(--color-border);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  flex-shrink: 0;
+  flex: 0 0 auto;
+  min-width: 0;
 }
 #page-correcao-atenuacao .atn2-panel-actions {
+  /* Mantém contador + ações sempre visíveis e sem "quebrar" o topo */
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 #page-correcao-atenuacao .atn2-panel-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
 #page-correcao-atenuacao .atn2-count {
@@ -2271,202 +2307,31 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
   background: var(--color-bg-surface);
   font-size: 10px;
   color: var(--color-text-secondary);
-}
-#page-correcao-atenuacao .atn2-filters {
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: row;
-  gap: 8px;
-  /* FIX: evita overflow horizontal em telas 320–430px */
-  flex-wrap: wrap;
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: var(--color-bg-card);
-}
-#page-correcao-atenuacao .atn2-input,
-#page-correcao-atenuacao .atn2-select {
-  background: var(--color-bg-surface);
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: 12px;
-  height: 32px;
-  padding: 0 10px;
-  color: var(--color-text-primary);
-  outline: none;
-  font-family: var(--font-display);
-  font-size: 12px;
-}
-#page-correcao-atenuacao .atn2-row-2 {
-  display: flex;
-  gap: 8px;
-  /* FIX: força os selects a quebrarem linha quando necessário */
-  flex: 1 1 100%;
-}
-#page-correcao-atenuacao .atn2-input { flex: 1; min-width: 0; }
-#page-correcao-atenuacao .atn2-select {
-  /* FIX: largura fluida para não estourar em mobile */
-  width: auto;
-  min-width: 140px;
-  flex: 1 1 0;
-}
-#page-correcao-atenuacao .atn2-list {
-  padding: 12px 14px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  min-height: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-border) transparent;
-}
-
-/* Quando passa de 7 itens, fixa uma janela de rolagem sem quebrar o layout flex. */
-#page-correcao-atenuacao .atn2-list.atn2-list--scroll7 {
   flex: 0 0 auto;
-  /* Responsivo: nunca estoura a viewport e mantém boa leitura em telas menores. */
-  max-height: min(52vh, 440px);
 }
 
-@media (max-width: 767px) {
-  #page-correcao-atenuacao .atn2-list.atn2-list--scroll7 {
-    max-height: min(56vh, 380px);
-  }
-}
-#page-correcao-atenuacao .atn2-list::-webkit-scrollbar { width: 8px; height: 8px; }
-#page-correcao-atenuacao .atn2-list::-webkit-scrollbar-track { background: transparent; }
-#page-correcao-atenuacao .atn2-list::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 8px; }
-#page-correcao-atenuacao .atn2-list::-webkit-scrollbar-thumb:hover { background: var(--color-bg-surface); }
-
-/* Mantém cabeçalho da lista visível quando rola */
-#page-correcao-atenuacao .atn2-left {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-#page-correcao-atenuacao .atn2-left .atn2-panel-head { position: sticky; top: 0; z-index: 3; background: var(--color-bg-card); }
-
-#page-correcao-atenuacao .atn2-cto {
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  border-radius: 6px;
-  background: var(--color-bg-card);
-  padding: 12px 14px;
-  cursor: pointer;
-  transition: background var(--transition), border-color var(--transition);
-  position: relative;
-  overflow: hidden;
-  margin-bottom: 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-#page-correcao-atenuacao .atn2-cto:hover { background: var(--color-bg-surface); }
-#page-correcao-atenuacao .atn2-cto:hover { border-color: rgba(255, 255, 255, 0.18); }
-#page-correcao-atenuacao .atn2-cto-leftbar {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: rgba(255,255,255,.18);
-}
-#page-correcao-atenuacao .atn2-cto-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-#page-correcao-atenuacao .atn2-cto-name {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.25;
-  color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-#page-correcao-atenuacao .atn2-cto-dbm {
-  flex-shrink: 0;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.1;
-  font-family: var(--font-mono);
-  padding: 6px 10px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-#page-correcao-atenuacao .atn2-status-picker-btn {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+/* Filtros do feed (Atividades de atenuação) */
+#page-correcao-atenuacao .atn2-filters { display: inline-flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+#page-correcao-atenuacao .atn2-filter-btn {
+  height: 26px;
+  padding: 0 10px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--white3);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background var(--transition), border-color var(--transition), transform var(--transition), color var(--transition);
-}
-#page-correcao-atenuacao .atn2-status-picker-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.03);
   color: var(--white2);
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), transform var(--transition);
 }
-#page-correcao-atenuacao .atn2-status-picker-btn:active { transform: scale(0.96); }
-#page-correcao-atenuacao .atn2-status-picker-btn:focus-visible {
-  outline: 2px solid rgba(34, 197, 94, 0.7);
-  outline-offset: 2px;
+#page-correcao-atenuacao .atn2-filter-btn:hover { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.22); }
+#page-correcao-atenuacao .atn2-filter-btn:active { transform: scale(.98); }
+#page-correcao-atenuacao .atn2-filter-btn.is-active {
+  background: rgba(34, 197, 94, 0.16);
+  border-color: rgba(34, 197, 94, 0.38);
+  color: var(--white);
 }
-#page-correcao-atenuacao .atn2-cto-bottom {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  justify-content: space-between;
-  flex-wrap: wrap;
-}
-#page-correcao-atenuacao .atn2-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 6px;
-  border-radius: 20px;
-  font-size: 10px;
-  font-weight: 600;
-  border: 1px solid rgba(255,255,255,.10);
-  background: rgba(255,255,255,.04);
-  color: var(--color-text-secondary);
-}
-#page-correcao-atenuacao .atn2-open {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--transition);
-  position: absolute;
-  right: 10px;
-  top: 10px;
-}
-#page-correcao-atenuacao .atn2-cto:hover .atn2-open { opacity: 1; pointer-events: auto; }
-
-#page-correcao-atenuacao .atn2-avatar {
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 9px;
-  font-weight: 500;
-  color: var(--color-text-on-accent);
-}
+/* (Removido) Caixa "Caixas com pendências": lista, filtros e cards eram daqui. */
 
 #page-correcao-atenuacao .atn2-side {
   min-height: 0;
@@ -2477,65 +2342,198 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
   min-height: 0;
   overflow: hidden;
 }
-#page-correcao-atenuacao .atn2-right.atn2-side > .atn2-card:first-child {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-#page-correcao-atenuacao .atn2-right.atn2-side > .atn2-card:last-child {
-  height: 200px;
-  flex-shrink: 0;
-}
-#page-correcao-atenuacao .atn2-right.atn2-side > .atn2-card:first-child .atn2-side-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
-#page-correcao-atenuacao .atn2-right.atn2-side > .atn2-card:last-child .atn2-side-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
 #page-correcao-atenuacao .atn2-side-body {
   padding: 12px 14px;
   overflow-y: auto;
   min-height: 0;
   scrollbar-gutter: stable;
 }
-#page-correcao-atenuacao #atn2Lanes {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
-#page-correcao-atenuacao #atn2Activities {
-  overflow-y: auto;
-}
-
 /* Em muitos itens, deixa o painel direito com scroll próprio */
 #page-correcao-atenuacao .atn2-side-body::-webkit-scrollbar { width: 8px; height: 8px; }
 #page-correcao-atenuacao .atn2-side-body::-webkit-scrollbar-track { background: transparent; }
 #page-correcao-atenuacao .atn2-side-body::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 8px; }
 #page-correcao-atenuacao .atn2-side-body::-webkit-scrollbar-thumb:hover { background: var(--color-bg-surface); }
-#page-correcao-atenuacao .atn2-lane-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 8px;
-}
 #page-correcao-atenuacao .atn2-dot { width: 8px; height: 8px; border-radius: 999px; background: rgba(255,255,255,.3); }
-#page-correcao-atenuacao .atn2-lane-main { flex: 1; min-width: 0; }
-#page-correcao-atenuacao .atn2-lane-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-#page-correcao-atenuacao .atn2-lane-name { font-weight: 500; color: var(--color-text-primary); font-size: 12px; }
-#page-correcao-atenuacao .atn2-lane-range { color: var(--color-text-muted); font-size: 10px; margin-top: 3px; }
-#page-correcao-atenuacao .atn2-mini-track { height: 4px; border-radius: 999px; background: var(--black5); border: 1px solid rgba(255,255,255,.08); overflow: hidden; margin-top: 8px; }
-#page-correcao-atenuacao .atn2-mini-fill { height: 100%; background: rgba(255,255,255,.3); width: 0%; }
 
-#page-correcao-atenuacao .atn2-activity-item { padding: 8px 0; border-top: 1px solid rgba(255,255,255,.06); }
-#page-correcao-atenuacao .atn2-activity-item:first-child { border-top: none; }
-#page-correcao-atenuacao .atn2-activity-top { display: flex; align-items: flex-start; gap: 10px; }
-#page-correcao-atenuacao .atn2-activity-text { font-size: 12px; color: var(--color-text-primary); }
-#page-correcao-atenuacao .atn2-activity-sub { font-size: 10px; color: var(--color-text-muted); margin-top: 4px; }
+/* Atividades de atenuação (card grande) — itens mais "clicáveis" e com cara de registro */
+#page-correcao-atenuacao #atn2AttenuationActivities {
+  /* Scroll interno do card (sempre) */
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  max-height: min(58vh, 520px);
+  padding-right: 6px; /* dá espaço pro scrollbar sem "comer" o conteúdo */
+  scrollbar-gutter: stable;
+}
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-act-row {
+  width: 100%;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.03);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  text-align: left;
+  color: inherit;
+  transition: background var(--transition), border-color var(--transition), transform var(--transition);
+}
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-act-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-act-row + .atn2-act-row {
+  margin-top: 10px;
+}
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-act-row:hover {
+  background: rgba(255,255,255,.06);
+  border-color: rgba(255,255,255,.14);
+  transform: translateY(-1px);
+}
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-act-row:active {
+  transform: translateY(0);
+}
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-act-row:focus-visible {
+  outline: 2px solid rgba(34, 197, 94, 0.7);
+  outline-offset: 2px;
+}
+
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-status-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.04);
+  color: var(--white3);
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), transform var(--transition);
+}
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-status-btn:hover {
+  background: rgba(255,255,255,.07);
+  border-color: rgba(255,255,255,.22);
+}
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-status-btn:active { transform: scale(.98); }
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-status-btn[aria-expanded="true"] {
+  border-color: rgba(34, 197, 94, 0.55);
+}
+
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-edit-btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.04);
+  color: var(--white2);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 650;
+  flex: 0 0 auto;
+  transition: background var(--transition), border-color var(--transition), transform var(--transition);
+}
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-edit-btn:hover {
+  background: rgba(255,255,255,.07);
+  border-color: rgba(255,255,255,.22);
+}
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-edit-btn:active { transform: scale(.98); }
+
+/* Dropdown de status (Atenuação - card de atividades) */
+.atn2-status-dropdown {
+  position: fixed;
+  /* Abaixo do modal de criação/edição (#atn2ActModal), para não bloquear Salvar/Fechar. */
+  z-index: 19000;
+  min-width: 200px;
+}
+.atn2-status-dropdown-panel {
+  background: #0b0f14;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255,255,255,.12);
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+  box-shadow: 0 18px 48px rgba(0,0,0,.55);
+  color: #fff;
+}
+.atn2-status-item {
+  border: none;
+  border-radius: var(--radius);
+  padding: 9px 10px;
+  background: transparent;
+  color: #fff !important;
+  text-align: left;
+  cursor: pointer;
+  font-size: 12.5px;
+  transition: background var(--transition), color var(--transition);
+}
+.atn2-status-item:hover,
+.atn2-status-item:focus-visible {
+  outline: none;
+  background: rgba(34, 197, 94, 0.14);
+  color: var(--white);
+}
+.atn2-status-item.is-current-atn2-status {
+  filter: brightness(1.06);
+  font-weight: 650;
+}
+
+/* Cores por status (texto) */
+.atn2-status-item[data-atn2-pick-status="Criada"] { color: rgba(255,255,255,.65) !important; }
+.atn2-status-item[data-atn2-pick-status="Em andamento"] { color: #f59e0b !important; }
+.atn2-status-item[data-atn2-pick-status="Concluída"] { color: #22c55e !important; }
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-act-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-act-title {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--color-text-primary);
+  line-height: 1.2;
+}
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-act-sub {
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+  line-height: 1.2;
+}
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-act-cta {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+}
+#page-correcao-atenuacao #atn2AttenuationActivities .atn2-act-cta-arrow {
+  font-size: 18px;
+  line-height: 1;
+  opacity: .8;
+}
+
+@media (max-width: 767px) {
+  #page-correcao-atenuacao #atn2AttenuationActivities {
+    max-height: min(52vh, 420px);
+  }
+}
 
 /* Modal simples */
 #page-correcao-atenuacao .atn2-modal {
@@ -2545,7 +2543,8 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
   display: none;
   align-items: center;
   justify-content: center;
-  z-index: 999;
+  /* Acima do dropdown de status e de overlays comuns do app. */
+  z-index: 20000;
   padding: 18px;
 }
 #page-correcao-atenuacao .atn2-modal.open { display: flex; }
@@ -2555,6 +2554,14 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
+  position: relative;
+  z-index: 1;
+}
+#page-correcao-atenuacao .atn2-modal-panel .atn2-input,
+#page-correcao-atenuacao .atn2-modal-panel input,
+#page-correcao-atenuacao .atn2-modal-panel select {
+  user-select: text;
+  -webkit-user-select: text;
 }
 #page-correcao-atenuacao .atn2-modal-head {
   padding: 12px 14px;
@@ -2567,7 +2574,32 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
 #page-correcao-atenuacao .atn2-modal-title { font-weight: 900; color: var(--white); }
 #page-correcao-atenuacao .atn2-modal-body { padding: 14px; display: grid; gap: 10px; }
 #page-correcao-atenuacao .atn2-modal-row2 { display: grid; grid-template-columns: 1fr; gap: 8px; }
-#page-correcao-atenuacao .atn2-modal-foot { padding: 12px 14px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+#page-correcao-atenuacao .atn2-modal-foot {
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+#page-correcao-atenuacao .atn2-modal-foot-end {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+#page-correcao-atenuacao .atn2-btn.atn2-btn-danger {
+  border-color: rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.12);
+  color: #fecaca;
+}
+#page-correcao-atenuacao .atn2-btn.atn2-btn-danger:hover {
+  background: rgba(239, 68, 68, 0.22);
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #fff;
+}
 #page-correcao-atenuacao .atn2-btn {
   padding: 10px 14px;
   border-radius: 12px;
@@ -2604,17 +2636,12 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
   #page-correcao-atenuacao .atn2-metrics { grid-template-columns: repeat(2, 1fr); }
   #page-correcao-atenuacao .atn2-main { flex-direction: column; }
   #page-correcao-atenuacao .atn2-right { width: 100%; }
-  #page-correcao-atenuacao .atn2-filters { flex-direction: column; gap: 6px; }
-  #page-correcao-atenuacao .atn2-row-2 { flex-direction: column; gap: 6px; }
-  #page-correcao-atenuacao .atn2-select { width: 100%; }
-  #page-correcao-atenuacao .atn2-right.atn2-side > .atn2-card:last-child { height: 200px; }
-  #page-correcao-atenuacao .atn2-side-body { overflow: visible; }
-  #page-correcao-atenuacao #atn2Lanes { overflow: visible; }
+  /* Mobile: não deixar os conteúdos “vazarem” dos cards */
+  #page-correcao-atenuacao .atn2-side-body { overflow-y: auto; overflow-x: hidden; }
+
+  /* Exceção: o feed de "Atividades de atenuação" precisa manter scroll interno */
+  #page-correcao-atenuacao #atn2AttenuationActivities { overflow-y: auto; }
   #page-correcao-atenuacao .atn2-thermo-labels > *:not(:first-child):not(:last-child) { display: none; }
-  #page-correcao-atenuacao .atn2-open { opacity: 1; pointer-events: auto; }
-  /* Faixas em grid 2 colunas no mobile */
-  #page-correcao-atenuacao #atn2Lanes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  #page-correcao-atenuacao .atn2-lane-row { padding: 8px; border: 1px solid rgba(255,255,255,.06); border-radius: 8px; }
 }
 #page-correcao-atenuacao .atn-thermo-card {
   position: relative;

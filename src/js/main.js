@@ -800,10 +800,23 @@ const ApiService = Store.ApiService;
 // Termômetro (componente) — manter lógica de posição da agulha
 // ─────────────────────────────────────────────────────────────
 const THERMO_CONFIG = {
+  // Fonte única de verdade para faixas/limiares de atenuação.
+  // p0 = crítico (mais negativo) → p3 = leve/estável (menos negativo).
+  thresholds: { p0: -28.0, p1: -26.0, p2: -24.0, p3: -22.01 },
   // maxDbm (estável) = 0% esquerda | minDbm (crítico) = 100% direita
-  minDbm: -28.0,
-  maxDbm: -22.01,
+  get minDbm() { return this.thresholds.p0; },
+  get maxDbm() { return this.thresholds.p3; },
 };
+
+function getAtenuacaoThresholds() {
+  const t = THERMO_CONFIG?.thresholds || {};
+  const p0 = Number(t.p0);
+  const p1 = Number(t.p1);
+  const p2 = Number(t.p2);
+  const p3 = Number(t.p3);
+  if ([p0, p1, p2, p3].every(Number.isFinite)) return { p0, p1, p2, p3 };
+  return { p0: -28.0, p1: -26.0, p2: -24.0, p3: -22.01 };
+}
 
 function updateThermometer(dbm) {
   const { minDbm, maxDbm } = THERMO_CONFIG;
@@ -1177,6 +1190,20 @@ const WebhookService = {
     return String(s ?? '').replace(/\*/g, '·');
   },
 
+  /** Coordenadas em formato lat,lon (Google Chat costuma tornar clicável). */
+  _coordsClickableForChat(raw) {
+    const coordsRaw = String(raw || '').trim();
+    if (!coordsRaw) return '—';
+    const normalized = coordsRaw.replace(/\s+/g, '');
+    const parts = normalized.split(',');
+    if (parts.length !== 2) return coordsRaw;
+    const lat = Number(parts[0]);
+    const lon = Number(parts[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return coordsRaw;
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return coordsRaw;
+    return `${lat},${lon}`;
+  },
+
   _formatChatMention(chatUserIdRaw) {
     const raw = String(chatUserIdRaw || '').trim();
     if (!raw) return '';
@@ -1543,19 +1570,7 @@ const WebhookService = {
     const taskId = String(code || synthetic || `ETQ-${String(task?.id || '').padStart(4, '0')}`).trim();
 
     const ctoId = String(task?.ctoId || task?.titulo || '').trim() || `CTO-${String(Number(task?.id) || 0).padStart(2, '0')}`;
-    const coordsRaw = String(task?.coordenadas || '').trim();
-    const coordsClickable = (() => {
-      // Mantém apenas "lat,lon" (Google Chat costuma tornar clicável).
-      if (!coordsRaw) return '—';
-      const normalized = coordsRaw.replace(/\s+/g, '');
-      const parts = normalized.split(',');
-      if (parts.length !== 2) return coordsRaw;
-      const lat = Number(parts[0]);
-      const lon = Number(parts[1]);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return coordsRaw;
-      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return coordsRaw;
-      return `${lat},${lon}`;
-    })();
+    const coordsClickable = this._coordsClickableForChat(task?.coordenadas);
 
     const title =
       event === 'concluida'
@@ -1568,6 +1583,74 @@ const WebhookService = {
         '',
         '📍Localizações:',
         `(${this._chatSafe(ctoId)}): ${this._chatSafe(coordsClickable)}`,
+        '',
+        `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
+        `👤 Enviado por: ${this._chatSafe(enviadoPor)}`,
+        `🆔 : ${this._chatSafe(taskId)}`,
+      ].join('\n'),
+    };
+  },
+
+  /**
+   * Google Chat — Correção de atenuação: mesmo layout da Troca de etiqueta.
+   * Elemento = nome da CTO; localização = coordenadas (clicáveis quando lat,lon).
+   * Lista: uma linha por tarefa; opcionalmente `task.atnLocalizacoes` ou `task.localizacoes`
+   * como array de `{ cto?, ctoId?, titulo?, coordenadas? }` para N elementos.
+   * @param {'andamento'|'concluida'|'finalizada'} event
+   */
+  _buildCorrecaoAtenuacaoMessage(event, task) {
+    const tecnico = this._resolveTechnicianDisplay(task);
+    const enviadoPor = String(task?.assinadaPor || '').trim() || '—';
+    const code = String(task?.taskCode || '').trim();
+    const synthetic = (typeof Utils !== 'undefined' && typeof Utils.syntheticOpTaskCode === 'function')
+      ? String(Utils.syntheticOpTaskCode(task) || '').trim()
+      : '';
+    const taskId = String(code || synthetic || `ATN-${String(task?.id || '').padStart(4, '0')}`).trim();
+
+    const ctoFromTask = () => {
+      const id = String(task?.ctoId || '').trim();
+      if (id) return id;
+      const t = String(task?.titulo || '').trim();
+      if (t.includes('·')) return t.split('·')[0].trim();
+      return t || `ATN-${String(Number(task?.id) || 0).padStart(4, '0')}`;
+    };
+
+    const rows = [];
+    const list = Array.isArray(task?.atnLocalizacoes)
+      ? task.atnLocalizacoes
+      : Array.isArray(task?.localizacoes)
+        ? task.localizacoes
+        : null;
+    if (list && list.length) {
+      list.forEach((row, idx) => {
+        const label = String(row?.cto || row?.ctoId || row?.titulo || `Elemento ${idx + 1}`).trim() || `Elemento ${idx + 1}`;
+        rows.push({
+          label,
+          coords: this._coordsClickableForChat(row?.coordenadas),
+        });
+      });
+    } else {
+      rows.push({
+        label: ctoFromTask(),
+        coords: this._coordsClickableForChat(task?.coordenadas),
+      });
+    }
+
+    const title =
+      event === 'concluida' || event === 'finalizada'
+        ? '*✅CORREÇÃO DE ATENUAÇÃO — CONCLUÍDA*'
+        : '*📡CORREÇÃO DE ATENUAÇÃO*';
+
+    const locLines = rows.map((r, i) =>
+      `(${this._chatSafe(r.label || `Elemento ${i + 1}`)}): ${this._chatSafe(r.coords)}`,
+    );
+
+    return {
+      text: [
+        title,
+        '',
+        '📍Localizações:',
+        ...locLines,
         '',
         `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
         `👤 Enviado por: ${this._chatSafe(enviadoPor)}`,
@@ -1754,6 +1837,10 @@ const WebhookService = {
 
     if (opCat === 'troca-etiqueta') {
       return this._buildTrocaEtiquetaMessage(event, task);
+    }
+
+    if (opCat === 'correcao-atenuacao' || opCat === 'correcao_atenuacao') {
+      return this._buildCorrecaoAtenuacaoMessage(event, task);
     }
 
     // Template específico: Atendimento ao Cliente (Tarefa Pai) entrando em andamento.
@@ -4071,7 +4158,11 @@ const UI = {
   /** Atualiza Kanban (Tarefas) ou painel de Atendimento conforme a página ativa. */
   refreshOperationalUi() {
     if (Store.currentPage === 'atendimento') this.renderAtendimentoPage();
-    else if (Store.currentPage === 'correcao-atenuacao') this.renderAtenuacaoDashboardPage();
+    else if (Store.currentPage === 'correcao-atenuacao') {
+      // Re-render completo com o modal aberto recria o DOM e derruba foco/seleção nos inputs.
+      if (document.getElementById('atn2ActModal')?.classList?.contains('open')) return;
+      this.renderAtenuacaoDashboardPage();
+    }
     else this.renderOpPage();
   },
 
@@ -4604,12 +4695,6 @@ const UI = {
 
   /* ── Correção de Atenuação (Dashboard flat) ───────────────── */
   _atn2State: {
-    search: '',
-    region: 'todas',
-    tech: 'todos',
-    type: 'todas',
-    modalOpen: false,
-    spin: false,
     items: [],
     lanes: [],
     activities: [],
@@ -4643,16 +4728,8 @@ const UI = {
   _atn2PriorityFromDbm(dbm) {
     const n = Number(dbm);
     if (!Number.isFinite(n) || n === 0) return 'nd';
-    // Métricas (conforme solicitado):
-    // Leve:   -22.01 a -24.00
-    // Média:  -24.01 a -26.00
-    // Alta:   -26.01 a -28.00
-    // Crítica: pior que -28.00 (n < -28.00)
-    if (n < -28.0) return 'critica';
-    if (n <= -26.01) return 'alta';
-    if (n <= -24.01) return 'media';
-    if (n <= -22.01) return 'leve';
-    return 'leve';
+    const bucket = this._atnBucketForDb(n, this._atnThresholds());
+    return this._atn2PriorityFromBucket(bucket);
   },
 
   _atn2NormalizeNegativeDbmInput(raw) {
@@ -4702,8 +4779,9 @@ const UI = {
 
   _atn2ThermoStats(items) {
     // 0% = bom (>= -22.01 dBm), 100% = crítico (< -28.00 dBm)
-    const worst = this._ATN_THRESHOLDS_DEFAULT.p0; // -28
-    const best = this._ATN_THRESHOLDS_DEFAULT.p3; // -22.01
+    const thresholds = this._atnThresholds();
+    const worst = thresholds.p0; // -28
+    const best = thresholds.p3; // -22.01
     let sum = 0;
     let count = 0;
     for (const it of items) {
@@ -4750,41 +4828,6 @@ const UI = {
     const fixed = n.toFixed(1);
     return fixed.endsWith('.0') ? fixed.slice(0, -2) : fixed;
   },
-  _atn2RegionsFromItems(items) {
-    const set = new Set();
-    items.forEach(it => {
-      const name = String(it.name || '');
-      const idx = name.indexOf('·');
-      const reg = idx >= 0 ? name.slice(idx + 1).trim() : '';
-      set.add(reg || 'Não informado');
-    });
-    return ['todas', ...Array.from(set).sort((a, b) => String(a).localeCompare(String(b)))];
-  },
-  _atn2TechsFromItems(items) {
-    const set = new Set();
-    items.forEach(it => set.add(String(it.tech || '').trim() || '—'));
-    return ['todos', ...Array.from(set).sort((a, b) => String(a).localeCompare(String(b)))];
-  },
-  _atn2FilterItems(items, st) {
-    const q = String(st.search || '').trim().toLowerCase();
-    const regSel = String(st.region || 'todas').trim().toLowerCase();
-    const typeSel = String(st.type || 'todas').trim().toLowerCase();
-    return items.filter(it => {
-      const name = String(it.name || '').toLowerCase();
-      const idx = name.indexOf('·');
-      const region = idx >= 0 ? name.slice(idx + 1).trim().toLowerCase() : 'não informado';
-      const prio = String(it.priority || '').trim().toLowerCase();
-      const matchQ = !q || name.includes(q) || region.includes(q);
-      const matchReg = regSel === 'todas' || region === regSel;
-      const matchType =
-        typeSel === 'todas' ||
-        (typeSel === 'critico' && prio === 'critica') ||
-        (typeSel === 'alto' && prio === 'alta') ||
-        (typeSel === 'medio' && prio === 'media') ||
-        (typeSel === 'estavel' && prio === 'leve');
-      return matchQ && matchReg && matchType;
-    });
-  },
   _atn2Counts(filtered) {
     let critAlta = 0, medio = 0, estavel = 0, nd = 0;
     filtered.forEach(it => {
@@ -4798,6 +4841,7 @@ const UI = {
     const thermo = this._atn2ThermoStats(filtered);
     return { critAlta, medio, estavel, nd, total: filtered.length, pctCritAlta, thermoPct: thermo.pct, thermoAvgDbm: thermo.avgDbm, thermoDbmCount: thermo.count };
   },
+
   _atn2LaneDotColor(color) {
     const c = String(color || '').toLowerCase();
     if (c === 'red') return '#ef4444';
@@ -4806,16 +4850,9 @@ const UI = {
     if (c === 'green') return '#22c55e';
     return 'rgba(255,255,255,.35)';
   },
-  _atn2LaneCountColor(color) {
-    const c = String(color || '').toLowerCase();
-    if (c === 'red') return 'var(--danger)';
-    if (c === 'amber') return 'var(--warning)';
-    if (c === 'blue') return 'var(--info)';
-    if (c === 'green') return 'var(--green)';
-    return 'var(--white4)';
-  },
 
-  _atn2RenderSkeleton(root, st, counts, regions, techs) {
+  // Render do Dashboard "flat" (sem a caixa de pendências/lista).
+  _atn2RenderSkeleton(root, st, counts) {
     const thermoLeft = this._atn2Clamp(counts.thermoPct, 0, 100);
     const accent = this._atn2ThermoAccent(thermoLeft);
     const avgTxt = Number.isFinite(Number(counts.thermoAvgDbm))
@@ -4867,426 +4904,277 @@ const UI = {
       </div>
 
       <div class="atn2-main">
-        <div class="atn2-card atn2-left">
-          <div class="atn2-panel-head">
-            <div class="atn2-panel-title">Caixas com pendências</div>
-            <div class="atn2-panel-actions">
-              <span class="atn2-count" id="atn2ListCount">${counts.total} itens</span>
-              <div class="atn2-actions">
-                <button class="atn2-refresh" id="atn2RefreshBtn" aria-label="Atualizar">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/>
-                  </svg>
-                </button>
-                <button class="atn2-primary" id="atn2NewBtn" type="button">+ Nova correção</button>
+        <div class="atn2-layout-3">
+          <div class="atn2-card atn2-activities-card">
+            <div class="atn2-panel-head">
+              <div class="atn2-panel-title">Atividades de atenuação</div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+                <div class="atn2-filters" role="tablist" aria-label="Filtrar atividades de atenuação">
+                  <button type="button" class="atn2-filter-btn" data-atn2-act-filter="all" role="tab" aria-selected="true">Todas</button>
+                  <button type="button" class="atn2-filter-btn" data-atn2-act-filter="pending" role="tab" aria-selected="false">Pendentes</button>
+                  <button type="button" class="atn2-filter-btn" data-atn2-act-filter="progress" role="tab" aria-selected="false">Em andamento</button>
+                  <button type="button" class="atn2-filter-btn" data-atn2-act-filter="done" role="tab" aria-selected="false">Concluídas</button>
+                </div>
+                <button class="atn2-primary atn2-primary--sm" id="atn2CreateActivityBtn" type="button">+ Criar atividade</button>
               </div>
             </div>
+            <div class="atn2-side-body" id="atn2AttenuationActivities"></div>
           </div>
-          <div class="atn2-filters">
-            <input class="atn2-input" id="atn2Search" type="search" placeholder="Buscar CTO, bairro ou técnico…" value="${this._atn2Escape(st.search)}" />
-            <div class="atn2-row-2">
-              <select class="atn2-select" id="atn2Region">
-                ${regions.map(r => `<option value="${this._atn2Escape(r)}"${String(st.region) === String(r) ? ' selected' : ''}>${r === 'todas' ? 'Todas as regiões' : this._atn2Escape(r)}</option>`).join('')}
-              </select>
-              <select class="atn2-select" id="atn2Type" aria-label="Filtrar por tipo">
-                <option value="todas"${String(st.type) === 'todas' ? ' selected' : ''}>Todos os tipos</option>
-                <option value="critico"${String(st.type) === 'critico' ? ' selected' : ''}>Crítico</option>
-                <option value="alto"${String(st.type) === 'alto' ? ' selected' : ''}>Alto</option>
-                <option value="medio"${String(st.type) === 'medio' ? ' selected' : ''}>Médio</option>
-                <option value="estavel"${String(st.type) === 'estavel' ? ' selected' : ''}>Estável</option>
-              </select>
-            </div>
-          </div>
-          <div class="atn2-list" id="atn2List"></div>
-        </div>
 
-        <div class="atn2-right atn2-side">
-          <div class="atn2-card">
-            <div class="atn2-panel-head">
-              <div class="atn2-panel-title">Faixas de Atenuação</div>
-              <span class="atn2-count">Resumo</span>
+          <div class="atn2-side-stack">
+            <div class="atn2-card atn2-sev-card" aria-label="Resumo de severidade">
+              <div class="atn2-panel-head">
+                <div class="atn2-panel-title">Resumo de atenuação</div>
+                <span class="atn2-count">P0/P1/P2/P3</span>
+              </div>
+              <div class="atn2-side-body">
+                <div class="atn2-sev-grid">
+                  <div class="atn2-sev-row">
+                    <span class="atn2-sev-dot atn2-sev-dot--crit"></span>
+                    <span class="atn2-sev-label">Críticas</span>
+                    <span class="atn2-sev-val" style="color:var(--danger)">${counts.critAlta}</span>
+                  </div>
+                  <div class="atn2-sev-row">
+                    <span class="atn2-sev-dot atn2-sev-dot--med"></span>
+                    <span class="atn2-sev-label">Médias</span>
+                    <span class="atn2-sev-val" style="color:var(--warning)">${counts.medio}</span>
+                  </div>
+                  <div class="atn2-sev-row">
+                    <span class="atn2-sev-dot atn2-sev-dot--lev"></span>
+                    <span class="atn2-sev-label">Leves</span>
+                    <span class="atn2-sev-val" style="color:var(--green)">${counts.estavel}</span>
+                  </div>
+                </div>
+                <div class="atn2-sev-sub">P0+P1 = críticas · P2 = médias · P3 = leves</div>
+              </div>
             </div>
-            <div class="atn2-side-body" id="atn2Lanes"></div>
-          </div>
-          <div class="atn2-card">
-            <div class="atn2-panel-head">
-              <div class="atn2-panel-title">Atividade Recente</div>
-              <span class="atn2-count">Hoje</span>
-            </div>
-            <div class="atn2-side-body" id="atn2Activities"></div>
           </div>
         </div>
       </div>
 
-      <div class="atn2-modal" id="atn2Modal" aria-hidden="true">
-        <div class="atn2-modal-panel" role="dialog" aria-modal="true" aria-label="Nova correção">
+      <div class="atn2-modal" id="atn2ActModal" aria-hidden="true">
+        <div class="atn2-modal-panel" role="dialog" aria-modal="true" aria-label="Criar atividade de atenuação">
           <div class="atn2-modal-head">
-            <div class="atn2-modal-title">Nova correção</div>
-            <button class="atn2-btn" id="atn2CloseModalBtn" type="button">Fechar</button>
+            <div class="atn2-modal-title">Criar atividade de atenuação</div>
+            <button class="atn2-btn" id="atn2ActCloseBtn" type="button">Fechar</button>
           </div>
           <div class="atn2-modal-body">
             <div class="form-group">
-              <label for="atn2ModalName">Nome / CTO</label>
-              <input class="atn2-input" id="atn2ModalName" type="text" placeholder="CTO-00 · Nova caixa" />
+              <label for="atn2ActName">Nome da caixa</label>
+              <input class="atn2-input" id="atn2ActName" type="text" placeholder="CTO-00 · Bairro · Região" />
             </div>
             <div class="form-group">
-              <label for="atn2ModalDbm">Atenuação (dBm)</label>
-              <input class="atn2-input" id="atn2ModalDbm" type="text" placeholder="-27.0" />
+              <label for="atn2ActRegion">Região</label>
+              <select class="atn2-input" id="atn2ActRegion" aria-label="Região da atividade de atenuação">
+                <option value="">—</option>
+                <option value="Goval">Goval</option>
+                <option value="Vale do Aço">Vale do Aço</option>
+                <option value="Caratinga">Caratinga</option>
+                <option value="Backup">Backup</option>
+              </select>
             </div>
-            <div class="atn2-modal-row2">
-              <div class="form-group">
-                <label for="atn2ModalTech">Técnico</label>
-                <select class="atn2-select" id="atn2ModalTech">
-                  <option value="Junin">Junin</option>
-                  <option value="Marcos">Marcos</option>
-                  <option value="Leandro">Leandro</option>
-                </select>
-              </div>
+            <div class="form-group">
+              <label for="atn2ActDbm">Faixa de atenuação (dBm)</label>
+              <input class="atn2-input" id="atn2ActDbm" type="text" placeholder="-27.0" inputmode="decimal" />
             </div>
           </div>
           <div class="atn2-modal-foot">
-            <button class="atn2-btn" id="atn2CancelBtn" type="button">Cancelar</button>
-            <button class="atn2-primary" id="atn2ConfirmBtn" type="button">Confirmar</button>
+            <button type="button" class="atn2-btn atn2-btn-danger" id="atn2ActDeleteBtn" hidden aria-hidden="true">Excluir</button>
+            <div class="atn2-modal-foot-end">
+              <button class="atn2-btn" id="atn2ActCancelBtn" type="button">Cancelar</button>
+              <button class="atn2-primary" id="atn2ActSaveBtn" type="button">Salvar</button>
+            </div>
           </div>
         </div>
       </div>
     `;
   },
 
-  _atn2RenderList(root, items) {
+  _atn2RenderAttenuationActivities(root, acts) {
     if (!root) return;
-    if (!items.length) {
-      root.innerHTML = `<div class="calendar-empty" style="padding:18px 10px;margin:0">Nenhuma caixa encontrada com os filtros atuais.</div>`;
-      root.classList.remove('atn2-list--scroll7');
+    if (!acts.length) {
+      root.innerHTML = `<div class="calendar-empty" style="padding:14px 10px;margin:0">Sem atividades de atenuação no momento.</div>`;
       return;
     }
-    root.innerHTML = items.map(it => {
-      const meta = this._atn2PriorityMeta(it.priority);
-      const dbm = it.dbm ? `${this._atn2FormatDbm(it.dbm)} dBm` : 'N/D';
-      const status = String(it.status || 'Criada');
-      const statusPill = `<span class="atn2-pill">${this._atn2Escape(status)}</span>`;
-      const prioPill = `<span class="atn2-pill" style="background:${meta.badgeBg};border-color:${meta.badgeBg};color:${meta.badgeText}">${this._atn2Escape(meta.label)}</span>`;
-      const initials = String(it.techInitials || '').trim() || Utils.getInitials(String(it.tech || '—'));
-      const avatar = `<span class="atn2-avatar" style="${this._atn2TechAvatarStyle(it.techColor)}">${this._atn2Escape(initials)}</span>`;
-      const statusPickerBtn = `
-        <button
-          type="button"
-          class="atn2-status-picker-btn"
-          draggable="false"
-          data-atn2-status-picker="${Number(it.id) || 0}"
-          title="Alterar status"
-          aria-label="Alterar status"
-        >${Utils.OP_STATUS_PICKER_SVG}</button>
-      `;
-      return `
-        <div class="atn2-cto" data-atn2-item="${Number(it.id) || 0}">
-          <span class="atn2-cto-leftbar" style="background:${meta.border}"></span>
-          <div class="atn2-cto-top">
-            <div class="atn2-cto-name">${this._atn2Escape(it.name)}</div>
-            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-              ${statusPickerBtn}
-              <div class="atn2-cto-dbm" style="color:${meta.value}">${this._atn2Escape(dbm)}</div>
-            </div>
-          </div>
-          <div class="atn2-cto-bottom">
-            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${prioPill}${statusPill}</div>
-            <div style="display:flex;align-items:center;gap:8px">${avatar}<span style="color:var(--white2);font-size:12px">${this._atn2Escape(it.tech)}</span></div>
-          </div>
-        </div>
-      `;
-    }).join('');
-    // Após 7 itens, aplica modo "scroll" via CSS (mais estável e responsivo).
-    if (items.length > 7) root.classList.add('atn2-list--scroll7');
-    else root.classList.remove('atn2-list--scroll7');
-  },
-
-  _atn2RenderLanes(root, lanes) {
-    if (!root) return;
-    root.innerHTML = lanes.map(l => {
-      const dot = this._atn2LaneDotColor(l.color);
-      const countColor = this._atn2LaneCountColor(l.color);
-      const pct = l.max ? Math.round((Number(l.count) / Number(l.max)) * 100) : 0;
-      return `
-        <div class="atn2-lane-row">
-          <span class="atn2-dot" style="background:${dot}"></span>
-          <div class="atn2-lane-main">
-            <div class="atn2-lane-head">
-              <div class="atn2-lane-name">${this._atn2Escape(l.label)}</div>
-              <div style="color:${countColor};font-family:var(--font-mono);font-weight:900">${Number(l.count) || 0}</div>
-            </div>
-            <div class="atn2-lane-range">${this._atn2Escape(l.range)}</div>
-            <div class="atn2-mini-track"><div class="atn2-mini-fill" style="background:${dot};width:${pct}%"></div></div>
-          </div>
-        </div>
-      `;
-    }).join('');
-  },
-
-  _atn2RenderActivities(root, acts) {
-    if (!root) return;
     const dot = (c) => this._atn2LaneDotColor(c === 'red' ? 'red' : c === 'amber' ? 'amber' : c === 'blue' ? 'blue' : 'green');
     root.innerHTML = acts.map(a => `
-      <div class="atn2-activity-item">
-        <div class="atn2-activity-top">
-          <span class="atn2-dot" style="background:${dot(a.color)}"></span>
-          <div style="min-width:0;flex:1">
-            <div class="atn2-activity-text">${this._atn2Escape(a.text)}</div>
-            <div class="atn2-activity-sub">${this._atn2Escape(a.time)} · ${this._atn2Escape(a.tech)}</div>
-          </div>
-        </div>
+      <div class="atn2-act-row" role="group" aria-label="Atividade de atenuação">
+        <button type="button" class="atn2-act-open" data-atn2-act-open="${Number(a.id) || 0}" aria-label="Editar atividade">
+          <span class="atn2-dot" style="background:${dot(a.color)}" aria-hidden="true"></span>
+          <span class="atn2-act-main">
+            <span class="atn2-act-title">${this._atn2Escape(a.text)}</span>
+            <span class="atn2-act-sub">${this._atn2Escape(a.time)} · ${this._atn2Escape(a.tech)}${a.meta ? ` · ${this._atn2Escape(a.meta)}` : ''}</span>
+          </span>
+          <span class="atn2-act-cta" aria-hidden="true">
+            <span class="atn2-act-cta-arrow">›</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          class="atn2-edit-btn"
+          data-atn2-edit-btn="${Number(a.id) || 0}"
+          title="Editar"
+          aria-label="Editar"
+        >Editar</button>
+        <button
+          type="button"
+          class="atn2-status-btn"
+          data-atn2-status-btn="${Number(a.id) || 0}"
+          title="Alterar status"
+          aria-label="Alterar status"
+          aria-haspopup="menu"
+          aria-expanded="false"
+        >●</button>
       </div>
     `).join('');
   },
 
-  _atn2OpenModal() {
-    const m = document.getElementById('atn2Modal');
-    if (!m) return;
-    m.classList.add('open');
-    m.setAttribute('aria-hidden', 'false');
-    document.getElementById('atn2ModalName')?.focus?.();
-  },
-  _atn2CloseModal() {
-    const m = document.getElementById('atn2Modal');
-    if (!m) return;
-    m.classList.remove('open');
-    m.setAttribute('aria-hidden', 'true');
+  _atn2PaintActFilterChips(root, actFilter) {
+    if (!root) return;
+    root.querySelectorAll?.('[data-atn2-act-filter]')?.forEach?.((b) => {
+      const k = String(b.getAttribute('data-atn2-act-filter') || '');
+      const isOn = k === actFilter;
+      b.classList.toggle('is-active', isOn);
+      b.setAttribute('aria-selected', isOn ? 'true' : 'false');
+    });
   },
 
-  _atn2CloseStatusDropdown() {
-    const dd = document.getElementById('atn2StatusDropdown');
-    if (!dd) return;
-    dd.hidden = true;
-    delete dd.dataset.opId;
-  },
-  _atn2EnsureStatusDropdown() {
-    // IMPORTANTE: o dropdown precisa ficar fora do layout da página (ex.: containers com transform),
-    // senão `position: fixed` pode ficar relativo ao painel e o cálculo por viewport "desloca".
-    let dd = document.getElementById('atn2StatusDropdown');
-    let panel = document.getElementById('atn2StatusDropdownPanel');
-    if (dd && panel) return { dd, panel };
-
-    dd = document.createElement('div');
-    dd.className = 'atd-status-dropdown';
-    dd.id = 'atn2StatusDropdown';
-    dd.hidden = true;
-
-    panel = document.createElement('div');
-    panel.className = 'atd-status-dropdown-panel';
-    panel.id = 'atn2StatusDropdownPanel';
-    panel.setAttribute('role', 'menu');
-    panel.setAttribute('aria-label', 'Alterar status');
-    dd.appendChild(panel);
-
-    document.body.appendChild(dd);
-    return { dd, panel };
-  },
-  _atn2PositionStatusDropdown(anchorEl) {
-    const dd = document.getElementById('atn2StatusDropdown');
-    if (!dd || !anchorEl) return;
-    const rect = anchorEl.getBoundingClientRect();
-    const ddW = dd.offsetWidth || 188;
-    const ddH = dd.offsetHeight || 160;
-    // Alinha pelo centro do botão para não "escapar" em listas longas.
-    let left = rect.left + (rect.width / 2) - (ddW / 2);
-    if (left < 8) left = 8;
-    if (left + ddW > window.innerWidth - 8) left = Math.max(8, window.innerWidth - ddW - 8);
-    let top = rect.bottom + 6;
-    if (top + ddH > window.innerHeight - 8) top = Math.max(8, rect.top - ddH - 6);
-    if (top < 8) top = 8;
-    dd.style.left = `${Math.round(left)}px`;
-    dd.style.top = `${Math.round(top)}px`;
-  },
-  _atn2OpenStatusDropdown(anchorEl, opTaskId) {
-    const id = Number(opTaskId);
-    if (!Number.isFinite(id) || id <= 0) return;
-    const task = Store.findOpTask(id);
-    if (!task || !anchorEl) return;
-
-    const { dd, panel } = this._atn2EnsureStatusDropdown();
-
-    if (!dd.hidden && Number(dd.dataset.opId || 0) === id) {
-      this._atn2CloseStatusDropdown();
-      return;
-    }
-
-    const cur = String(task.status || '').trim();
-    const picks = [
-      { value: 'Pendente', label: 'Pendente' },
-      { value: 'Em andamento', label: 'Em andamento' },
-      { value: 'Concluída', label: 'Concluído' },
+  _atn2BuildAttenuationActivityFeed(actFilter) {
+    const atnOpTasks = [
+      ...(Store.getOpTasksByCategory('correcao-atenuacao') || []),
+      ...(Store.getOpTasksByCategory('correcao_atenuacao') || []),
     ];
-    panel.innerHTML = picks.map(p => {
-      const isCur = String(p.value) === cur;
-      return `<button type="button" class="atd-status-dropdown-item${isCur ? ' is-current-op-status' : ''}" role="menuitem" data-atn2-pick-status="${Utils.escapeHtmlAttr(p.value)}">${Utils.escapeHtml(p.label)}${isCur ? ' \u2713' : ''}</button>`;
-    }).join('');
-
-    dd.dataset.opId = String(id);
-    dd.hidden = false;
-    requestAnimationFrame(() => {
-      this._atn2PositionStatusDropdown(anchorEl);
-      panel.querySelector('.atd-status-dropdown-item')?.focus?.();
+    const feed = [];
+    const prioColor = (t) => {
+      const p = String(t?.prioridade || '').trim().toLowerCase();
+      if (p === 'critica') return 'red';
+      if (p === 'alta') return 'amber';
+      if (p === 'media') return 'blue';
+      return 'green';
+    };
+    const f = String(actFilter || 'all');
+    atnOpTasks.forEach((t) => {
+      const hist = Array.isArray(t?.historico) ? t.historico : [];
+      const last = hist.length ? hist[hist.length - 1] : null;
+      const ts = String(last?.timestamp || t?.criadaEm || '').trim();
+      if (!ts) return;
+      const d = new Date(ts);
+      const time = Number.isFinite(d.getTime())
+        ? d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+        : ts.slice(0, 16).replace('T', ' ');
+      const title = String(t?.titulo || t?.nome || 'Correção').trim() || 'Correção';
+      const stt = String(last?.status || t?.status || '—').trim();
+      const stLower = stt.toLowerCase();
+      const showByFilter = f === 'all'
+        ? true
+        : f === 'pending'
+          ? stLower === 'criada'
+          : f === 'progress'
+            ? stLower === 'em andamento'
+            : f === 'done'
+              ? stLower === 'concluída' || stLower === 'concluida'
+              : true;
+      if (!showByFilter) return;
+      const who = String(last?.autor || t?.responsavel || '—').trim() || '—';
+      const db = Number(t?.atenuacaoDb);
+      const meta = Number.isFinite(db) && db !== 0 ? `${String(db)} dBm` : '';
+      feed.push({
+        color: prioColor(t),
+        id: Number(t?.id) || 0,
+        text: `${title} — ${stt}`,
+        time,
+        tech: who,
+        meta,
+        ts,
+      });
     });
+    feed.sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
+    return feed.slice(0, 20);
   },
 
-  _bindAtenuacaoDashboardEventsOnce(root) {
-    if (!root || root.dataset.boundAtn2) return;
-    root.dataset.boundAtn2 = '1';
+  _atn2SyncActModalDeleteBtn() {
+    const del = document.getElementById('atn2ActDeleteBtn');
+    const m = document.getElementById('atn2ActModal');
+    if (!del || !m) return;
+    const id = Number(m.dataset?.editId || 0);
+    const show = Number.isFinite(id) && id > 0;
+    del.hidden = !show;
+    del.setAttribute('aria-hidden', show ? 'false' : 'true');
+  },
 
-    const rerender = () => this.renderAtenuacaoDashboardPage();
-
-    root.addEventListener('click', (e) => {
-      const t = e.target;
-      const statusBtn = t?.closest?.('[data-atn2-status-picker]');
-      if (statusBtn) {
-        e.preventDefault();
-        e.stopPropagation();
-        this._atn2EnsureStatusDropdown();
-        const oid = Number(statusBtn.getAttribute('data-atn2-status-picker') || 0);
-        if (oid) this._atn2OpenStatusDropdown(statusBtn, oid);
-        return;
-      }
-      const card = t?.closest?.('[data-atn2-item]');
-      if (card) {
-        e.preventDefault();
-        this._atn2OpenModal();
-        return;
-      }
-      if (t?.closest?.('#atn2NewBtn')) {
-        e.preventDefault();
-        this._atn2OpenModal();
-        return;
-      }
-      if (t?.closest?.('#atn2CloseModalBtn') || t?.closest?.('#atn2CancelBtn')) {
-        e.preventDefault();
-        this._atn2CloseModal();
-        return;
-      }
-      if (t?.closest?.('#atn2ConfirmBtn')) {
-        e.preventDefault();
-        const name = String(document.getElementById('atn2ModalName')?.value || '').trim() || 'CTO-00 · Nova caixa';
-        const dbmEl = document.getElementById('atn2ModalDbm');
-        const dbmNorm = this._atn2NormalizeNegativeDbmInput(dbmEl?.value);
-        if (dbmEl && dbmNorm !== String(dbmEl.value || '')) dbmEl.value = dbmNorm;
-        const dbm = Number(String(dbmNorm || '').replace(',', '.')) || 0;
-        const tech = String(document.getElementById('atn2ModalTech')?.value || 'Junin');
-        const idx = name.indexOf('·');
-        const titulo = (idx >= 0 ? name.slice(0, idx) : name).trim() || 'Nova correção';
-        const regiao = (idx >= 0 ? name.slice(idx + 1) : '').trim();
-        const atenuacaoDb = Number.isFinite(dbm) ? (dbm > 0 ? -dbm : dbm) : 0;
-        const prio = this._atn2PriorityFromDbm(atenuacaoDb);
-        // Persiste no Store como OpTask real (fonte da UI em tempo real)
-        Store.addOpTask({
-          categoria: 'correcao-atenuacao',
-          titulo,
-          regiao,
-          responsavel: tech,
-          prioridade: prio,
-          status: 'Criada',
-          descricao: atenuacaoDb ? `Atenuação: ${atenuacaoDb} dBm` : 'Atenuação: N/D',
-          atenuacaoDb,
-        });
-        this._atn2CloseModal();
-        rerender();
-        ToastService.show('Correção criada.', 'success');
-        return;
-      }
-      if (t?.closest?.('#atn2RefreshBtn')) {
-        e.preventDefault();
-        const btn = document.getElementById('atn2RefreshBtn');
-        btn?.classList.remove('atn2-spin');
-        void btn?.offsetWidth;
-        btn?.classList.add('atn2-spin');
-        setTimeout(() => btn?.classList.remove('atn2-spin'), 700);
-        ToastService.show('Lista atualizada.', 'info');
-        return;
-      }
-    });
-
-    const ddPanel = this._atn2EnsureStatusDropdown().panel;
-    if (ddPanel && !ddPanel.dataset.boundPick) {
-      ddPanel.addEventListener('click', (e) => {
-        const pickBtn = e.target.closest('[data-atn2-pick-status]');
-        if (!pickBtn || !ddPanel.contains(pickBtn)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const dd = document.getElementById('atn2StatusDropdown');
-        const tid = Number(dd?.dataset?.opId || 0);
-        const nextStatus = pickBtn.getAttribute('data-atn2-pick-status');
-        if (!tid || !nextStatus) return;
-        const curTask = Store.findOpTask(tid);
-        if (curTask && String(curTask.status || '') === String(nextStatus)) {
-          this._atn2CloseStatusDropdown();
-          return;
-        }
-        OpTaskService.changeStatus(tid, nextStatus);
-        UI.refreshOperationalUi();
-        UI.renderDashboard();
-        UI.renderCalendarPage();
-        rerender();
-        this._atn2CloseStatusDropdown();
-        ToastService.show(`Status: ${nextStatus}`, 'success');
-      });
-      ddPanel.dataset.boundPick = '1';
-
-      document.addEventListener(
-        'pointerdown',
-        (e) => {
-          const dd = document.getElementById('atn2StatusDropdown');
-          if (!dd || dd.hidden) return;
-          if (dd.contains(e.target)) return;
-          if (e.target.closest('[data-atn2-status-picker]')) return;
-          this._atn2CloseStatusDropdown();
-        },
-        true,
-      );
-
-      document.addEventListener('keydown', (e) => {
-        if (e.key !== 'Escape') return;
-        const dd = document.getElementById('atn2StatusDropdown');
-        if (!dd || dd.hidden) return;
-        this._atn2CloseStatusDropdown();
-      });
+  /** Atualiza só filtros + lista de atividades (não recria o modal nem o skeleton). */
+  _atn2RefreshAttenuationFeedOnly(root, preservedScroll) {
+    if (!root) return;
+    if (!root.dataset.atn2ActFilter) root.dataset.atn2ActFilter = 'all';
+    const actFilter = String(root.dataset.atn2ActFilter || 'all');
+    this._atn2PaintActFilterChips(root, actFilter);
+    const feed = this._atn2BuildAttenuationActivityFeed(actFilter);
+    const feedRoot = document.getElementById('atn2AttenuationActivities');
+    const prevScrollTop = feedRoot ? feedRoot.scrollTop : 0;
+    const prevClientH = feedRoot ? feedRoot.clientHeight : 0;
+    const prevScrollH = feedRoot ? feedRoot.scrollHeight : 0;
+    const prevNearBottom = feedRoot
+      ? (prevScrollH - (prevScrollTop + prevClientH)) <= 14
+      : false;
+    const usePreserved = preservedScroll && typeof preservedScroll.scrollTop === 'number';
+    const nearBottom = usePreserved ? !!preservedScroll.nearBottom : prevNearBottom;
+    const scrollTop = usePreserved ? preservedScroll.scrollTop : prevScrollTop;
+    this._atn2RenderAttenuationActivities(feedRoot, feed);
+    if (feedRoot) {
+      if (nearBottom) feedRoot.scrollTop = feedRoot.scrollHeight;
+      else feedRoot.scrollTop = scrollTop;
     }
-
-    root.addEventListener('input', (e) => {
-      const el = e.target;
-      if (el?.id === 'atn2Search') {
-        this._atn2State.search = String(el.value || '');
-        rerender();
-      }
-      if (el?.id === 'atn2ModalDbm') {
-        const next = this._atn2NormalizeNegativeDbmInput(el.value);
-        if (next !== el.value) {
-          const pos = el.selectionStart;
-          el.value = next;
-          try { el.setSelectionRange(pos, pos); } catch {}
-        }
-      }
-    });
-    root.addEventListener('change', (e) => {
-      const el = e.target;
-      if (el?.id === 'atn2Region') {
-        this._atn2State.region = String(el.value || 'todas');
-        rerender();
-      }
-      if (el?.id === 'atn2Type') {
-        this._atn2State.type = String(el.value || 'todas');
-        rerender();
-      }
-    });
-
-    // Fecha modal ao clicar fora do painel
-    root.addEventListener('click', (e) => {
-      const modal = e.target?.closest?.('#atn2Modal');
-      if (modal && e.target === modal) this._atn2CloseModal();
-    });
+    if (feedRoot && !feedRoot.dataset.boundScrollFlag) {
+      feedRoot.dataset.boundScrollFlag = '1';
+      let t = null;
+      const mark = () => {
+        feedRoot.dataset.userScrolling = '1';
+        clearTimeout(t);
+        t = setTimeout(() => { feedRoot.dataset.userScrolling = '0'; }, 800);
+      };
+      feedRoot.addEventListener('wheel', mark, { passive: true });
+      feedRoot.addEventListener('touchmove', mark, { passive: true });
+      feedRoot.addEventListener('scroll', mark, { passive: true });
+    }
   },
 
   renderAtenuacaoDashboardPage() {
     const root = document.getElementById('atn2Root');
     if (!root) return;
-    this._bindAtenuacaoDashboardEventsOnce(root);
     const st = this._atn2State;
+
+    const atn2DbgOn = (() => {
+      try {
+        const byLs = localStorage.getItem('planner.atn2.debug') === '1';
+        const byQs = /\batn2debug=1\b/.test(String(location.search || ''));
+        return byLs || byQs;
+      } catch {
+        return /\batn2debug=1\b/.test(String(location.search || ''));
+      }
+    })();
+    const atn2Dbg = (msg, data) => {
+      if (!atn2DbgOn) return;
+      try { console.log(`[atn2] ${msg}`, data || {}); } catch { /* ignore */ }
+    };
+    atn2Dbg('renderAtenuacaoDashboardPage()', { ts: Date.now() });
+
+    // Preserva scroll do feed de atividades (evita “pular” com re-render em tempo real).
+    const prevFeed = document.getElementById('atn2AttenuationActivities');
+    const prevScrollTop = prevFeed ? prevFeed.scrollTop : 0;
+    const prevClientH = prevFeed ? prevFeed.clientHeight : 0;
+    const prevScrollH = prevFeed ? prevFeed.scrollHeight : 0;
+    const prevNearBottom = prevFeed
+      ? (prevScrollH - (prevScrollTop + prevClientH)) <= 14
+      : false;
+
+    // Preserva estado do modal (o skeleton recria o DOM a cada render).
+    const prevModal = document.getElementById('atn2ActModal');
+    const prevModalOpen = !!(prevModal && prevModal.classList.contains('open'));
+    const prevEditId = prevModalOpen ? String(prevModal?.dataset?.editId || '') : '';
+    const prevOpenedAt = prevModalOpen ? String(prevModal?.dataset?.openedAt || '') : '';
+    const prevName = prevModalOpen ? String(document.getElementById('atn2ActName')?.value || '') : '';
+    const prevRegion = prevModalOpen ? String(document.getElementById('atn2ActRegion')?.value || '') : '';
+    const prevDbm = prevModalOpen ? String(document.getElementById('atn2ActDbm')?.value || '') : '';
 
     // Seed leve para teste do termômetro (não duplica; só quando vazio)
     try {
@@ -5323,68 +5211,459 @@ const UI = {
       /* ignore */
     }
 
+    // Adiciona 2 atividades extras (uma vez) para visualização do card "Atividades de atenuação".
+    // Não depende do seed inicial (pode rodar mesmo com dados já existentes).
+    try {
+      const extraKey = 'planner.atn2.extraActivities2.v1';
+      const hasExtra = localStorage.getItem(extraKey) === '1';
+      if (!hasExtra) {
+        const samples2 = [
+          { titulo: 'CTO-05', regiao: 'Goval', responsavel: 'Junin', atenuacaoDb: -25.6 },
+          { titulo: 'CTO-06', regiao: 'Vale do Aço', responsavel: 'Marcos', atenuacaoDb: -28.6 },
+        ];
+        samples2.forEach((s) => {
+          const db = Number(s.atenuacaoDb);
+          const atenuacaoDb = Number.isFinite(db) ? (db > 0 ? -db : db) : 0;
+          const prio = this._atn2PriorityFromDbm(atenuacaoDb);
+          Store.addOpTask({
+            categoria: 'correcao-atenuacao',
+            titulo: `${s.titulo} · ${s.regiao}`,
+            regiao: s.regiao,
+            responsavel: s.responsavel,
+            prioridade: prio,
+            status: 'Criada',
+            descricao: `Atenuação: ${atenuacaoDb} dBm`,
+            atenuacaoDb,
+          });
+        });
+        localStorage.setItem(extraKey, '1');
+      }
+    } catch {
+      /* ignore */
+    }
+
     // Atualiza dados em tempo real com base no Store
     st.items = this._atn2ItemsFromStore();
 
-    const regions = this._atn2RegionsFromItems(st.items);
-    const techs = this._atn2TechsFromItems(st.items);
-    const filtered = this._atn2FilterItems(st.items, st);
-    const counts = this._atn2Counts(filtered);
-    this._atn2RenderSkeleton(root, st, counts, regions, techs);
+    const counts = this._atn2Counts(st.items);
+    this._atn2RenderSkeleton(root, st, counts);
+
+    // Restaura modal aberto (se estava aberto antes do re-render).
+    if (prevModalOpen) {
+      const m = document.getElementById('atn2ActModal');
+      if (m) {
+        if (prevEditId) m.dataset.editId = prevEditId;
+        if (prevOpenedAt) m.dataset.openedAt = prevOpenedAt;
+        m.classList.add('open');
+        m.setAttribute('aria-hidden', 'false');
+        const nameEl = document.getElementById('atn2ActName');
+        const regionEl = document.getElementById('atn2ActRegion');
+        const dbmEl = document.getElementById('atn2ActDbm');
+        if (nameEl) nameEl.value = prevName;
+        if (regionEl) regionEl.value = prevRegion;
+        if (dbmEl) dbmEl.value = prevDbm;
+        this._atn2SyncActModalDeleteBtn();
+      }
+    }
+
+    // Bind do modal de criação (uma vez por sessão do root)
+    if (!root.dataset.atn2ActBound) {
+      root.dataset.atn2ActBound = '1';
+
+      const openModal = () => {
+        const m = document.getElementById('atn2ActModal');
+        if (!m) return;
+        dismissAtn2StatusUi();
+        // Marca abertura para evitar fechamento imediato por listeners globais.
+        m.dataset.openedAt = String(Date.now());
+        m.classList.add('open');
+        m.setAttribute('aria-hidden', 'false');
+        this._atn2SyncActModalDeleteBtn();
+        document.getElementById('atn2ActName')?.focus?.();
+        atn2Dbg('modal:open', { openedAt: m.dataset.openedAt, editId: m.dataset.editId || '' });
+      };
+      const closeModal = () => {
+        const m = document.getElementById('atn2ActModal');
+        if (!m) return;
+        dismissAtn2StatusUi();
+        m.classList.remove('open');
+        m.setAttribute('aria-hidden', 'true');
+        atn2Dbg('modal:close', { ts: Date.now(), editId: m.dataset.editId || '' });
+        if (Store.currentPage === 'correcao-atenuacao') {
+          queueMicrotask(() => { this.renderAtenuacaoDashboardPage(); });
+        }
+      };
+
+      const normalizeAtenuacaoRegionLabel = (raw) => {
+        const key = WebhookService?._normalizeRegionKey?.(raw);
+        if (key === 'GOVAL') return 'Goval';
+        if (key === 'VALE_DO_ACO') return 'Vale do Aço';
+        if (key === 'CARATINGA') return 'Caratinga';
+        if (key === 'BACKUP') return 'Backup';
+        return '';
+      };
+
+      // Dropdown simples (circular) para status na lista de atividades
+      const ensureStatusDropdown = () => {
+        let dd = document.getElementById('atn2StatusDropdown');
+        if (dd) return dd;
+        dd = document.createElement('div');
+        dd.id = 'atn2StatusDropdown';
+        dd.className = 'atn2-status-dropdown';
+        dd.hidden = true;
+        dd.innerHTML = `
+          <div class="atn2-status-dropdown-panel" role="menu" aria-label="Alterar status">
+            <button type="button" class="atn2-status-item" role="menuitem" data-atn2-pick-status="Criada">Pendente</button>
+            <button type="button" class="atn2-status-item" role="menuitem" data-atn2-pick-status="Em andamento">Em andamento</button>
+            <button type="button" class="atn2-status-item" role="menuitem" data-atn2-pick-status="Concluída">Concluído</button>
+          </div>
+        `;
+        document.body.appendChild(dd);
+        return dd;
+      };
+
+      const closeStatusDropdown = () => {
+        const dd = document.getElementById('atn2StatusDropdown');
+        if (!dd) return;
+        dd.hidden = true;
+        delete dd.dataset.opId;
+      };
+
+      const dismissAtn2StatusUi = () => {
+        closeStatusDropdown();
+        root.querySelectorAll?.('.atn2-status-btn[aria-expanded="true"]')?.forEach?.((b) => b.setAttribute('aria-expanded', 'false'));
+      };
+
+      const openStatusDropdown = (opId, anchorEl) => {
+        const id = Number(opId) || 0;
+        if (!id || !anchorEl) return;
+        const task = Store.findOpTask(id);
+        if (!task) return;
+        const dd = ensureStatusDropdown();
+        dd.dataset.opId = String(id);
+        dd.hidden = false;
+
+        const rect = anchorEl.getBoundingClientRect();
+        const panel = dd.querySelector('.atn2-status-dropdown-panel');
+        const panelW = panel?.offsetWidth || 220;
+        const panelH = panel?.offsetHeight || 140;
+        const vw = window.innerWidth || document.documentElement.clientWidth || 1024;
+        const vh = window.innerHeight || document.documentElement.clientHeight || 768;
+
+        const left = Math.max(10, Math.min(vw - panelW - 10, rect.left - panelW + rect.width));
+        const top = Math.max(10, Math.min(vh - panelH - 10, rect.bottom + 8));
+        dd.style.left = `${Math.round(left)}px`;
+        dd.style.top = `${Math.round(top)}px`;
+
+        // marca item atual (sem depender de CSS externo)
+        const cur = String(task.status || '').trim();
+        dd.querySelectorAll('[data-atn2-pick-status]').forEach((btn) => {
+          const st = String(btn.getAttribute('data-atn2-pick-status') || '').trim();
+          const isCur = st === cur;
+          btn.classList.toggle('is-current-atn2-status', isCur);
+          btn.textContent = st === 'Criada'
+            ? `Pendente${isCur ? ' ✓' : ''}`
+            : st === 'Em andamento'
+              ? `Em andamento${isCur ? ' ✓' : ''}`
+              : `Concluído${isCur ? ' ✓' : ''}`;
+        });
+
+        // acessibilidade: foca primeiro item
+        requestAnimationFrame(() => dd.querySelector('.atn2-status-item')?.focus?.());
+      };
+
+      const saveAtn2ActivityModal = () => {
+        try {
+          const m = document.getElementById('atn2ActModal');
+          const editId = Number(m?.dataset?.editId || 0);
+          const rawName = String(document.getElementById('atn2ActName')?.value || '').trim();
+          const region = normalizeAtenuacaoRegionLabel(document.getElementById('atn2ActRegion')?.value);
+          const name = rawName || 'Atividade de atenuação';
+          const title = region && name && !name.toLowerCase().includes(region.toLowerCase())
+            ? `${name} · ${region}`
+            : name;
+          const dbmEl = document.getElementById('atn2ActDbm');
+          const dbmNorm = this._atn2NormalizeNegativeDbmInput(dbmEl?.value);
+          if (dbmEl && dbmNorm !== String(dbmEl.value || '')) dbmEl.value = dbmNorm;
+          const dbm = Number(String(dbmNorm || '').replace(',', '.')) || 0;
+          const atenuacaoDb = Number.isFinite(dbm) ? (dbm > 0 ? -dbm : dbm) : 0;
+          const prio = this._atn2PriorityFromDbm(atenuacaoDb);
+          const who = String(getSignedUserName?.() || '').trim() || '—';
+          const patch = {
+            titulo: title,
+            regiao: region,
+            prioridade: prio,
+            descricao: atenuacaoDb ? `Atenuação: ${atenuacaoDb} dBm` : 'Atenuação: N/D',
+            atenuacaoDb,
+          };
+          if (editId) {
+            Store.updateOpTask(editId, patch);
+            ToastService?.show?.('Atividade atualizada.', 'success');
+          } else {
+            Store.addOpTask({
+              categoria: 'correcao-atenuacao',
+              titulo: title,
+              regiao: region,
+              responsavel: who,
+              prioridade: prio,
+              status: 'Criada',
+              descricao: atenuacaoDb ? `Atenuação: ${atenuacaoDb} dBm` : 'Atenuação: N/D',
+              atenuacaoDb,
+            });
+            ToastService?.show?.('Atividade salva.', 'success');
+          }
+        } catch {
+          ToastService?.show?.('Não foi possível salvar a atividade.', 'danger');
+        }
+        closeModal();
+      };
+
+      // Salvar/Fechar/Cancelar: captura no document — não depende de bubble até #atn2Root.
+      document.addEventListener('click', (e) => {
+        const m = document.getElementById('atn2ActModal');
+        if (!m?.classList.contains('open')) return;
+        const raw = e.target;
+        const t = raw && raw.nodeType === 3 ? raw.parentElement : raw;
+        if (!t || !m.contains(t)) return;
+        if (t.closest('#atn2ActCloseBtn') || t.closest('#atn2ActCancelBtn')) {
+          e.preventDefault();
+          e.stopPropagation();
+          closeModal();
+          return;
+        }
+        if (t.closest('#atn2ActSaveBtn')) {
+          e.preventDefault();
+          e.stopPropagation();
+          saveAtn2ActivityModal();
+          return;
+        }
+        if (t.closest('#atn2ActDeleteBtn')) {
+          e.preventDefault();
+          e.stopPropagation();
+          const editId = Number(m?.dataset?.editId || 0);
+          if (!editId) return;
+          const task = Store.findOpTask(editId);
+          if (!task) {
+            ToastService?.show?.('Atividade não encontrada.', 'warning');
+            closeModal();
+            return;
+          }
+          const label = String(task.titulo || task.nome || 'esta atividade').trim().slice(0, 120);
+          if (!window.confirm(`Excluir "${label}"? Esta ação não pode ser desfeita.`)) return;
+          try {
+            const removed = Store.removeOpTask(editId, { cascade: false });
+            if (removed) ToastService?.show?.('Atividade excluída.', 'success');
+            else ToastService?.show?.('Não foi possível excluir.', 'danger');
+          } catch {
+            ToastService?.show?.('Não foi possível excluir.', 'danger');
+          }
+          closeModal();
+        }
+      }, true);
+
+      root.addEventListener('click', (e) => {
+        const t = (e.target && e.target.nodeType === 3) ? e.target.parentElement : e.target;
+        const filterBtn = t?.closest?.('[data-atn2-act-filter]');
+        if (filterBtn) {
+          e.preventDefault();
+          const k = String(filterBtn.getAttribute('data-atn2-act-filter') || '').trim();
+          if (k) {
+            root.dataset.atn2ActFilter = k;
+            if (document.getElementById('atn2ActModal')?.classList?.contains('open')) {
+              this._atn2RefreshAttenuationFeedOnly(root);
+            } else {
+              this.renderAtenuacaoDashboardPage();
+            }
+          }
+          return;
+        }
+        const editBtn = t?.closest?.('[data-atn2-edit-btn]');
+        if (editBtn) {
+          e.preventDefault();
+          try { e.stopImmediatePropagation(); } catch { /* ignore */ }
+          const id = Number(editBtn.getAttribute('data-atn2-edit-btn') || 0);
+          if (!id) return;
+          const task = Store.findOpTask(id);
+          if (!task) return;
+          const m = document.getElementById('atn2ActModal');
+          if (m) m.dataset.editId = String(id);
+          const nameEl = document.getElementById('atn2ActName');
+          const regionEl = document.getElementById('atn2ActRegion');
+          const dbmEl = document.getElementById('atn2ActDbm');
+          if (nameEl) nameEl.value = String(task.titulo || task.nome || '').trim();
+          if (regionEl) regionEl.value = normalizeAtenuacaoRegionLabel(task.regiao);
+          const db = Number(task.atenuacaoDb);
+          if (dbmEl) dbmEl.value = Number.isFinite(db) && db !== 0 ? String(db) : '';
+          openModal();
+          return;
+        }
+        if (t?.closest?.('#atn2CreateActivityBtn')) {
+          e.preventDefault();
+          const m = document.getElementById('atn2ActModal');
+          if (m) delete m.dataset.editId;
+          const nameEl = document.getElementById('atn2ActName');
+          const regionEl = document.getElementById('atn2ActRegion');
+          const dbmEl = document.getElementById('atn2ActDbm');
+          if (nameEl) nameEl.value = '';
+          if (regionEl) regionEl.value = '';
+          if (dbmEl) dbmEl.value = '';
+          openModal();
+          return;
+        }
+        const actRow = t?.closest?.('[data-atn2-act-open]');
+        if (actRow) {
+          const id = Number(actRow.getAttribute('data-atn2-act-open') || 0);
+          if (!id) return;
+          const task = Store.findOpTask(id);
+          if (!task) return;
+          e.preventDefault();
+          // Garante que nenhum outro handler no mesmo evento feche o modal.
+          try { e.stopImmediatePropagation(); } catch { /* ignore */ }
+          atn2Dbg('click:editRow', { id, target: String(t?.className || ''), ts: Date.now() });
+          const m = document.getElementById('atn2ActModal');
+          if (m) m.dataset.editId = String(id);
+          const nameEl = document.getElementById('atn2ActName');
+          const regionEl = document.getElementById('atn2ActRegion');
+          const dbmEl = document.getElementById('atn2ActDbm');
+          if (nameEl) nameEl.value = String(task.titulo || task.nome || '').trim();
+          if (regionEl) regionEl.value = normalizeAtenuacaoRegionLabel(task.regiao);
+          const db = Number(task.atenuacaoDb);
+          if (dbmEl) dbmEl.value = Number.isFinite(db) && db !== 0 ? String(db) : '';
+          openModal();
+          return;
+        }
+      });
+
+      // Abrir dropdown de status no pointerdown (mais confiável que click)
+      root.addEventListener('pointerdown', (e) => {
+        const t = (e.target && e.target.nodeType === 3) ? e.target.parentElement : e.target;
+        const stBtn = t?.closest?.('[data-atn2-status-btn]');
+        if (!stBtn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const id = Number(stBtn.getAttribute('data-atn2-status-btn') || 0);
+        const dd = document.getElementById('atn2StatusDropdown');
+        if (dd && !dd.hidden && dd.dataset.opId === String(id)) {
+          closeStatusDropdown();
+          stBtn.setAttribute('aria-expanded', 'false');
+          return;
+        }
+        closeStatusDropdown();
+        root.querySelectorAll?.('.atn2-status-btn[aria-expanded="true"]')?.forEach?.(b => b.setAttribute('aria-expanded', 'false'));
+        stBtn.setAttribute('aria-expanded', 'true');
+        openStatusDropdown(id, stBtn);
+      }, true);
+
+      // Botão "Editar" em pointerdown (captura) — evita briga com click/re-render.
+      root.addEventListener('pointerdown', (e) => {
+        const t = (e.target && e.target.nodeType === 3) ? e.target.parentElement : e.target;
+        const btn = t?.closest?.('[data-atn2-edit-btn]');
+        if (!btn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const id = Number(btn.getAttribute('data-atn2-edit-btn') || 0);
+        if (!id) return;
+        const task = Store.findOpTask(id);
+        if (!task) return;
+        const m = document.getElementById('atn2ActModal');
+        if (m) m.dataset.editId = String(id);
+        const nameEl = document.getElementById('atn2ActName');
+        const regionEl = document.getElementById('atn2ActRegion');
+        const dbmEl = document.getElementById('atn2ActDbm');
+        if (nameEl) nameEl.value = String(task.titulo || task.nome || '').trim();
+        if (regionEl) regionEl.value = normalizeAtenuacaoRegionLabel(task.regiao);
+        const db = Number(task.atenuacaoDb);
+        if (dbmEl) dbmEl.value = Number.isFinite(db) && db !== 0 ? String(db) : '';
+        openModal();
+      }, true);
+
+      // Fecha modal ao clicar fora do painel (listener global, evita corrida com click que abre).
+      document.addEventListener('pointerdown', (e) => {
+        const m = document.getElementById('atn2ActModal');
+        if (!m || !m.classList.contains('open')) return;
+        if (e.target !== m) return;
+        const openedAt = Number(m.dataset.openedAt || 0);
+        if (openedAt && Date.now() - openedAt < 450) return;
+        atn2Dbg('modal:backdropPointerDown->close', { ts: Date.now(), openedAt, deltaMs: Date.now() - openedAt });
+        closeModal();
+      }, true);
+
+      root.addEventListener('input', (e) => {
+        const el = e.target;
+        if (el?.id === 'atn2ActDbm') {
+          const next = this._atn2NormalizeNegativeDbmInput(el.value);
+          if (next !== el.value) {
+            const pos = el.selectionStart;
+            el.value = next;
+            try { el.setSelectionRange(pos, pos); } catch {}
+          }
+        }
+      });
+
+      // Seleção de status no dropdown
+      document.addEventListener('click', (e) => {
+        const btn = e.target?.closest?.('[data-atn2-pick-status]');
+        if (!btn) return;
+        const dd = document.getElementById('atn2StatusDropdown');
+        if (!dd || dd.hidden) return;
+        const id = Number(dd.dataset.opId || 0);
+        if (!id) return;
+        const next = String(btn.getAttribute('data-atn2-pick-status') || '').trim();
+        if (!next) return;
+        const before = Store.findOpTask(id);
+        const beforeStatus = String(before?.status || '').trim();
+
+        // Se for colocar em andamento, exige região e usa o fluxo oficial (que dispara webhook por região).
+        if (beforeStatus !== next && next === 'Em andamento') {
+          const fresh0 = Store.findOpTask(id);
+          const region = normalizeAtenuacaoRegionLabel(fresh0?.regiao);
+          if (!region) {
+            ToastService?.show?.('Selecione uma região antes de colocar em andamento.', 'warning');
+            closeStatusDropdown();
+            root.querySelectorAll?.('.atn2-status-btn[aria-expanded="true"]')?.forEach?.(b => b.setAttribute('aria-expanded', 'false'));
+            return;
+          }
+        }
+
+        // Usa o serviço de negócio: atualiza status + histórico e dispara webhook quando aplicável.
+        OpTaskService.changeStatus(id, next);
+
+        closeStatusDropdown();
+        root.querySelectorAll?.('.atn2-status-btn[aria-expanded="true"]')?.forEach?.(b => b.setAttribute('aria-expanded', 'false'));
+        if (document.getElementById('atn2ActModal')?.classList?.contains('open')) {
+          this._atn2RefreshAttenuationFeedOnly(root);
+        } else {
+          this.renderAtenuacaoDashboardPage();
+        }
+      }, true);
+
+      // Clique fora fecha o dropdown de status (usa pointerdown pra ser mais confiável)
+      document.addEventListener('pointerdown', (e) => {
+        const dd = document.getElementById('atn2StatusDropdown');
+        if (!dd || dd.hidden) return;
+        if (dd.contains(e.target)) return;
+        if (e.target?.closest?.('.atn2-status-btn')) return;
+        closeStatusDropdown();
+        root.querySelectorAll?.('.atn2-status-btn[aria-expanded="true"]')?.forEach?.(b => b.setAttribute('aria-expanded', 'false'));
+      }, true);
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        const dd = document.getElementById('atn2StatusDropdown');
+        if (!dd || dd.hidden) return;
+        closeStatusDropdown();
+        root.querySelectorAll?.('.atn2-status-btn[aria-expanded="true"]')?.forEach?.(b => b.setAttribute('aria-expanded', 'false'));
+      });
+    }
+
     // Integração do componente: agulha + stats (sem alterar a lógica do percent)
     updateThermometer(counts.thermoAvgDbm);
     updateStats(counts.total, counts.pctCritAlta, counts.thermoAvgDbm);
-    this._atn2RenderList(document.getElementById('atn2List'), filtered);
 
-    // Faixas calculadas em tempo real
-    const laneCounts = { p0: 0, p1: 0, p2: 0, p3: 0, mon: 0, unknown: 0 };
-    filtered.forEach((it) => {
-      const p = String(it.priority || '').toLowerCase();
-      if (p === 'critica') laneCounts.p0++;
-      else if (p === 'alta') laneCounts.p1++;
-      else if (p === 'media') laneCounts.p2++;
-      else if (p === 'leve') laneCounts.p3++;
-      else laneCounts.unknown++;
+    this._atn2RefreshAttenuationFeedOnly(root, {
+      scrollTop: prevScrollTop,
+      nearBottom: prevNearBottom,
     });
-    const max = Math.max(1, laneCounts.p0, laneCounts.p1, laneCounts.p2, laneCounts.p3, laneCounts.mon, laneCounts.unknown);
-    const lanes = [
-      { key: 'p0', label: 'P0 · Crítica', range: 'Pior que -28 dBm', count: laneCounts.p0, max, color: 'red' },
-      { key: 'p1', label: 'P1 · Alta', range: '-28 a -26 dBm', count: laneCounts.p1, max, color: 'amber' },
-      { key: 'p2', label: 'P2 · Média', range: '-26 a -24 dBm', count: laneCounts.p2, max, color: 'blue' },
-      { key: 'p3', label: 'P3 · Leve', range: '-24 a -22.01 dBm', count: laneCounts.p3, max, color: 'green' },
-      { key: 'unk', label: 'N/D', range: 'Sem leitura', count: laneCounts.unknown, max, color: 'gray' },
-    ];
-    this._atn2RenderLanes(document.getElementById('atn2Lanes'), lanes);
-
-    // Atividade recente: somente tarefas que entraram em "Em andamento" (histórico).
-    const todayIso = Utils.todayIso();
-    const atnOpTasks = [
-      ...(Store.getOpTasksByCategory('correcao-atenuacao') || []),
-      ...(Store.getOpTasksByCategory('correcao_atenuacao') || []),
-    ];
-    const acts = [];
-    atnOpTasks.forEach((t) => {
-      const hist = Array.isArray(t?.historico) ? t.historico : [];
-      const lastStart = [...hist].reverse().find(h => String(h?.status || '').trim() === 'Em andamento');
-      const ts = String(lastStart?.timestamp || '').trim();
-      if (!ts) return;
-      if (ts.slice(0, 10) !== todayIso) return;
-      const d = new Date(ts);
-      const time = Number.isFinite(d.getTime())
-        ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-        : ts.slice(11, 16);
-      const tech = String(lastStart?.autor || t?.responsavel || '—').trim() || '—';
-      const title = String(t?.titulo || t?.nome || '').trim() || 'Tarefa';
-      acts.push({
-        color: 'blue',
-        text: `${title} em andamento`,
-        time,
-        tech,
-        ts,
-      });
-    });
-    acts.sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
-    this._atn2RenderActivities(document.getElementById('atn2Activities'), acts.slice(0, 10));
 
     // Timer de "tempo real" (sem duplicar intervalos)
     if (!this._atn2LiveTimer) {
@@ -5394,14 +5673,13 @@ const UI = {
           this._atn2LiveTimer = null;
           return;
         }
-        const modalOpen = document.getElementById('atn2Modal')?.classList?.contains?.('open');
-        if (modalOpen) return;
-        const dd = document.getElementById('atn2StatusDropdown');
-        const ddOpen = dd && !dd.hidden;
-        if (ddOpen) return;
         const ae = document.activeElement;
         const aeId = ae && typeof ae.id === 'string' ? ae.id : '';
-        if (aeId && (aeId === 'atn2Search' || aeId === 'atn2Region' || aeId === 'atn2Type' || aeId.startsWith('atn2Modal'))) return;
+        if (aeId && aeId.startsWith('atn2')) return;
+        if (document.getElementById('atn2ActModal')?.classList?.contains('open')) return;
+        // Se o usuário estiver com o mouse/scroll no feed, não re-renderiza.
+        const feedEl = document.getElementById('atn2AttenuationActivities');
+        if (feedEl && (feedEl.matches(':hover') || feedEl.dataset.userScrolling === '1')) return;
         this.renderAtenuacaoDashboardPage();
       }, 1000);
     }
@@ -5415,7 +5693,9 @@ const UI = {
   // p2 <= -24.00 (até -26.00)
   // p3 <= -22.01 (até -24.00)
   // mon > -22.01
-  _ATN_THRESHOLDS_DEFAULT: { p0: -28.0, p1: -26.0, p2: -24.0, p3: -22.01 },
+  _atnThresholds() {
+    return getAtenuacaoThresholds();
+  },
   _atnParseDbFromText(text) {
     const s = String(text || '');
     if (!s) return null;
@@ -5446,7 +5726,7 @@ const UI = {
       null
     );
   },
-  _atnBucketForDb(db, thresholds = this._ATN_THRESHOLDS_DEFAULT) {
+  _atnBucketForDb(db, thresholds = this._atnThresholds()) {
     if (!Number.isFinite(db)) return 'unknown';
     // Mais negativo = pior (P0 mais crítico)
     if (db <= thresholds.p0) return 'p0'; // crítico: pior que -28.00
@@ -5461,7 +5741,7 @@ const UI = {
     if (v === 'p0' || v === 'p1' || v === 'p2' || v === 'p3' || v === 'mon') return v;
     return '';
   },
-  _atnBucketForTask(task, thresholds = this._ATN_THRESHOLDS_DEFAULT) {
+  _atnBucketForTask(task, thresholds = this._atnThresholds()) {
     const override = this._atnOverrideBucket(task);
     if (override) return override;
     const db = this._atnDb(task);
@@ -5531,7 +5811,7 @@ const UI = {
       return matchQ && matchRegion && matchTech;
     });
 
-    const thresholds = this._ATN_THRESHOLDS_DEFAULT;
+    const thresholds = this._atnThresholds();
     // Filtra placeholders / itens incompletos (não entram na lista normal).
     const isGenericTestName = (raw) => {
       const n = String(raw || '').trim().toLowerCase();
