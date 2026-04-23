@@ -396,7 +396,7 @@
             </svg>
             <span class="topbar-notif-badge" id="topbarNotifBadge" hidden>0</span>
           </button>
-          <div class="topbar-notif-panel" id="topbarNotifPanel" role="menu" aria-label="Menções no chat" hidden></div>
+          <div class="topbar-notif-panel" id="topbarNotifPanel" role="menu" aria-label="Notificações" hidden></div>
         </div>
         <button type="button" class="icon-btn" id="plannerSettingsBtn" title="Configurações" aria-label="Configurações">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -494,7 +494,6 @@
                 <div class="planner-reg-row"><div class="planner-reg-label"><span id="plannerRegLabel2">Caratinga</span><span id="plannerRegNum2">0</span></div><div class="planner-reg-bar"><span data-planner-reg-bar="2"></span></div></div>
               </div>
               <div class="planner-mini-grid">
-                <div class="planner-mini"><div class="planner-mini-lbl">Técnicos online</div><div class="planner-mini-val" id="plannerMiniTech">0</div></div>
                 <div class="planner-mini"><div class="planner-mini-lbl">SLA geral (rompimentos)</div><div class="planner-mini-val" id="plannerMiniSla">0%</div></div>
                 <div class="planner-mini"><div class="planner-mini-lbl">Tempo médio (rompimentos)</div><div class="planner-mini-val" id="plannerMiniTmp">—</div></div>
               </div>
@@ -1139,6 +1138,28 @@
           <label for="op-atd-descricao">Descrição da tarefa</label>
           <textarea id="op-atd-descricao" placeholder="Detalhes, observações, pendências… (opcional)" style="min-height:120px;resize:vertical"></textarea>
         </div>
+      </div>
+
+      <!-- Qualidade de Potência — cliente/OS/região/técnico/CTO -->
+      <div id="opQdpWrap" class="op-qdp-wrap" style="display:none">
+        <div class="form-group">
+          <label for="op-qdp-cliente">Nome/usuário do cliente</label>
+          <input type="text" id="op-qdp-cliente" placeholder="Opcional" autocomplete="off"/>
+        </div>
+        <div class="form-group">
+          <label for="op-qdp-ordem-servico">Ordem de serviço</label>
+          <input type="text" id="op-qdp-ordem-servico" placeholder="Opcional" autocomplete="off"/>
+        </div>
+        <div class="form-group">
+          <label for="op-qdp-cto">CTO</label>
+          <input type="text" id="op-qdp-cto" placeholder="Opcional" autocomplete="off" spellcheck="false"/>
+          <div class="hint" id="op-qdp-cto-hint" style="margin-top:6px"></div>
+        </div>
+        <div id="opQdpCoordsSlot"></div>
+        <div class="form-group" id="opQdpRegiaoSlot"></div>
+        <div class="form-group" id="opQdpTecSlot"></div>
+        <div class="form-group" id="opQdpPrazoSlot"></div>
+        <div class="form-group" id="opQdpPrioridadeSlot"></div>
       </div>
 
       <div class="form-group" id="opTituloGroup">

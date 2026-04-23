@@ -148,8 +148,7 @@
       if (sb && window.APP_CONFIG && APP_CONFIG.appBuild) sb.textContent = String(APP_CONFIG.appBuild);
 
       this._startClock();
-      this._renderActivityFeed(DADOS.atividade);
-      this._scheduleFeedPulse();
+      this._renderActivityFeedFromStore();
       this._refreshSidebarTooltips();
       const sidebar = document.getElementById('sidebar');
       if (sidebar) {
@@ -251,34 +250,26 @@
         .join('');
     },
 
-    _scheduleFeedPulse() {
-      clearInterval(this._feedTimer);
-      this._feedTimer = setInterval(() => {
-        const root = document.getElementById('plannerActivityFeed');
-        if (!root || !document.getElementById('page-dashboard')?.classList.contains('active')) return;
-        const tipos = ['info', 'success', 'warning', 'danger'];
-        const tipo = tipos[Math.floor(Math.random() * tipos.length)];
-        const hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-        const row = document.createElement('div');
-        row.className = 'planner-activity-item planner-activity-item--enter';
-        const dot = document.createElement('span');
-        const dc = tipo === 'danger' ? 'danger' : tipo === 'warning' ? 'warning' : tipo === 'success' ? 'success' : 'info';
-        dot.className = `planner-activity-dot planner-activity-dot--${dc}`;
-        dot.setAttribute('aria-hidden', 'true');
-        const mid = document.createElement('div');
-        const strong = document.createElement('strong');
-        strong.textContent = 'Sistema';
-        mid.appendChild(strong);
-        mid.appendChild(document.createTextNode(' — evento simulado para demonstração do feed.'));
-        const tm = document.createElement('span');
-        tm.className = 'planner-activity-time';
-        tm.textContent = hora;
-        row.appendChild(dot);
-        row.appendChild(mid);
-        row.appendChild(tm);
-        root.insertBefore(row, root.firstChild);
-        while (root.children.length > 12) root.removeChild(root.lastChild);
-      }, 28000);
+    _renderActivityFeedFromStore() {
+      if (typeof Store === 'undefined' || !Store.getActivityEvents) return;
+      const raw = Store.getActivityEvents();
+      const items = (Array.isArray(raw) ? raw : [])
+        .slice()
+        .sort((a, b) => (Number(b?.id) || 0) - (Number(a?.id) || 0))
+        .slice(0, 12)
+        .map((e) => {
+          const tipo = String(e?.severity || 'info');
+          const who = String(e?.username || '').trim();
+          const core = String(e?.message || '').trim() || '—';
+          const texto = who ? `${who} — ${core}` : core;
+          const createdAt = String(e?.createdAt || '');
+          const hora =
+            createdAt
+              ? new Date(createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+              : new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+          return { tipo, texto, hora };
+        });
+      this._renderActivityFeed(items);
     },
 
     syncFromStore() {
@@ -290,6 +281,7 @@
       this._applyRegions();
       this._applyTeam();
       this._applySlaInfra(anim);
+      this._renderActivityFeedFromStore();
       this._kpiAnimated = true;
     },
 
@@ -400,22 +392,48 @@
     },
 
     _applyTeam() {
-      const tasks = TaskService.getFilteredTasks();
-      const by = {};
-      tasks.forEach(t => {
-        const n = String(t.responsavel || t.tecnico || '').trim();
-        if (!n) return;
-        by[n] = (by[n] || 0) + 1;
+      // Top técnicos por rompimentos resolvidos (op_tasks.categoria='rompimentos' e status final)
+      const allOp = (typeof Store !== 'undefined' && Store.getOpTasks) ? Store.getOpTasks() : [];
+      const doneStatus = new Set(['Concluída', 'Finalizada', 'Finalizado']);
+      const rompDone = allOp.filter(t =>
+        String(t?.categoria || '').trim() === 'rompimentos' &&
+        doneStatus.has(String(t?.status || '').trim()),
+      );
+
+      const byTech = new Map(); // nome -> { count, regions: Map(region->count) }
+      rompDone.forEach(t => {
+        const nome = String(t?.responsavel || '').trim();
+        if (!nome) return;
+        const reg = String(t?.regiao || '').trim() || '—';
+        if (!byTech.has(nome)) byTech.set(nome, { count: 0, regions: new Map() });
+        const obj = byTech.get(nome);
+        obj.count++;
+        obj.regions.set(reg, (obj.regions.get(reg) || 0) + 1);
       });
-      const sorted = Object.entries(by)
-        .sort((a, b) => b[1] - a[1])
+
+      const pickMainRegion = (regionsMap) => {
+        let best = '—';
+        let bestC = -1;
+        for (const [r, c] of regionsMap.entries()) {
+          if (c > bestC) { bestC = c; best = r; }
+        }
+        return best;
+      };
+
+      const sorted = [...byTech.entries()]
+        .map(([nome, obj]) => ({ nome, resolvidos: obj.count, regiao: pickMainRegion(obj.regions) }))
+        .sort((a, b) => b.resolvidos - a.resolvidos)
         .slice(0, 4);
-      const list = sorted.map(([nome, c]) => ({
-        iniciais: nome.slice(0, 2).toUpperCase(),
-        nome,
-        tarefas: c,
-        status: c >= 3 ? 'danger' : c >= 2 ? 'warning' : 'success',
-      }));
+
+      const list = sorted.map((m) => {
+        const c = Number(m.resolvidos) || 0;
+        return {
+          iniciais: String(m.nome || '—').slice(0, 2).toUpperCase(),
+          nome: `${m.nome} — ${m.regiao}`,
+          tarefas: c,
+          status: c >= 8 ? 'danger' : c >= 4 ? 'warning' : 'success',
+        };
+      });
 
       for (let i = 0; i < 4; i++) {
         const m = list[i] || { iniciais: '—', nome: '—', tarefas: 0, status: 'success' };
@@ -429,7 +447,7 @@
           av.className = `planner-team-av ${on ? 'planner-team-av--on' : 'planner-team-av--off'}`;
         }
         if (nm) nm.textContent = m.nome;
-        if (ct) ct.textContent = `${m.tarefas} tarefas`;
+        if (ct) ct.textContent = `${m.tarefas} rompimentos`;
         if (dot) {
           dot.className = `planner-team-dot planner-team-dot--${m.status === 'danger' ? 'danger' : m.status === 'warning' ? 'warning' : 'success'}`;
         }
@@ -488,22 +506,8 @@
       const tpBackEl = document.getElementById('plannerTpBackup');
       if (tpBackEl) tpBackEl.textContent = String(countBy.Backup);
 
-      const techSet = new Set(
-        TaskService.getFilteredTasks().map(t => String(t.responsavel || '').trim()).filter(Boolean),
-      );
-      const mt = document.getElementById('plannerMiniTech');
-      // Técnicos online: preferir técnicos com rompimentos em andamento; fallback = técnicos do filtro geral.
       const opTasks = (typeof Store !== 'undefined' && Store.getOpTasks) ? Store.getOpTasks() : [];
       const rompimentos = opTasks.filter(t => String(t?.categoria || '').trim() === 'rompimentos');
-      const progressStatuses = new Set(['Em andamento', 'Validação', 'Envio pendente', 'Necessário adequação']);
-      const techOnlineSet = new Set(
-        rompimentos
-          .filter(t => progressStatuses.has(String(t?.status || '').trim()))
-          .map(t => String(t?.responsavel || '').trim())
-          .filter(Boolean),
-      );
-      const online = techOnlineSet.size || techSet.size;
-      if (mt) mt.textContent = String(online);
       const ms = document.getElementById('plannerMiniSla');
       // SLA geral (rompimentos): % de itens dentro do prazo (concluídos até o prazo, ou ainda no prazo).
       const doneStatuses = new Set(['Concluída', 'Finalizada', 'Finalizado']);
@@ -543,8 +547,9 @@
       }).filter(v => Number.isFinite(v));
       if (avgEl) {
         if (durationsMin.length) {
-          const avg = Math.round(durationsMin.reduce((s, v) => s + v, 0) / durationsMin.length);
-          avgEl.textContent = `${avg} min`;
+          const avgMin = Math.round(durationsMin.reduce((s, v) => s + v, 0) / durationsMin.length);
+          const hours = avgMin / 60;
+          avgEl.textContent = `${hours.toFixed(1)} h`;
         } else {
           avgEl.textContent = '—';
         }

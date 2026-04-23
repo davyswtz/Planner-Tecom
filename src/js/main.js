@@ -16,7 +16,7 @@
 /**
  * Modelo de tarefa operacional (Rompimentos / Troca de Poste)
  * @typedef {{ id: number, titulo: string, responsavel: string, responsavelChatId?: string, categoria: string, prazo: string, prioridade: string, descricao: string, status: OpStatus, historico: HistoryEntry[], criadaEm: string, assinadaPor?: string, assinadaEm?: string, protocolo?: string, dataEntrada?: string, subProcesso?: string, dataInstalacao?: string, ordemServico?: string, nomeCliente?: string }} OpTask
- * @typedef {'Criada'|'Backlog'|'A iniciar'|'Em andamento'|'Concluída'|'Finalizada'|'Cancelada'|'Agendado'|'Validação'|'Envio pendente'|'Necessário adequação'|'Finalizado'} OpStatus
+ * @typedef {'Criada'|'Backlog'|'A iniciar'|'Em andamento'|'Concluída'|'Finalizada'|'Cancelada'|'Validação'|'Envio pendente'|'Necessário adequação'|'Finalizado'} OpStatus
  * @typedef {{ status: OpStatus, timestamp: string, autor: string }} HistoryEntry
  */
 
@@ -90,6 +90,8 @@ const NAV_LAST_PAGE_KEY = 'planner.nav.lastPage.v1';
 const CHAT_LAST_SEEN_ID_KEY = 'planner.chat.lastSeenId.v1';
 const CHAT_MENTION_INBOX_KEY = 'planner.chat.mentionInbox.v1';
 const CHAT_MENTION_HANDLED_IDS_KEY = 'planner.chat.mentionHandledIds.v1';
+const TOPBAR_NOTIF_INBOX_KEY = 'planner.topbar.notifs.v2';
+const TOPBAR_NOTIF_LAST_SEEN_KEY = 'planner.topbar.notifs.lastSeenId.v2';
 
 function isAuthenticatedSession() {
   try {
@@ -159,6 +161,7 @@ const Store = (() => {
     opTasks: 'planner.opTasks.v2',
     webhook: 'planner.webhook.v1',
     note: 'planner.note.v2',
+    activity: 'planner.activity.v1',
   };
 
   /** Campos ATD / thread: o servidor pode devolver vazio ou prazo 0000-00-00; não sobrescrever valor bom do cliente. */
@@ -390,6 +393,9 @@ const Store = (() => {
   const opTasks = readLocal(STORAGE_KEYS.opTasks, []);
   let nextOpTaskId = opTasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
 
+  /** @type {any[]} */
+  const activityEvents = readLocal(STORAGE_KEYS.activity, []);
+
   const WEBHOOK_EVENTS_DEFAULT = { andamento: true, concluida: true, finalizada: true };
   /** @type {WebhookConfig} */
   const webhookConfig = {
@@ -424,6 +430,7 @@ const Store = (() => {
     writeLocal(STORAGE_KEYS.opTasks, opTasks);
     writeLocal(STORAGE_KEYS.webhook, webhookConfig);
     writeLocal(STORAGE_KEYS.note, plannerConfig.note || '');
+    writeLocal(STORAGE_KEYS.activity, activityEvents);
   };
   const syncUpTask = (task) => { ApiService.saveTask(task); };
   const syncUpOpTask = (task) => {
@@ -619,6 +626,29 @@ const Store = (() => {
       }
       return changed;
     },
+    applyRemoteActivity(incoming) {
+      if (!Array.isArray(incoming) || !incoming.length) return 0;
+      let changed = 0;
+      const byId = new Map(activityEvents.map((e) => [Number(e?.id) || 0, e]).filter(([id]) => id > 0));
+      for (const inc of incoming) {
+        const id = Number(inc?.id);
+        if (!Number.isFinite(id) || id <= 0) continue;
+        if (!byId.has(id)) {
+          activityEvents.push(inc);
+          byId.set(id, inc);
+          changed++;
+        } else {
+          Object.assign(byId.get(id), inc);
+          changed++;
+        }
+      }
+      if (changed) {
+        activityEvents.sort((a, b) => (Number(a?.id) || 0) - (Number(b?.id) || 0));
+        while (activityEvents.length > 60) activityEvents.shift();
+        persistSnapshot();
+      }
+      return changed;
+    },
     removeOpTask: (id, options = {}) => {
       const cascade = Boolean(options.cascade);
       const removeIds = cascade
@@ -639,6 +669,7 @@ const Store = (() => {
       return changed;
     },
     findOpTask: (id) => opTasks.find(t => t.id === id),
+    getActivityEvents: () => [...activityEvents],
 
     // Webhook
     getWebhookConfig: ()     => ({ ...webhookConfig }),
@@ -744,6 +775,12 @@ const Store = (() => {
       if (Array.isArray(payload.calendarNotes)) {
         calendarNotes = payload.calendarNotes;
         nextCalendarNoteId = calendarNotes.reduce((max, n) => Math.max(max, n.id || 0), 0) + 1;
+      }
+      if (Array.isArray(payload.notifications)) {
+        ChatMentionNotifs.processIncomingTaskNotifications(payload.notifications);
+      }
+      if (Array.isArray(payload.activity)) {
+        activityEvents.splice(0, activityEvents.length, ...payload.activity);
       }
       applyDefaultWebhookUrlIfNeeded();
       persistSnapshot();
@@ -1582,7 +1619,7 @@ const WebhookService = {
         title,
         '',
         '📍Localizações:',
-        `(${this._chatSafe(ctoId)}): ${this._chatSafe(coordsClickable)}`,
+        `${this._chatSafe(ctoId)}: ${this._chatSafe(coordsClickable)}`,
         '',
         `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
         `👤 Enviado por: ${this._chatSafe(enviadoPor)}`,
@@ -1642,7 +1679,7 @@ const WebhookService = {
         : '*📡CORREÇÃO DE ATENUAÇÃO*';
 
     const locLines = rows.map((r, i) =>
-      `(${this._chatSafe(r.label || `Elemento ${i + 1}`)}): ${this._chatSafe(r.coords)}`,
+      `${this._chatSafe(r.label || `Elemento ${i + 1}`)}: ${this._chatSafe(r.coords)}`,
     );
 
     return {
@@ -1656,6 +1693,166 @@ const WebhookService = {
         `👤 Enviado por: ${this._chatSafe(enviadoPor)}`,
         `🆔 : ${this._chatSafe(taskId)}`,
       ].join('\n'),
+    };
+  },
+
+  /**
+   * Google Chat — Qualidade de potência (QDP): mensagem completa e com menção ao técnico.
+   * Usa `responsavelChatId` quando disponível (ou resolve via diretório por região).
+   * @param {'andamento'|'concluida'|'finalizada'} event
+   */
+  _buildQualidadePotenciaMessage(event, task) {
+    const B = (lines) => this._rompimentoBoldLines(lines);
+    const s = (x) => this._chatSafe(String(x ?? '').trim());
+    const tecnico = this._resolveTechnicianDisplay(task);
+    const enviadoPor = s(String(task?.assinadaPor || '').trim() || '—');
+    const code = s(String(task?.taskCode || '').trim());
+    const synthetic = (typeof Utils !== 'undefined' && typeof Utils.syntheticOpTaskCode === 'function')
+      ? s(String(Utils.syntheticOpTaskCode(task) || '').trim())
+      : '';
+    const taskId = s(code || synthetic || `QDP-${String(task?.id || '').padStart(4, '0')}`);
+
+    const cliente = s(String(task?.nomeCliente || '').trim() || '—');
+    const os = s(String(task?.ordemServico || '').trim() || '—');
+    const cto = s(String(task?.setor || '').trim() || '—');
+    const regiao = s(String(task?.regiao || '').trim() || '—');
+    const prioridade = s(String(task?.prioridade || '').trim() || '—');
+    const prazoRaw = s(String(task?.prazo || '').trim());
+    const prazo = prazoRaw ? s(Utils.formatDate(prazoRaw)) : '—';
+
+    const coords = s(this._coordsClickableForChat(task?.coordenadas));
+    const endereco = s(String(task?.localizacaoTexto || '').trim() || '—');
+
+    if (event === 'andamento') {
+      return {
+        text: B([
+          '⚡ QUALIDADE DE POTÊNCIA',
+          '',
+          `👤 Cliente: ${cliente}`,
+          `🧾 Ordem de serviço: ${os}`,
+          `🌎 Região: ${regiao}`,
+          `🔧 Técnico: ${tecnico}`,
+          `🏷️ CTO: ${cto}`,
+          '',
+          `🗺️ Coordenadas: ${coords}`,
+          `🏠 Endereço: ${endereco}`,
+          '',
+          `📅 Vencimento: ${prazo}`,
+          `⭐ Prioridade: ${prioridade}`,
+          '',
+          `👤 Enviado por: ${enviadoPor}`,
+          `🆔 ID: ${taskId}`,
+        ]),
+      };
+    }
+
+    const sep = '▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬';
+    const head =
+      event === 'concluida'
+        ? '✅ QUALIDADE DE POTÊNCIA — CONCLUÍDA'
+        : '🏁 QUALIDADE DE POTÊNCIA — FINALIZADA';
+    const elapsed = this._formatDurationFromStart(task);
+    const elapsedLine =
+      elapsed && elapsed !== 'Não foi possível calcular'
+        ? [`⏱️ TEMPO NO SERVIÇO · ${s(elapsed)}`]
+        : [];
+
+    return {
+      text: B([
+        head,
+        sep,
+        `🆔 ID · ${taskId}`,
+        `👤 CLIENTE · ${cliente}`,
+        `🧾 OS · ${os}`,
+        `🌎 REGIÃO · ${regiao}`,
+        `🔧 TÉCNICO · ${tecnico}`,
+        `🏷️ CTO · ${cto}`,
+        `🗺️ COORDENADAS · ${coords}`,
+        `🏠 ENDEREÇO · ${endereco}`,
+        `📅 VENCIMENTO · ${prazo}`,
+        `⭐ PRIORIDADE · ${prioridade}`,
+        ...elapsedLine,
+      ]),
+    };
+  },
+
+  /**
+   * Google Chat — Manutenção corretiva: mensagem própria baseada nos campos do card/modal.
+   * @param {'andamento'|'concluida'|'finalizada'} event
+   */
+  _buildManutencaoCorretivaMessage(event, task) {
+    const B = (lines) => this._rompimentoBoldLines(lines);
+    const s = (x) => this._chatSafe(String(x ?? '').trim());
+    const tecnico = this._resolveTechnicianDisplay(task); // já vem com menção quando possível
+    const enviadoPor = s(String(task?.assinadaPor || '').trim() || '—');
+    const code = s(String(task?.taskCode || '').trim());
+    const synthetic = (typeof Utils !== 'undefined' && typeof Utils.syntheticOpTaskCode === 'function')
+      ? s(String(Utils.syntheticOpTaskCode(task) || '').trim())
+      : '';
+    const taskId = s(code || synthetic || `MCR-${String(task?.id || '').padStart(4, '0')}`);
+
+    // Campos preenchidos no card/modal (no modal o label é "Manutenção", mas o campo persiste em `nomeCliente`)
+    const manutencao = s(String(task?.nomeCliente || '').trim() || '—');
+    const os = s(String(task?.ordemServico || '').trim() || '—');
+    const cto = s(String(task?.setor || '').trim() || '—');
+    const regiao = s(String(task?.regiao || '').trim() || '—');
+    const prioridade = s(String(task?.prioridade || '').trim() || '—');
+    const prazoRaw = s(String(task?.prazo || '').trim());
+    const prazo = prazoRaw ? s(Utils.formatDate(prazoRaw)) : '—';
+
+    const coords = s(this._coordsClickableForChat(task?.coordenadas));
+    const endereco = s(String(task?.localizacaoTexto || '').trim() || '—');
+
+    if (event === 'andamento') {
+      return {
+        text: B([
+          '🛠️ MANUTENÇÃO CORRETIVA',
+          '',
+          `🧰 Manutenção: ${manutencao}`,
+          `🧾 Ordem de serviço: ${os}`,
+          `🌎 Região: ${regiao}`,
+          `🔧 Técnico: ${tecnico}`,
+          `🏷️ CTO: ${cto}`,
+          '',
+          `🗺️ Coordenadas: ${coords}`,
+          `🏠 Endereço: ${endereco}`,
+          '',
+          `📅 Vencimento: ${prazo}`,
+          `⭐ Prioridade: ${prioridade}`,
+          '',
+          `👤 Enviado por: ${enviadoPor}`,
+          `🆔 ID: ${taskId}`,
+        ]),
+      };
+    }
+
+    const sep = '▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬';
+    const head =
+      event === 'concluida'
+        ? '✅ MANUTENÇÃO CORRETIVA — CONCLUÍDA'
+        : '🏁 MANUTENÇÃO CORRETIVA — FINALIZADA';
+    const elapsed = this._formatDurationFromStart(task);
+    const elapsedLine =
+      elapsed && elapsed !== 'Não foi possível calcular'
+        ? [`⏱️ TEMPO NO SERVIÇO · ${s(elapsed)}`]
+        : [];
+
+    return {
+      text: B([
+        head,
+        sep,
+        `🆔 ID · ${taskId}`,
+        `🧰 MANUTENÇÃO · ${manutencao}`,
+        `🧾 OS · ${os}`,
+        `🌎 REGIÃO · ${regiao}`,
+        `🔧 TÉCNICO · ${tecnico}`,
+        `🏷️ CTO · ${cto}`,
+        `🗺️ COORDENADAS · ${coords}`,
+        `🏠 ENDEREÇO · ${endereco}`,
+        `📅 VENCIMENTO · ${prazo}`,
+        `⭐ PRIORIDADE · ${prioridade}`,
+        ...elapsedLine,
+      ]),
     };
   },
 
@@ -1712,6 +1909,9 @@ const WebhookService = {
     let regionSource = isAtd ? (rootTask?.regiao || task?.regiao) : task?.regiao;
 
     const key = this._normalizeRegionKey(regionSource);
+    // Atenuação: não permitir fallback silencioso para BACKUP quando a região não foi escolhida.
+    // (o usuário escolhe a região no dropdown; sem região, não sabemos qual chat usar.)
+    if (!key && String(task?.categoria || '').trim() === 'correcao-atenuacao') return '';
     const picked = key ? String(byRegion[key] || '').trim() : '';
     if (picked) return picked;
     // FIX: se a região não estiver mapeada, usa BACKUP (quando configurado) antes do default.
@@ -1822,6 +2022,13 @@ const WebhookService = {
   /** Monta o payload formatado */
   _buildMessage(event, task, category) {
     const opCat = String(task?.categoria ?? '').trim();
+
+    if (opCat === 'qualidade-potencia') {
+      return this._buildQualidadePotenciaMessage(event, task);
+    }
+    if (opCat === 'manutencao-corretiva') {
+      return this._buildManutencaoCorretivaMessage(event, task);
+    }
 
     if (opCat === 'otimizacao-rede') {
       return this._buildOtimRedeMessage(event, task);
@@ -2138,7 +2345,7 @@ const TaskService = {
   },
 
   _isPendingStatus(status) {
-    return status === 'Pendente' || status === 'Criada' || status === 'Backlog' || status === 'Agendado';
+    return status === 'Pendente' || status === 'Criada' || status === 'Backlog';
   },
 
   _isProgressStatus(status) {
@@ -2253,20 +2460,20 @@ const OpTaskService = {
   /** Kanban Certificação Cemig — ordem do fluxo */
   _cemigColumns: [
     { status: 'Pendente', key: 'col-cemig-pendente', label: 'Pendentes' },
-    { status: 'Agendado', key: 'col-cemig-agendado', label: 'Agendado' },
+    { status: 'Em andamento', key: 'col-cemig-andamento', label: 'Em andamento' },
     { status: 'Validação', key: 'col-cemig-validacao', label: 'Validação' },
     { status: 'Necessário adequação', key: 'col-cemig-adequacao', label: 'Precisa de adequação' },
     { status: 'Concluída', key: 'col-cemig-concluida', label: 'Concluído' },
   ],
   _cemigNext: {
-    'Pendente': ['Agendado'],
-    'Agendado': ['Validação'],
+    'Pendente': ['Em andamento'],
+    'Em andamento': ['Validação'],
     'Validação': ['Necessário adequação', 'Concluída'],
     'Necessário adequação': ['Validação', 'Concluída'],
     'Concluída': [],
   },
   _cemigActionLabels: {
-    'Agendado': 'Agendar',
+    'Em andamento': 'Iniciar',
     'Validação': 'Em validação',
     'Necessário adequação': 'Adequação',
     'Concluída': 'Concluir',
@@ -2292,7 +2499,7 @@ const OpTaskService = {
 
   /** Status exibidos no menu «alterar status» (fora do fluxo Cemig). */
   _stdOpStatusPicklist() {
-    return ['Backlog', 'A iniciar', 'Criada', 'Agendado', 'Pendente', 'Em andamento', 'Concluída', 'Finalizada', 'Finalizado', 'Cancelada'];
+    return ['Backlog', 'A iniciar', 'Criada', 'Pendente', 'Em andamento', 'Concluída', 'Finalizada', 'Finalizado', 'Cancelada'];
   },
 
   /**
@@ -2368,7 +2575,7 @@ const OpTaskService = {
       if (t.categoria === 'atendimento-cliente' && t.parentTaskId) return;
       if (t.categoria === 'certificacao-cemig') {
         const s = t.status;
-        if (s === 'Backlog' || s === 'Agendado') counts.Criada++;
+        if (s === 'Backlog') counts.Criada++;
         else if (['Em andamento', 'Validação', 'Envio pendente', 'Necessário adequação'].includes(s)) counts['Em andamento']++;
         else if (s === 'Finalizado') counts.Finalizada++;
         return;
@@ -3102,6 +3309,7 @@ const SidebarNavOrder = {
 /* ─────────────────────────────────────────────────────────────
    UI RENDERERS — Funções de renderização da interface
 ───────────────────────────────────────────────────────────── */
+
 const UI = {
   _lastMovedOpTask: null,
   _atendimentoExpanded: {},
@@ -3172,7 +3380,6 @@ const UI = {
     'Concluída':    's-concluida',
     'Finalizada':   's-finalizada',
     'Finalizado':   's-finalizado',
-    'Agendado':     's-agendado',
     'Validação':    's-validacao',
     'Envio pendente': 's-envio-pendente',
     'Necessário adequação': 's-adequacao',
@@ -3387,7 +3594,6 @@ const UI = {
     const statusActionClass = isCemig
       ? {
         'Pendente': 'cemig-advance',
-        'Agendado': 'cemig-advance',
         'Validação': 'cemig-advance',
         'Necessário adequação': 'cemig-advance',
         'Concluída': 'cemig-advance',
@@ -3403,10 +3609,12 @@ const UI = {
     const kanbanColKey = (t) => {
       if (category === 'otimizacao-rede' && ['Backlog', 'A iniciar'].includes(t.status)) return 'Criada';
       if (isCemig) {
+        // Normaliza para evitar espaços extras (ex.: " Agendado")
         const st = String(t.status || '').trim();
         // Compatibilidade com tarefas antigas: mapeia status descontinuados para as colunas novas.
         if (st === 'Backlog') return 'Pendente';
-        if (st === 'Em andamento') return 'Validação';
+        // Status removido: manter compatibilidade (tarefas antigas) sem expor a coluna.
+        if (st === 'Agendado') return 'Pendente';
         if (st === 'Envio pendente') return 'Validação';
         if (st === 'Finalizado') return 'Concluída';
         return st;
@@ -3513,6 +3721,14 @@ const UI = {
         e.stopPropagation();
         const id = +statusBtn.dataset.opId;
         const toStatus = statusBtn.dataset.toStatus;
+        const cur = Store.findOpTask(id);
+        if (cur && cur.categoria === 'certificacao-cemig' && String(toStatus || '').trim() === 'Em andamento') {
+          const reg = String(cur.regiao || '').trim();
+          if (!reg) {
+            ToastService.show('Selecione a região antes de colocar em andamento.', 'warning');
+            return;
+          }
+        }
         this._lastMovedOpTask = { id, status: toStatus };
         OpTaskService.changeStatus(id, toStatus);
         this.renderOpPage();
@@ -3573,6 +3789,14 @@ const UI = {
         setTimeout(() => col.classList.remove('drop-flash'), 500);
         const targetStatus = col.dataset.colStatus;
         if (!draggedId || !targetStatus || targetStatus === draggedFromStatus) return;
+        const cur = Store.findOpTask(draggedId);
+        if (cur && cur.categoria === 'certificacao-cemig' && String(targetStatus || '').trim() === 'Em andamento') {
+          const reg = String(cur.regiao || '').trim();
+          if (!reg) {
+            ToastService.show('Selecione a região antes de colocar em andamento.', 'warning');
+            return;
+          }
+        }
         this._lastMovedOpTask = { id: draggedId, status: targetStatus };
         OpTaskService.changeStatus(draggedId, targetStatus);
         this.renderOpPage();
@@ -3875,6 +4099,11 @@ const UI = {
     if (page === 'troca-etiqueta') this.renderTrocaEtiquetaPage();
     if (page === 'atendimento') this.renderAtendimentoPage();
     if (page === 'calendario') this.renderCalendarPage();
+    if (page === 'dashboard') {
+      this.renderDashboard();
+      // Garante atualização imediata do ranking/atividade ao entrar no dashboard
+      queueMicrotask(() => window.PlannerDashboard?.syncFromStore?.());
+    }
   },
 
   /**
@@ -3913,6 +4142,8 @@ const UI = {
     this.renderAgenda();
     this.renderDashboardStats();
     this.renderTaskTable();
+    // Atualiza widgets do dashboard (Equipe/Atividade) sem precisar de F5
+    queueMicrotask(() => window.PlannerDashboard?.syncFromStore?.());
   },
 
   /* ── Página dedicada: Atendimento ao cliente (quadro estilo kanban) ───── */
@@ -3938,11 +4169,10 @@ const UI = {
       { status: 'Finalizada',   key: 'col-finalizada', label: 'Finalizada'   },
     ];
 
-    const nextStatusMap = {
+  const nextStatusMap = {
       'Backlog': ['Em andamento'],
       'A iniciar': ['Em andamento'],
       'Criada': ['Em andamento'],
-      'Agendado': ['Em andamento'],
       'Pendente': ['Em andamento'],
       'Em andamento': ['Concluída'],
       'Concluída': ['Finalizada'],
@@ -4172,526 +4402,8 @@ const UI = {
     this.renderKanban();
   },
 
-  /* ── Troca de etiqueta (kanban CTO visual) ───────────────── */
-  _teState: {
-    filterTech: 'todos',
-    filterPriority: 'todas',
-    modalOpen: false,
-  },
-  _teEscape(s) { return Utils.escapeHtml(String(s ?? '')); },
-  _teInitials(name) { return Utils.getInitials(String(name || '—')); },
-  _tePriorityMeta(p) {
-    const k = String(p || '').trim().toLowerCase();
-    if (k === 'urgente') return { key: 'urgente', label: 'Urgente', a: '#E24B4A', b: '#FCEBEB' };
-    if (k === 'alto') return { key: 'alto', label: 'Alto', a: '#EF9F27', b: '#FAEEDA' };
-    if (k === 'medio') return { key: 'medio', label: 'Médio', a: '#1D9E75', b: '#E1F5EE' };
-    if (k === 'estavel') return { key: 'estavel', label: 'Estável', a: '#639922', b: '#EAF3DE' };
-    return { key: 'alto', label: 'Alto', a: '#EF9F27', b: '#FAEEDA' };
-  },
-  _teStatusKey(status) {
-    const s = String(status || '').trim().toLowerCase();
-    if (s.includes('and')) return 'andamento';
-    if (s.includes('conc')) return 'concluida';
-    return 'pendente';
-  },
-  _teStatusLabel(key) {
-    if (key === 'andamento') return 'Em andamento';
-    if (key === 'concluida') return 'Concluídas';
-    return 'Pendentes';
-  },
-  _teAll() {
-    const all = Store.getOpTasksByCategory('troca-etiqueta') || [];
-    return all.map(t => ({
-      id: Number(t.id) || 0,
-      ctoId: String(t.ctoId || t.titulo || '').trim() || `CTO-${String(Number(t.id) || 0).padStart(2, '0')}`,
-      endereco: String(t.endereco || t.regiao || t.setor || '').trim() || '—',
-      motivo: String(t.motivo || t.subProcesso || '').trim() || 'Padrão novo',
-      tecnico: String(t.responsavel || t.tecnico || '').trim() || '—',
-      prioridade: String(t.prioridade || '').trim().toLowerCase() || 'alto',
-      status: String(t.status || 'Pendente'),
-    }));
-  },
-  _teFiltered(items) {
-    const st = this._teState;
-    const tech = String(st.filterTech || 'todos').toLowerCase();
-    const pr = String(st.filterPriority || 'todas').toLowerCase();
-    return items.filter(it => {
-      const matchTech = tech === 'todos' || String(it.tecnico || '').toLowerCase().includes(tech);
-      const matchPr = pr === 'todas' || String(it.prioridade || '').toLowerCase() === pr;
-      return matchTech && matchPr;
-    });
-  },
-  _teCounts(items) {
-    let total = items.length, pend = 0, and = 0, conc = 0;
-    items.forEach(it => {
-      const k = this._teStatusKey(it.status);
-      if (k === 'andamento') and++;
-      else if (k === 'concluida') conc++;
-      else pend++;
-    });
-    return { total, pend, and, conc };
-  },
-  _teRenderMetrics(root, counts) {
-    root.innerHTML = `
-      <div class="te-metrics">
-        <div class="te-metric"><div class="te-metric-label">Total</div><div class="te-metric-value">${counts.total}</div></div>
-        <div class="te-metric" data-te-m="pend"><div class="te-metric-label">Pendentes</div><div class="te-metric-value">${counts.pend}</div></div>
-        <div class="te-metric" data-te-m="and"><div class="te-metric-label">Em andamento</div><div class="te-metric-value">${counts.and}</div></div>
-        <div class="te-metric" data-te-m="conc"><div class="te-metric-label">Concluídas</div><div class="te-metric-value">${counts.conc}</div></div>
-      </div>
-    `;
-  },
-  _teCtoCardHTML(it) {
-    const meta = this._tePriorityMeta(it.prioridade);
-    const statusKey = this._teStatusKey(it.status);
-    const urgent = meta.key === 'urgente';
-    const done = statusKey === 'concluida';
-    const border = urgent ? '#E24B4A' : done ? '#639922' : meta.a;
-    const opacity = done ? '0.55' : '1';
-    const badgeBg = meta.b;
-    const badgeFg = meta.a;
-    const label = this._teEscape(it.ctoId);
-    const endereco = this._teEscape(it.endereco);
-    const motivo = this._teEscape(it.motivo);
-    const status = urgent ? 'Urgente' : statusKey === 'andamento' ? 'Em andamento' : statusKey === 'concluida' ? 'Concluída' : 'Pendente';
-    const initials = this._teEscape(this._teInitials(it.tecnico));
-    const tech = this._teEscape(it.tecnico);
-    return `
-      <div class="te-cto-wrap" draggable="true" data-te-id="${it.id}">
-        <div class="te-cto-box" style="border-color:${border};opacity:${opacity}">
-          <div class="te-cto-screws" aria-hidden="true">
-            <span class="te-cto-screw"></span>
-            <span class="te-cto-screw"></span>
-          </div>
-          <div class="te-cto-serrated" aria-hidden="true"></div>
-
-          <div class="te-cto-label" style="background:#e8e0c8">
-            <div class="te-cto-label-top">
-              <span class="te-cto-id">${label}</span>
-            </div>
-            <div class="te-cto-addr">${endereco}</div>
-            <div class="te-cto-badges">
-              <span class="te-cto-badge" style="border-color:${badgeFg};color:${badgeFg}">${this._teEscape(status)}</span>
-            </div>
-          </div>
-
-          <div class="te-cto-latch" aria-hidden="true">
-            <span class="te-cto-latch-knob"></span>
-            <span class="te-cto-latch-bar"></span>
-          </div>
-
-          <div class="te-cto-bottom" aria-hidden="true">
-            <span class="te-cto-connector"></span>
-            <span class="te-cto-connector"></span>
-          </div>
-        </div>
-
-        <div class="te-cto-strip">
-          <div class="te-cto-strip-left">
-            <span class="te-cto-avatar">${initials}</span>
-            <span class="te-cto-tech-name">${tech}</span>
-          </div>
-          <span class="te-cto-strip-badge" style="background:${badgeBg};color:${badgeFg};border-color:${badgeFg}">${motivo}</span>
-        </div>
-      </div>
-    `;
-  },
-  _teRenderBoard(root, items) {
-    const cols = {
-      pendente: items.filter(it => this._teStatusKey(it.status) === 'pendente'),
-      andamento: items.filter(it => this._teStatusKey(it.status) === 'andamento'),
-      concluida: items.filter(it => this._teStatusKey(it.status) === 'concluida'),
-    };
-    root.innerHTML = `
-      <div class="te-board">
-        ${['pendente','andamento','concluida'].map(k => `
-          ${(() => {
-            const collapseKey = `te|${k}`;
-            const collapsed = this._isKanbanCollapsedKey ? this._isKanbanCollapsedKey(collapseKey) : false;
-            const toggleTitle = collapsed ? 'Expandir' : 'Recolher';
-            const toggleAria = collapsed ? 'false' : 'true';
-            return `
-          <div class="te-col te-col-${k}" data-te-col="${k}">
-            <div class="te-col-head">
-              <button type="button" class="kanban-col-toggle te-col-toggle" data-te-collapse="${this._teEscape(collapseKey)}" aria-expanded="${toggleAria}" title="${toggleTitle}">
-                <span class="kanban-col-toggle-chevron" aria-hidden="true">
-                  <svg class="kanban-col-toggle-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                </span>
-              </button>
-              <div class="te-col-title">${this._teEscape(this._teStatusLabel(k))}</div>
-              <div class="te-col-count">${cols[k].length}</div>
-            </div>
-            <div class="te-col-body${collapsed ? ' te-col-body--collapsed' : ''}">
-              ${cols[k].map(it => this._teCtoCardHTML(it)).join('') || `<div class="te-empty">Sem ordens</div>`}
-            </div>
-          </div>
-            `;
-          })()}
-        `).join('')}
-      </div>
-    `;
-  },
-  _teRenderTopbar(root) {
-    const st = this._teState;
-    root.innerHTML = `
-      <div class="te-topbar">
-        <div class="te-topbar-left">
-          <div class="te-topbar-title">Troca de etiqueta</div>
-          <div class="te-topbar-sub">Ordens e status no kanban</div>
-        </div>
-        <div class="te-topbar-actions">
-          <div class="te-filter">
-            <button class="te-filter-btn${st.filterPriority==='todas'?' active':''}" data-te-pr="todas">Todas</button>
-            <button class="te-filter-btn${st.filterPriority==='urgente'?' active':''}" data-te-pr="urgente">Urgente</button>
-            <button class="te-filter-btn${st.filterPriority==='alto'?' active':''}" data-te-pr="alto">Alto</button>
-            <button class="te-filter-btn${st.filterPriority==='medio'?' active':''}" data-te-pr="medio">Médio</button>
-            <button class="te-filter-btn${st.filterPriority==='estavel'?' active':''}" data-te-pr="estavel">Estável</button>
-          </div>
-          <div class="te-filter tech">
-            <button class="te-filter-btn${st.filterTech==='todos'?' active':''}" data-te-tech="todos">Todos técnicos</button>
-            <button class="te-filter-btn" data-te-tech="prompt">Filtrar técnico…</button>
-          </div>
-          <button class="te-primary" id="teNewBtn" type="button">+ Nova ordem</button>
-        </div>
-      </div>
-    `;
-  },
-  _teRenderModal(root) {
-    root.insertAdjacentHTML('beforeend', `
-      <div class="te-modal" id="teModal" aria-hidden="true">
-        <div class="te-modal-panel" role="dialog" aria-modal="true" aria-label="Nova ordem">
-          <div class="te-modal-head">
-            <div class="te-modal-title">Nova ordem</div>
-            <button class="te-btn" id="teCloseModalBtn" type="button">Fechar</button>
-          </div>
-          <div class="te-modal-body">
-            <div class="form-group">
-              <label for="teCtoId">ID da CTO</label>
-              <input class="te-input" id="teCtoId" type="text" placeholder="CTO-07" />
-            </div>
-            <div class="form-group">
-              <label for="teEndereco">Endereço completo</label>
-              <input class="te-input" id="teEndereco" type="text" placeholder="Rua …, nº …, bairro …" />
-            </div>
-            <div class="te-row2">
-              <div class="form-group">
-                <label for="teMotivo">Motivo</label>
-                <select class="te-select" id="teMotivo">
-                  <option value="Danificada">Danificada</option>
-                  <option value="Desbotada">Desbotada</option>
-                  <option value="Padrão novo" selected>Padrão novo</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="teTecnico">Técnico</label>
-                <input class="te-input" id="teTecnico" type="text" placeholder="Nome do técnico" />
-              </div>
-            </div>
-            <div class="form-group">
-              <label for="teRegiao">Região</label>
-              <select class="te-select" id="teRegiao">
-                <option value="">Selecione a região</option>
-                <option value="Goval">Goval</option>
-                <option value="Vale do Aço">Vale do Aço</option>
-                <option value="Caratinga">Caratinga</option>
-                <option value="Backup">Backup</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label for="tePrioridade">Prioridade</label>
-              <select class="te-select" id="tePrioridade">
-                <option value="urgente">Urgente</option>
-                <option value="alto" selected>Alto</option>
-                <option value="medio">Médio</option>
-                <option value="estavel">Estável</option>
-              </select>
-            </div>
-          </div>
-          <div class="te-modal-foot">
-            <button class="te-btn" id="teCancelBtn" type="button">Cancelar</button>
-            <button class="te-primary" id="teConfirmBtn" type="button">Adicionar</button>
-          </div>
-        </div>
-      </div>
-    `);
-  },
-  async _teResolveCoordsToAddress(lat, lng) {
-    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}&zoom=18&addressdetails=1`;
-    const response = await fetch(url, { headers: { Accept: 'application/json' } });
-    if (!response.ok) throw new Error('Falha na consulta');
-    const payload = await response.json();
-    const addr = payload?.address || {};
-    const rua = addr.road || addr.pedestrian || addr.residential || addr.path || '';
-    const bairro = addr.suburb || addr.neighbourhood || addr.city_district || addr.quarter || '';
-    return [rua, bairro].filter(Boolean).join(' - ');
-  },
-  _teApplyCtoLookupToEndereco() {
-    const ctoEl = document.getElementById('teCtoId');
-    const endEl = document.getElementById('teEndereco');
-    if (!ctoEl || !endEl) return;
-    const raw = String(ctoEl.value || '').trim();
-    if (!raw) return;
-    // não sobrescreve se o usuário já editou manualmente (exceto se foi auto preenchido)
-    const manualLock = endEl.dataset.teManual === '1';
-    if (manualLock) return;
-
-    const q = raw;
-    CtoLocationRegistry.load().then(async () => {
-      const hit = CtoLocationRegistry.findByQuery(q);
-      if (!hit) return;
-      try {
-        const txt = await this._teResolveCoordsToAddress(hit.lat, hit.lng);
-        if (txt) {
-          endEl.value = txt;
-          endEl.dataset.teAutofill = '1';
-          endEl.dataset.teManual = '0';
-        }
-      } catch {
-        /* ignore */
-      }
-    }).catch(() => {});
-  },
-  _teOpenModal() {
-    const m = document.getElementById('teModal');
-    if (!m) return;
-    m.classList.add('open');
-    m.setAttribute('aria-hidden', 'false');
-    document.getElementById('teCtoId')?.focus?.();
-  },
-  _teCloseModal() {
-    const m = document.getElementById('teModal');
-    if (!m) return;
-    m.classList.remove('open');
-    m.setAttribute('aria-hidden', 'true');
-  },
-  _teSetStatus(id, colKey) {
-    const status = colKey === 'andamento' ? 'Em andamento' : colKey === 'concluida' ? 'Concluída' : 'Pendente';
-    const before = Store.findOpTask(id);
-    const beforeKey = before ? this._teStatusKey(before.status) : '';
-
-    Store.updateOpTask(id, { status });
-
-    // Dispara webhook ao entrar em andamento ou ao concluir via drag.
-    try {
-      const after = Store.findOpTask(id);
-      const afterKey = after ? this._teStatusKey(after.status) : '';
-      const shouldSendAndamento = beforeKey === 'pendente' && afterKey === 'andamento';
-      const shouldSendConcluida = beforeKey !== 'concluida' && afterKey === 'concluida';
-
-      if (shouldSendAndamento || shouldSendConcluida) {
-        (async () => {
-          try {
-            const fresh0 = Store.findOpTask(id);
-            if (!fresh0) return;
-
-            // Garante CTO.
-            const ctoId = String(fresh0?.ctoId || fresh0?.titulo || '').trim();
-            if (ctoId && !fresh0?.ctoId) Store.updateOpTask(id, { ctoId });
-
-            // Puxa coordenadas da CTO e salva na tarefa antes do envio.
-            let coords = String(fresh0?.coordenadas || '').trim();
-            if (!coords && ctoId && typeof CtoLocationRegistry !== 'undefined' && CtoLocationRegistry) {
-              try { await CtoLocationRegistry.load(); } catch { /* ignore */ }
-              try {
-                const hit = (typeof CtoLocationRegistry.findByQuery === 'function')
-                  ? CtoLocationRegistry.findByQuery(ctoId)
-                  : null;
-                if (hit && Number.isFinite(Number(hit.lat)) && Number.isFinite(Number(hit.lng))) {
-                  coords = `${Number(hit.lat)},${Number(hit.lng)}`;
-                  Store.updateOpTask(id, { coordenadas: coords });
-                }
-              } catch {
-                /* ignore */
-              }
-            }
-
-            const fresh = Store.findOpTask(id);
-            const event = shouldSendConcluida ? 'concluida' : 'andamento';
-            WebhookService.send(event, fresh, null);
-          } catch {
-            /* ignore */
-          }
-        })();
-      }
-    } catch {
-      /* não quebra o drop */
-    }
-  },
-  _bindTrocaEtiquetaEventsOnce(root) {
-    if (!root || root.dataset.boundTe) return;
-    root.dataset.boundTe = '1';
-
-    const rerender = () => this.renderTrocaEtiquetaPage();
-
-    root.addEventListener('click', (e) => {
-      const t = e.target;
-      const colToggle = t?.closest?.('[data-te-collapse]');
-      if (colToggle) {
-        e.preventDefault();
-        const key = String(colToggle.getAttribute('data-te-collapse') || '').trim();
-        if (key && this._toggleKanbanCollapsedKey) this._toggleKanbanCollapsedKey(key);
-        this.renderTrocaEtiquetaPage();
-        return;
-      }
-      if (t?.closest?.('#teNewBtn')) {
-        e.preventDefault();
-        this._teOpenModal();
-        return;
-      }
-      if (t?.closest?.('#teCloseModalBtn') || t?.closest?.('#teCancelBtn')) {
-        e.preventDefault();
-        this._teCloseModal();
-        return;
-      }
-      if (t?.closest?.('#teConfirmBtn')) {
-        e.preventDefault();
-        const ctoId = String(document.getElementById('teCtoId')?.value || '').trim() || 'CTO-00';
-        const endereco = String(document.getElementById('teEndereco')?.value || '').trim() || '—';
-        const motivo = String(document.getElementById('teMotivo')?.value || 'Padrão novo');
-        const tecnico = String(document.getElementById('teTecnico')?.value || '').trim() || '—';
-        const regiao = String(document.getElementById('teRegiao')?.value || '').trim();
-        const prioridade = String(document.getElementById('tePrioridade')?.value || 'alto').trim().toLowerCase();
-        Store.addOpTask({
-          categoria: 'troca-etiqueta',
-          ctoId,
-          titulo: ctoId,
-          endereco,
-          motivo,
-          responsavel: tecnico,
-          regiao,
-          prioridade,
-          status: 'Pendente',
-        });
-        this._teCloseModal();
-        rerender();
-        ToastService.show('Ordem criada.', 'success');
-        return;
-      }
-
-      // FIX: ao clicar em uma tarefa "Criada/Pendente" na Troca de etiqueta, permitir editar no modal padrão.
-      const card = t?.closest?.('[data-te-id]');
-      if (card && !t?.closest?.('#teModal')) {
-        const id = Number(card.dataset.teId || 0);
-        const task = id ? Store.findOpTask(id) : null;
-        if (task && String(task.categoria || '') === 'troca-etiqueta') {
-          const stKey = this._teStatusKey(task.status);
-          if (stKey === 'pendente') {
-            e.preventDefault();
-            Controllers.opTask.openEditModal(id);
-            return;
-          }
-        }
-      }
-
-      const prBtn = t?.closest?.('[data-te-pr]');
-      if (prBtn) {
-        e.preventDefault();
-        this._teState.filterPriority = String(prBtn.dataset.tePr || 'todas');
-        rerender();
-        return;
-      }
-      const techBtn = t?.closest?.('[data-te-tech]');
-      if (techBtn) {
-        e.preventDefault();
-        const k = String(techBtn.dataset.teTech || 'todos');
-        if (k === 'prompt') {
-          const v = window.prompt('Filtrar por técnico (deixe vazio para todos):') ?? '';
-          this._teState.filterTech = String(v).trim() ? String(v).trim() : 'todos';
-        } else {
-          this._teState.filterTech = k;
-        }
-        rerender();
-      }
-    });
-
-    // Autofill endereço pela CTO (igual Rompimento): debounce leve
-    let teCtoDebounce = null;
-    root.addEventListener('input', (e) => {
-      const el = e.target;
-      if (el?.id === 'teEndereco') {
-        // qualquer edição manual trava o autofill
-        el.dataset.teManual = '1';
-      }
-      if (el?.id !== 'teCtoId') return;
-      const endEl = document.getElementById('teEndereco');
-      if (endEl && endEl.dataset.teAutofill === '1') {
-        // se estava auto preenchido, permitir novo autofill ao trocar CTO
-        endEl.dataset.teManual = '0';
-      }
-      if (teCtoDebounce) clearTimeout(teCtoDebounce);
-      teCtoDebounce = setTimeout(() => {
-        this._teApplyCtoLookupToEndereco();
-      }, 350);
-    });
-
-    // Drag & drop
-    let draggedId = 0;
-    root.addEventListener('dragstart', (e) => {
-      const card = e.target?.closest?.('[data-te-id]');
-      if (!card) return;
-      draggedId = Number(card.dataset.teId || 0);
-      try { e.dataTransfer.setData('text/plain', String(draggedId)); } catch {}
-      e.dataTransfer.effectAllowed = 'move';
-      card.classList.add('te-dragging');
-    });
-    root.addEventListener('dragend', (e) => {
-      const card = e.target?.closest?.('[data-te-id]');
-      card?.classList?.remove?.('te-dragging');
-      draggedId = 0;
-      root.querySelectorAll('.te-col').forEach(c => c.classList.remove('te-drag-over'));
-    });
-    root.addEventListener('dragover', (e) => {
-      const col = e.target?.closest?.('[data-te-col]');
-      if (!col) return;
-      e.preventDefault();
-      col.classList.add('te-drag-over');
-      e.dataTransfer.dropEffect = 'move';
-    });
-    root.addEventListener('dragleave', (e) => {
-      const col = e.target?.closest?.('[data-te-col]');
-      if (!col) return;
-      if (e.relatedTarget && col.contains(e.relatedTarget)) return;
-      col.classList.remove('te-drag-over');
-    });
-    root.addEventListener('drop', (e) => {
-      const col = e.target?.closest?.('[data-te-col]');
-      if (!col) return;
-      e.preventDefault();
-      col.classList.remove('te-drag-over');
-      const id = draggedId || Number(e.dataTransfer.getData('text/plain') || 0);
-      if (!id) return;
-      const colKey = String(col.dataset.teCol || 'pendente');
-      this._teSetStatus(id, colKey);
-      rerender();
-    });
-
-    // Fecha modal clicando fora
-    root.addEventListener('click', (e) => {
-      const modal = e.target?.closest?.('#teModal');
-      if (modal && e.target === modal) this._teCloseModal();
-    });
-  },
-  renderTrocaEtiquetaPage() {
-    const root = document.getElementById('teRoot');
-    if (!root) return;
-    this._bindTrocaEtiquetaEventsOnce(root);
-
-    const all = this._teAll();
-    const filtered = this._teFiltered(all);
-    const counts = this._teCounts(filtered);
-
-    root.innerHTML = `
-      <div class="te-layout">
-        <div id="teTopbar"></div>
-        <div id="teMetrics"></div>
-        <div id="teBoard"></div>
-      </div>
-    `;
-    this._teRenderTopbar(root.querySelector('#teTopbar'));
-    this._teRenderMetrics(root.querySelector('#teMetrics'), counts);
-    this._teRenderBoard(root.querySelector('#teBoard'), filtered);
-    this._teRenderModal(root);
-  },
+  /* ── Troca de etiqueta (delegado ao módulo TrocaEtiquetaPage) ─────────── */
+  renderTrocaEtiquetaPage() { TrocaEtiquetaPage.render(); },
 
   /* ── Correção de Atenuação (Dashboard flat) ───────────────── */
   _atn2State: {
@@ -4962,6 +4674,7 @@ const UI = {
             <div class="form-group">
               <label for="atn2ActName">Nome da caixa</label>
               <input class="atn2-input" id="atn2ActName" type="text" placeholder="CTO-00 · Bairro · Região" />
+              <div class="hint" id="atn2ActCtoHint" style="margin-top:6px"></div>
             </div>
             <div class="form-group">
               <label for="atn2ActRegion">Região</label>
@@ -4972,6 +4685,29 @@ const UI = {
                 <option value="Caratinga">Caratinga</option>
                 <option value="Backup">Backup</option>
               </select>
+            </div>
+            <div class="form-group">
+              <label for="atn2ActResponsavel">Técnico responsável</label>
+              <input class="atn2-input" id="atn2ActResponsavel" type="text" placeholder="Selecione ou digite o técnico" autocomplete="off" list="atn2TecnicosList" />
+              <input type="hidden" id="atn2ActResponsavelChatId" value="" />
+              <datalist id="atn2TecnicosList"></datalist>
+            </div>
+            <div class="form-group">
+              <label for="atn2ActStatus">Status</label>
+              <select class="atn2-input" id="atn2ActStatus" aria-label="Status da atividade de atenuação">
+                <option value="Criada">Pendente</option>
+                <option value="Em andamento">Em andamento</option>
+                <option value="Concluída">Concluída</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="atn2ActCoords">Coordenadas</label>
+              <input class="atn2-input" id="atn2ActCoords" type="text" placeholder="Preenchidas ao digitar a CTO (ou edite manualmente)" autocomplete="off" />
+            </div>
+            <div class="form-group">
+              <label for="atn2ActAddress">Endereço (rua / bairro)</label>
+              <input class="atn2-input" id="atn2ActAddress" type="text" readonly placeholder="Identificado automaticamente a partir das coordenadas" />
+              <div class="hint" id="atn2ActAddressHint" style="margin-top:6px">Aguardando CTO ou coordenadas.</div>
             </div>
             <div class="form-group">
               <label for="atn2ActDbm">Faixa de atenuação (dBm)</label>
@@ -5258,10 +4994,15 @@ const UI = {
         m.setAttribute('aria-hidden', 'false');
         const nameEl = document.getElementById('atn2ActName');
         const regionEl = document.getElementById('atn2ActRegion');
+        const coordsEl = document.getElementById('atn2ActCoords');
+        const addrEl = document.getElementById('atn2ActAddress');
         const dbmEl = document.getElementById('atn2ActDbm');
         if (nameEl) nameEl.value = prevName;
         if (regionEl) regionEl.value = prevRegion;
         if (dbmEl) dbmEl.value = prevDbm;
+        // coordenadas/endereço ficam vazios quando o modal foi aberto e o usuário ainda não preencheu
+        if (coordsEl && !coordsEl.value) coordsEl.value = '';
+        if (addrEl && !addrEl.value) addrEl.value = '';
         this._atn2SyncActModalDeleteBtn();
       }
     }
@@ -5301,6 +5042,97 @@ const UI = {
         if (key === 'CARATINGA') return 'Caratinga';
         if (key === 'BACKUP') return 'Backup';
         return '';
+      };
+
+      const parseCoords = (raw) => {
+        if (!raw) return null;
+        const normalized = String(raw).replace(/\s+/g, '');
+        const parts = normalized.split(',');
+        if (parts.length !== 2) return null;
+        const lat = Number(parts[0]);
+        const lon = Number(parts[1]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+        return { lat, lon };
+      };
+
+      const syncAtenuacaoTecnicosDatalist = () => {
+        const listEl = document.getElementById('atn2TecnicosList');
+        if (!listEl) return;
+        const regiaoRaw = document.getElementById('atn2ActRegion')?.value || '';
+        const techs = getTechDirectory(WebhookService._normalizeRegionKey(regiaoRaw));
+        listEl.innerHTML = techs.map(t => `<option value="${t.name}"></option>`).join('');
+      };
+
+      const syncAtenuacaoSelectedTecnicoChatId = () => {
+        const input = document.getElementById('atn2ActResponsavel');
+        const hidden = document.getElementById('atn2ActResponsavelChatId');
+        if (!input || !hidden) return;
+        const regiaoRaw = document.getElementById('atn2ActRegion')?.value || '';
+        const key = normalizeTechName(input.value);
+        const match = getTechDirectory(WebhookService._normalizeRegionKey(regiaoRaw)).find(t => t.key === key);
+        hidden.value = match ? match.chatUserId : '';
+      };
+
+      const resolveCoordsToAddress = async (rawCoords) => {
+        const coordsInput = document.getElementById('atn2ActCoords');
+        const addressInput = document.getElementById('atn2ActAddress');
+        const hint = document.getElementById('atn2ActAddressHint');
+        if (!addressInput || !hint) return;
+        const coords = parseCoords(rawCoords);
+        if (!coords) {
+          addressInput.value = '';
+          hint.textContent = rawCoords ? 'Coordenadas inválidas. Use o formato: latitude, longitude.' : 'Aguardando CTO ou coordenadas.';
+          return;
+        }
+        hint.textContent = 'Buscando endereço...';
+        try {
+          const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coords.lat}&lon=${coords.lon}&zoom=18&addressdetails=1`;
+          const response = await fetch(url, { headers: { Accept: 'application/json' } });
+          if (!response.ok) throw new Error('Falha na consulta');
+          const payload = await response.json();
+          const addr = payload?.address || {};
+          const rua = addr.road || addr.pedestrian || addr.residential || addr.path || '';
+          const bairro = addr.suburb || addr.neighbourhood || addr.city_district || addr.quarter || '';
+          const text = [rua, bairro].filter(Boolean).join(' - ');
+          if (!text) {
+            addressInput.value = '';
+            hint.textContent = 'Não foi possível identificar rua e bairro para essas coordenadas.';
+            return;
+          }
+          addressInput.value = text;
+          hint.textContent = 'Localização identificada automaticamente.';
+          if (coordsInput && coordsInput.value !== rawCoords) coordsInput.value = rawCoords;
+        } catch {
+          addressInput.value = '';
+          hint.textContent = 'Não foi possível converter coordenadas em endereço agora.';
+        }
+      };
+
+      const applyCtoLookupFromName = () => {
+        const nameEl = document.getElementById('atn2ActName');
+        const hintEl = document.getElementById('atn2ActCtoHint');
+        const coordsEl = document.getElementById('atn2ActCoords');
+        if (!nameEl) return;
+        const q = String(nameEl.value || '').trim();
+        if (!q) {
+          if (hintEl) hintEl.textContent = '';
+          if (coordsEl) coordsEl.value = '';
+          resolveCoordsToAddress('');
+          return;
+        }
+        if (typeof CtoLocationRegistry === 'undefined' || !CtoLocationRegistry) return;
+        CtoLocationRegistry.load().then(async () => {
+          const hit = CtoLocationRegistry.findByQuery(q);
+          if (!hit) {
+            if (hintEl && q.length >= 4) hintEl.textContent = 'CTO não encontrada na base — você pode preencher as coordenadas manualmente.';
+            else if (hintEl) hintEl.textContent = '';
+            return;
+          }
+          if (hintEl) hintEl.textContent = `Base: ${hit.nome} (ajuste as coordenadas se necessário).`;
+          if (coordsEl) coordsEl.value = `${hit.lat}, ${hit.lng}`;
+          await resolveCoordsToAddress(`${hit.lat}, ${hit.lng}`);
+        });
       };
 
       // Dropdown simples (circular) para status na lista de atividades
@@ -5378,6 +5210,7 @@ const UI = {
           const editId = Number(m?.dataset?.editId || 0);
           const rawName = String(document.getElementById('atn2ActName')?.value || '').trim();
           const region = normalizeAtenuacaoRegionLabel(document.getElementById('atn2ActRegion')?.value);
+          const status = String(document.getElementById('atn2ActStatus')?.value || 'Criada').trim() || 'Criada';
           const name = rawName || 'Atividade de atenuação';
           const title = region && name && !name.toLowerCase().includes(region.toLowerCase())
             ? `${name} · ${region}`
@@ -5388,29 +5221,66 @@ const UI = {
           const dbm = Number(String(dbmNorm || '').replace(',', '.')) || 0;
           const atenuacaoDb = Number.isFinite(dbm) ? (dbm > 0 ? -dbm : dbm) : 0;
           const prio = this._atn2PriorityFromDbm(atenuacaoDb);
-          const who = String(getSignedUserName?.() || '').trim() || '—';
+          const who = String(document.getElementById('atn2ActResponsavel')?.value || '').trim()
+            || String(getSignedUserName?.() || '').trim()
+            || '—';
+          const responsavelChatId = String(document.getElementById('atn2ActResponsavelChatId')?.value || '').trim();
+          const rawCoords = String(document.getElementById('atn2ActCoords')?.value || '').trim();
+          const coords = parseCoords(rawCoords) ? rawCoords : '';
+          const address = String(document.getElementById('atn2ActAddress')?.value || '').trim();
           const patch = {
             titulo: title,
             regiao: region,
             prioridade: prio,
+            status,
             descricao: atenuacaoDb ? `Atenuação: ${atenuacaoDb} dBm` : 'Atenuação: N/D',
             atenuacaoDb,
+            coordenadas: coords,
+            localizacaoTexto: address,
+            responsavel: who,
+            responsavelChatId,
           };
           if (editId) {
+            const before = Store.findOpTask?.(editId);
+            const beforeStatus = String(before?.status || '').trim();
             Store.updateOpTask(editId, patch);
+            const savedTask = Store.findOpTask?.(editId) || before;
             ToastService?.show?.('Atividade atualizada.', 'success');
+            const event = OpTaskService?._statusToEvent?.[status];
+            if (event && savedTask && beforeStatus !== status) {
+              // Evita cair no BACKUP quando o usuário não escolheu região.
+              if (!String(savedTask.regiao || '').trim()) {
+                ToastService?.show?.('Selecione uma região para enviar ao chat.', 'warning');
+              } else {
+              const categoryLabel = OpTaskService?._categoryLabels?.[savedTask.categoria] || savedTask.categoria;
+              WebhookService?.send?.(event, savedTask, categoryLabel);
+              }
+            }
           } else {
-            Store.addOpTask({
+            const newId = Store.addOpTask({
               categoria: 'correcao-atenuacao',
               titulo: title,
               regiao: region,
               responsavel: who,
+              responsavelChatId,
               prioridade: prio,
-              status: 'Criada',
+              status,
               descricao: atenuacaoDb ? `Atenuação: ${atenuacaoDb} dBm` : 'Atenuação: N/D',
               atenuacaoDb,
+              coordenadas: coords,
+              localizacaoTexto: address,
             });
             ToastService?.show?.('Atividade salva.', 'success');
+            const savedTask = (typeof newId === 'number' && newId) ? Store.findOpTask?.(newId) : null;
+            const event = OpTaskService?._statusToEvent?.[status];
+            if (event && savedTask) {
+              if (!String(savedTask.regiao || '').trim()) {
+                ToastService?.show?.('Selecione uma região para enviar ao chat.', 'warning');
+              } else {
+              const categoryLabel = OpTaskService?._categoryLabels?.[savedTask.categoria] || savedTask.categoria;
+              WebhookService?.send?.(event, savedTask, categoryLabel);
+              }
+            }
           }
         } catch {
           ToastService?.show?.('Não foi possível salvar a atividade.', 'danger');
@@ -5461,6 +5331,39 @@ const UI = {
         }
       }, true);
 
+      // "+ Criar atividade": usa pointerdown (captura) para ser mais confiável que click
+      // em cenários com scroll/drag/overlays que impedem o click de disparar.
+      root.addEventListener('pointerdown', (e) => {
+        const t = (e.target && e.target.nodeType === 3) ? e.target.parentElement : e.target;
+        if (!t?.closest?.('#atn2CreateActivityBtn')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const m = document.getElementById('atn2ActModal');
+        if (m) delete m.dataset.editId;
+        const nameEl = document.getElementById('atn2ActName');
+        const regionEl = document.getElementById('atn2ActRegion');
+        const respEl = document.getElementById('atn2ActResponsavel');
+        const respChatEl = document.getElementById('atn2ActResponsavelChatId');
+        const statusEl = document.getElementById('atn2ActStatus');
+        const coordsEl = document.getElementById('atn2ActCoords');
+        const addrEl = document.getElementById('atn2ActAddress');
+        const ctoHint = document.getElementById('atn2ActCtoHint');
+        const addrHint = document.getElementById('atn2ActAddressHint');
+        const dbmEl = document.getElementById('atn2ActDbm');
+        if (nameEl) nameEl.value = '';
+        if (regionEl) regionEl.value = '';
+        if (respEl) respEl.value = '';
+        if (respChatEl) respChatEl.value = '';
+        if (statusEl) statusEl.value = 'Criada';
+        if (coordsEl) coordsEl.value = '';
+        if (addrEl) addrEl.value = '';
+        if (ctoHint) ctoHint.textContent = '';
+        if (addrHint) addrHint.textContent = 'Aguardando CTO ou coordenadas.';
+        if (dbmEl) dbmEl.value = '';
+        syncAtenuacaoTecnicosDatalist();
+        openModal();
+      }, true);
+
       root.addEventListener('click', (e) => {
         const t = (e.target && e.target.nodeType === 3) ? e.target.parentElement : e.target;
         const filterBtn = t?.closest?.('[data-atn2-act-filter]');
@@ -5489,11 +5392,25 @@ const UI = {
           if (m) m.dataset.editId = String(id);
           const nameEl = document.getElementById('atn2ActName');
           const regionEl = document.getElementById('atn2ActRegion');
+          const respEl = document.getElementById('atn2ActResponsavel');
+          const respChatEl = document.getElementById('atn2ActResponsavelChatId');
+          const statusEl = document.getElementById('atn2ActStatus');
+          const coordsEl = document.getElementById('atn2ActCoords');
+          const addrEl = document.getElementById('atn2ActAddress');
+          const addrHint = document.getElementById('atn2ActAddressHint');
           const dbmEl = document.getElementById('atn2ActDbm');
           if (nameEl) nameEl.value = String(task.titulo || task.nome || '').trim();
           if (regionEl) regionEl.value = normalizeAtenuacaoRegionLabel(task.regiao);
+          if (respEl) respEl.value = String(task.responsavel || '').trim();
+          if (respChatEl) respChatEl.value = String(task.responsavelChatId || '').trim();
+          if (statusEl) statusEl.value = String(task.status || 'Criada').trim() || 'Criada';
           const db = Number(task.atenuacaoDb);
           if (dbmEl) dbmEl.value = Number.isFinite(db) && db !== 0 ? String(db) : '';
+          if (coordsEl) coordsEl.value = String(task.coordenadas || '').trim();
+          if (addrEl) addrEl.value = String(task.localizacaoTexto || '').trim();
+          if (addrHint) addrHint.textContent = coordsEl?.value ? 'Localização carregada.' : 'Aguardando CTO ou coordenadas.';
+          syncAtenuacaoTecnicosDatalist();
+          syncAtenuacaoSelectedTecnicoChatId();
           openModal();
           return;
         }
@@ -5503,10 +5420,25 @@ const UI = {
           if (m) delete m.dataset.editId;
           const nameEl = document.getElementById('atn2ActName');
           const regionEl = document.getElementById('atn2ActRegion');
+          const respEl = document.getElementById('atn2ActResponsavel');
+          const respChatEl = document.getElementById('atn2ActResponsavelChatId');
+          const statusEl = document.getElementById('atn2ActStatus');
+          const coordsEl = document.getElementById('atn2ActCoords');
+          const addrEl = document.getElementById('atn2ActAddress');
+          const ctoHint = document.getElementById('atn2ActCtoHint');
+          const addrHint = document.getElementById('atn2ActAddressHint');
           const dbmEl = document.getElementById('atn2ActDbm');
           if (nameEl) nameEl.value = '';
           if (regionEl) regionEl.value = '';
+          if (respEl) respEl.value = '';
+          if (respChatEl) respChatEl.value = '';
+          if (statusEl) statusEl.value = 'Criada';
+          if (coordsEl) coordsEl.value = '';
+          if (addrEl) addrEl.value = '';
+          if (ctoHint) ctoHint.textContent = '';
+          if (addrHint) addrHint.textContent = 'Aguardando CTO ou coordenadas.';
           if (dbmEl) dbmEl.value = '';
+          syncAtenuacaoTecnicosDatalist();
           openModal();
           return;
         }
@@ -5524,11 +5456,25 @@ const UI = {
           if (m) m.dataset.editId = String(id);
           const nameEl = document.getElementById('atn2ActName');
           const regionEl = document.getElementById('atn2ActRegion');
+          const respEl = document.getElementById('atn2ActResponsavel');
+          const respChatEl = document.getElementById('atn2ActResponsavelChatId');
+          const statusEl = document.getElementById('atn2ActStatus');
+          const coordsEl = document.getElementById('atn2ActCoords');
+          const addrEl = document.getElementById('atn2ActAddress');
+          const addrHint = document.getElementById('atn2ActAddressHint');
           const dbmEl = document.getElementById('atn2ActDbm');
           if (nameEl) nameEl.value = String(task.titulo || task.nome || '').trim();
           if (regionEl) regionEl.value = normalizeAtenuacaoRegionLabel(task.regiao);
+          if (respEl) respEl.value = String(task.responsavel || '').trim();
+          if (respChatEl) respChatEl.value = String(task.responsavelChatId || '').trim();
+          if (statusEl) statusEl.value = String(task.status || 'Criada').trim() || 'Criada';
           const db = Number(task.atenuacaoDb);
           if (dbmEl) dbmEl.value = Number.isFinite(db) && db !== 0 ? String(db) : '';
+          if (coordsEl) coordsEl.value = String(task.coordenadas || '').trim();
+          if (addrEl) addrEl.value = String(task.localizacaoTexto || '').trim();
+          if (addrHint) addrHint.textContent = coordsEl?.value ? 'Localização carregada.' : 'Aguardando CTO ou coordenadas.';
+          syncAtenuacaoTecnicosDatalist();
+          syncAtenuacaoSelectedTecnicoChatId();
           openModal();
           return;
         }
@@ -5597,6 +5543,30 @@ const UI = {
             el.value = next;
             try { el.setSelectionRange(pos, pos); } catch {}
           }
+        }
+        if (el?.id === 'atn2ActRegion') {
+          syncAtenuacaoTecnicosDatalist();
+          syncAtenuacaoSelectedTecnicoChatId();
+        }
+        if (el?.id === 'atn2ActResponsavel') {
+          syncAtenuacaoSelectedTecnicoChatId();
+        }
+        if (el?.id === 'atn2ActName') {
+          // Sempre força o valor em maiúsculo (mantém a posição do cursor)
+          const v0 = String(el.value || '');
+          const v1 = v0.toUpperCase();
+          if (v1 !== v0) {
+            const start = el.selectionStart;
+            const end = el.selectionEnd;
+            el.value = v1;
+            try { el.setSelectionRange(start, end); } catch { /* ignore */ }
+          }
+          applyCtoLookupFromName();
+        }
+        if (el?.id === 'atn2ActCoords') {
+          const raw = String(el.value || '').trim();
+          // Atualiza endereço ao digitar coordenadas manualmente
+          resolveCoordsToAddress(raw);
         }
       });
 
@@ -6108,6 +6078,583 @@ const UI = {
   // Tela de relatório removida.
 };
 
+/* ─────────────────────────────────────────────────────────────
+   TROCA DE ETIQUETA — Página reescrita (módulo isolado)
+───────────────────────────────────────────────────────────── */
+const TrocaEtiquetaPage = (() => {
+  const COLLAPSE_NS = 'troca-etiqueta';
+  const state = {
+    filterPriority: 'todas', // todas|urgente|alto|medio|estavel
+    filterTech: 'todos', // todos|<substring>
+    drag: { id: 0 },
+    suppressOpenUntil: 0,
+    modal: { open: false, ctoDebounce: 0 },
+  };
+
+  function escapeHtml(s) { return Utils.escapeHtml(String(s ?? '')); }
+  function initials(name) { return Utils.getInitials(String(name || '—')); }
+
+  function statusKey(statusRaw) {
+    const s = String(statusRaw || '').trim().toLowerCase();
+    if (s.includes('and')) return 'andamento';
+    if (s.includes('conc')) return 'concluida';
+    return 'pendente';
+  }
+  function statusLabel(k) {
+    if (k === 'andamento') return 'Em andamento';
+    if (k === 'concluida') return 'Concluídas';
+    return 'Pendentes';
+  }
+  function statusFromColKey(k) {
+    if (k === 'andamento') return 'Em andamento';
+    if (k === 'concluida') return 'Concluída';
+    return 'Pendente';
+  }
+
+  function priorityKey(p) {
+    const k = String(p || '').trim().toLowerCase();
+    if (k === 'urgente') return 'urgente';
+    if (k === 'alto') return 'alto';
+    if (k === 'medio') return 'medio';
+    if (k === 'estavel') return 'estavel';
+    return 'alto';
+  }
+
+  function getAll() {
+    const all = Store.getOpTasksByCategory('troca-etiqueta') || [];
+    return all.map((t) => ({
+      id: Number(t.id) || 0,
+      ctoId: String(t.ctoId || t.titulo || '').trim() || `CTO-${String(Number(t.id) || 0).padStart(2, '0')}`,
+      endereco: String(t.endereco || t.regiao || t.setor || '').trim() || '—',
+      motivo: String(t.motivo || t.subProcesso || '').trim() || 'Padrão novo',
+      tecnico: String(t.responsavel || t.tecnico || '').trim() || '—',
+      prioridade: priorityKey(t.prioridade),
+      status: String(t.status || 'Pendente'),
+    }));
+  }
+
+  function applyFilters(items) {
+    const techNeedle = String(state.filterTech || 'todos').toLowerCase();
+    const prNeedle = String(state.filterPriority || 'todas').toLowerCase();
+    return items.filter((it) => {
+      const matchTech = techNeedle === 'todos' || String(it.tecnico || '').toLowerCase().includes(techNeedle);
+      const matchPr = prNeedle === 'todas' || String(it.prioridade || '').toLowerCase() === prNeedle;
+      return matchTech && matchPr;
+    });
+  }
+
+  function countsByStatus(items) {
+    const out = { total: items.length, pend: 0, and: 0, conc: 0 };
+    items.forEach((it) => {
+      const k = statusKey(it.status);
+      if (k === 'andamento') out.and++;
+      else if (k === 'concluida') out.conc++;
+      else out.pend++;
+    });
+    return out;
+  }
+
+  function isColCollapsed(k) {
+    return typeof UI._isKanbanCollapsedKey === 'function'
+      ? UI._isKanbanCollapsedKey(`${COLLAPSE_NS}|${k}`)
+      : false;
+  }
+  function toggleColCollapsed(k) {
+    if (typeof UI._toggleKanbanCollapsedKey !== 'function') return false;
+    return UI._toggleKanbanCollapsedKey(`${COLLAPSE_NS}|${k}`);
+  }
+
+  function rootEl() { return document.getElementById('teRoot'); }
+
+  function ensureShell(root) {
+    if (!root) return;
+    if (root.dataset.teV2 === '1') return;
+    root.dataset.teV2 = '1';
+    root.innerHTML = `
+      <div class="te2">
+        <header class="te2__topbar" aria-label="Troca de etiqueta">
+          <div class="te2__topbar-left">
+            <div class="te2__title">Troca de etiqueta</div>
+            <div class="te2__subtitle">Ordens e status no kanban</div>
+          </div>
+          <div class="te2__topbar-right">
+            <div class="te2__filters" aria-label="Filtros">
+              <div class="te2__filter-group" aria-label="Prioridade">
+                <button type="button" class="te2__chip" data-te2-pr="todas">Todas</button>
+                <button type="button" class="te2__chip" data-te2-pr="urgente">Urgente</button>
+                <button type="button" class="te2__chip" data-te2-pr="alto">Alto</button>
+                <button type="button" class="te2__chip" data-te2-pr="medio">Médio</button>
+                <button type="button" class="te2__chip" data-te2-pr="estavel">Estável</button>
+              </div>
+              <div class="te2__filter-group" aria-label="Técnico">
+                <button type="button" class="te2__chip" data-te2-tech="todos">Todos técnicos</button>
+                <button type="button" class="te2__chip" data-te2-tech="prompt">Filtrar técnico…</button>
+              </div>
+            </div>
+            <button type="button" class="te2__primary" data-te2-action="new">+ Nova ordem</button>
+          </div>
+        </header>
+
+        <section class="te2__metrics" aria-label="Resumo">
+          <div class="te2__metric" data-te2-metric="total"><div class="te2__metric-label">Total</div><div class="te2__metric-value">0</div></div>
+          <div class="te2__metric" data-te2-metric="pend"><div class="te2__metric-label">Pendentes</div><div class="te2__metric-value">0</div></div>
+          <div class="te2__metric" data-te2-metric="and"><div class="te2__metric-label">Em andamento</div><div class="te2__metric-value">0</div></div>
+          <div class="te2__metric" data-te2-metric="conc"><div class="te2__metric-label">Concluídas</div><div class="te2__metric-value">0</div></div>
+        </section>
+
+        <section class="te2__board" aria-label="Kanban" data-te2-board></section>
+      </div>
+
+      <div class="modal-overlay" id="te2Modal" role="dialog" aria-modal="true" aria-hidden="true" aria-label="Nova ordem troca de etiqueta">
+        <div class="modal te2-modal" role="document">
+          <div class="modal-head te2-modal__head">
+            <span class="modal-title">Nova ordem</span>
+            <button type="button" class="close-btn" data-te2-action="close" aria-label="Fechar modal">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="modal-body te2-modal__body">
+            <div class="form-group">
+              <label for="te2CtoId">ID da CTO</label>
+              <input class="te2-input" id="te2CtoId" type="text" placeholder="CTO-07" autocomplete="off" />
+            </div>
+            <div class="form-group">
+              <label for="te2Endereco">Endereço</label>
+              <input class="te2-input" id="te2Endereco" type="text" placeholder="Rua - Bairro" autocomplete="off" />
+              <div class="hint" id="te2EnderecoHint" style="margin-top:6px"></div>
+            </div>
+            <div class="te2-row2">
+              <div class="form-group">
+                <label for="te2Motivo">Motivo</label>
+                <select class="te2-input" id="te2Motivo">
+                  <option value="Danificada">Danificada</option>
+                  <option value="Desbotada">Desbotada</option>
+                  <option value="Padrão novo" selected>Padrão novo</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="te2Tecnico">Técnico</label>
+                <input class="te2-input" id="te2Tecnico" type="text" placeholder="Nome do técnico" autocomplete="off" />
+              </div>
+            </div>
+            <div class="te2-row2">
+              <div class="form-group">
+                <label for="te2Regiao">Região</label>
+                <select class="te2-input" id="te2Regiao">
+                  <option value="">Selecione a região</option>
+                  <option value="Goval">Goval</option>
+                  <option value="Vale do Aço">Vale do Aço</option>
+                  <option value="Caratinga">Caratinga</option>
+                  <option value="Backup">Backup</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="te2Prioridade">Prioridade</label>
+                <select class="te2-input" id="te2Prioridade">
+                  <option value="urgente">Urgente</option>
+                  <option value="alto" selected>Alto</option>
+                  <option value="medio">Médio</option>
+                  <option value="estavel">Estável</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer te2-modal__foot">
+            <button type="button" class="ghost-btn" data-te2-action="cancel">Cancelar</button>
+            <button type="button" class="primary-btn" data-te2-action="save">Adicionar</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderMetrics(root, counts) {
+    const set = (k, v) => {
+      const card = root.querySelector(`[data-te2-metric="${k}"]`);
+      const val = card?.querySelector?.('.te2__metric-value');
+      if (val) val.textContent = String(v);
+    };
+    set('total', counts.total);
+    set('pend', counts.pend);
+    set('and', counts.and);
+    set('conc', counts.conc);
+  }
+
+  function cardHtml(it) {
+    const kStatus = statusKey(it.status);
+    const pKey = priorityKey(it.prioridade);
+    return `
+      <article class="te2-card te2-card--${kStatus} te2-card--p-${pKey}" draggable="true" data-te2-id="${it.id}" aria-label="${escapeHtml(it.ctoId)}">
+        <div class="te2-card__body">
+          <div class="te2-card__top">
+            <div class="te2-card__cto">${escapeHtml(it.ctoId)}</div>
+            <span class="te2-badge te2-badge--status">${escapeHtml(statusFromColKey(kStatus))}</span>
+          </div>
+          <div class="te2-card__addr">${escapeHtml(it.endereco)}</div>
+        </div>
+        <div class="te2-card__foot">
+          <div class="te2-card__tech">
+            <span class="te2-av" aria-hidden="true">${escapeHtml(initials(it.tecnico))}</span>
+            <span>${escapeHtml(it.tecnico)}</span>
+          </div>
+          <span class="te2-badge te2-badge--motivo">${escapeHtml(it.motivo)}</span>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderBoard(root, items) {
+    const groups = {
+      pendente: items.filter(it => statusKey(it.status) === 'pendente'),
+      andamento: items.filter(it => statusKey(it.status) === 'andamento'),
+      concluida: items.filter(it => statusKey(it.status) === 'concluida'),
+    };
+    const col = (k) => {
+      const collapsed = isColCollapsed(k);
+      const title = escapeHtml(statusLabel(k));
+      const key = escapeHtml(k);
+      const body = groups[k].length ? groups[k].map(cardHtml).join('') : `<div class="te2-empty">Sem ordens</div>`;
+      return `
+        <section class="te2-col te2-col--${key}" data-te2-col="${key}" aria-label="Coluna ${title}">
+          <header class="te2-col__head">
+            <button type="button"
+              class="te2-col__toggle"
+              data-te2-toggle="${key}"
+              aria-expanded="${collapsed ? 'false' : 'true'}"
+              title="${collapsed ? 'Expandir' : 'Recolher'}"
+              aria-label="${collapsed ? 'Expandir' : 'Recolher'} coluna ${title}"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <div class="te2-col__title">${title}</div>
+            <div class="te2-col__count">${groups[k].length}</div>
+          </header>
+          <div class="te2-col__body${collapsed ? ' is-collapsed' : ''}" data-te2-drop="${key}">
+            <div class="te2-col__body-inner">
+              ${body}
+            </div>
+          </div>
+        </section>
+      `;
+    };
+    root.innerHTML = `<div class="te2-grid">${col('pendente')}${col('andamento')}${col('concluida')}</div>`;
+  }
+
+  function closeModal() {
+    const m = document.getElementById('te2Modal');
+    if (!m) return;
+    m.classList.remove('open');
+    m.setAttribute('aria-hidden', 'true');
+    state.modal.open = false;
+  }
+
+  function openModal() {
+    // Garante hierarquia: fecha outros overlays do app antes
+    ModalService?.closeAll?.();
+    const m = document.getElementById('te2Modal');
+    if (!m) return;
+    m.classList.add('open');
+    m.setAttribute('aria-hidden', 'false');
+    state.modal.open = true;
+    const cto = document.getElementById('te2CtoId');
+    if (cto) cto.focus();
+  }
+
+  async function reverseGeocode(lat, lng) {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(lat))}&lon=${encodeURIComponent(String(lng))}&zoom=18&addressdetails=1`;
+    const response = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!response.ok) throw new Error('Falha na consulta');
+    const payload = await response.json();
+    const addr = payload?.address || {};
+    const rua = addr.road || addr.pedestrian || addr.residential || addr.path || '';
+    const bairro = addr.suburb || addr.neighbourhood || addr.city_district || addr.quarter || '';
+    return [rua, bairro].filter(Boolean).join(' - ');
+  }
+
+  function scheduleCtoAutofill() {
+    clearTimeout(state.modal.ctoDebounce);
+    state.modal.ctoDebounce = setTimeout(applyCtoAutofill, 300);
+  }
+
+  function applyCtoAutofill() {
+    const ctoEl = document.getElementById('te2CtoId');
+    const endEl = document.getElementById('te2Endereco');
+    const hintEl = document.getElementById('te2EnderecoHint');
+    if (!ctoEl || !endEl) return;
+    const q = String(ctoEl.value || '').trim();
+    if (!q) return;
+    if (endEl.dataset.te2Manual === '1') return;
+    if (!CtoLocationRegistry) return;
+    CtoLocationRegistry.load().then(async () => {
+      const hit = CtoLocationRegistry.findByQuery(q);
+      if (!hit) return;
+      try {
+        if (hintEl) hintEl.textContent = 'Buscando endereço...';
+        const txt = await reverseGeocode(hit.lat, hit.lng);
+        if (txt) {
+          endEl.value = txt;
+          endEl.dataset.te2Manual = '0';
+          if (hintEl) hintEl.textContent = 'Localização preenchida automaticamente.';
+        }
+      } catch {
+        if (hintEl) hintEl.textContent = '';
+      }
+    }).catch(() => {});
+  }
+
+  function readModalForm() {
+    const ctoId = String(document.getElementById('te2CtoId')?.value || '').trim() || 'CTO-00';
+    const endereco = String(document.getElementById('te2Endereco')?.value || '').trim() || '—';
+    const motivo = String(document.getElementById('te2Motivo')?.value || 'Padrão novo').trim() || 'Padrão novo';
+    const tecnico = String(document.getElementById('te2Tecnico')?.value || '').trim() || '—';
+    const regiao = String(document.getElementById('te2Regiao')?.value || '').trim();
+    const prioridade = priorityKey(document.getElementById('te2Prioridade')?.value || 'alto');
+    return { ctoId, endereco, motivo, tecnico, regiao, prioridade };
+  }
+
+  function saveNew() {
+    const v = readModalForm();
+    Store.addOpTask({
+      categoria: 'troca-etiqueta',
+      ctoId: v.ctoId,
+      titulo: v.ctoId,
+      endereco: v.endereco,
+      motivo: v.motivo,
+      responsavel: v.tecnico,
+      regiao: v.regiao,
+      prioridade: v.prioridade,
+      status: 'Pendente',
+    });
+    ToastService?.show?.('Ordem criada.', 'success');
+    closeModal();
+    render();
+  }
+
+  async function ensureCoordsForWebhook(taskId) {
+    const fresh0 = Store.findOpTask(taskId);
+    if (!fresh0) return null;
+    const ctoId = String(fresh0?.ctoId || fresh0?.titulo || '').trim();
+    if (ctoId && !fresh0?.ctoId) Store.updateOpTask(taskId, { ctoId });
+    let coords = String(fresh0?.coordenadas || '').trim();
+    if (coords || !ctoId || !CtoLocationRegistry) return Store.findOpTask(taskId);
+    try { await CtoLocationRegistry.load(); } catch { return Store.findOpTask(taskId); }
+    try {
+      const hit = CtoLocationRegistry.findByQuery(ctoId);
+      if (hit && Number.isFinite(Number(hit.lat)) && Number.isFinite(Number(hit.lng))) {
+        coords = `${Number(hit.lat)},${Number(hit.lng)}`;
+        Store.updateOpTask(taskId, { coordenadas: coords });
+      }
+    } catch { /* ignore */ }
+    return Store.findOpTask(taskId);
+  }
+
+  function setStatusFromDrop(id, colKey) {
+    const before = Store.findOpTask(id);
+    if (!before) return;
+    const beforeKey = statusKey(before.status);
+    const nextStatus = statusFromColKey(colKey);
+    Store.updateOpTask(id, { status: nextStatus });
+
+    const after = Store.findOpTask(id);
+    if (!after) return;
+    const afterKey = statusKey(after.status);
+    const shouldSendAndamento = beforeKey === 'pendente' && afterKey === 'andamento';
+    const shouldSendConcluida = beforeKey !== 'concluida' && afterKey === 'concluida';
+    if (!shouldSendAndamento && !shouldSendConcluida) return;
+
+    (async () => {
+      const fresh = await ensureCoordsForWebhook(id);
+      if (!fresh) return;
+      WebhookService.send(shouldSendConcluida ? 'concluida' : 'andamento', fresh, null);
+    })();
+  }
+
+  function paintFilterChips(root) {
+    root.querySelectorAll('[data-te2-pr]').forEach((b) => {
+      const k = String(b.getAttribute('data-te2-pr') || '');
+      b.classList.toggle('is-active', k === state.filterPriority);
+    });
+    root.querySelectorAll('[data-te2-tech]').forEach((b) => {
+      const k = String(b.getAttribute('data-te2-tech') || '');
+      b.classList.toggle('is-active', (k === 'todos' && state.filterTech === 'todos'));
+    });
+    const techPrompt = root.querySelector('[data-te2-tech="prompt"]');
+    if (techPrompt) {
+      const active = state.filterTech !== 'todos';
+      techPrompt.classList.toggle('is-active', active);
+      techPrompt.textContent = active ? `Técnico: ${state.filterTech}` : 'Filtrar técnico…';
+    }
+  }
+
+  function bindOnce(root) {
+    if (!root || root.dataset.te2Bound === '1') return;
+    root.dataset.te2Bound = '1';
+
+    root.addEventListener('click', (e) => {
+      const raw = e.target;
+      const t = (raw && raw.nodeType === 3) ? raw.parentElement : raw;
+
+      const toggle = t?.closest?.('[data-te2-toggle]');
+      if (toggle) {
+        e.preventDefault();
+        const k = String(toggle.getAttribute('data-te2-toggle') || '');
+        const nowCollapsed = toggleColCollapsed(k);
+        // Atualiza DOM sem depender do re-render completo (animação suave via max-height)
+        const col = toggle.closest('.te2-col');
+        const body = col?.querySelector?.('.te2-col__body');
+        const inner = col?.querySelector?.('.te2-col__body-inner');
+        if (body && inner) {
+          // mede e seta altura alvo para animação
+          const h = Math.max(0, Math.round(inner.scrollHeight || 0));
+          body.style.setProperty('--te2-body-h', `${h}px`);
+          body.classList.toggle('is-collapsed', nowCollapsed);
+        } else if (body) {
+          body.classList.toggle('is-collapsed', nowCollapsed);
+        }
+        toggle.setAttribute('aria-expanded', nowCollapsed ? 'false' : 'true');
+        toggle.title = nowCollapsed ? 'Expandir' : 'Recolher';
+        return;
+      }
+
+      const act = t?.closest?.('[data-te2-action]')?.getAttribute?.('data-te2-action');
+      if (act === 'new') { e.preventDefault(); openModal(); return; }
+      if (act === 'close' || act === 'cancel') { e.preventDefault(); closeModal(); return; }
+      if (act === 'save') { e.preventDefault(); saveNew(); return; }
+
+      const prBtn = t?.closest?.('[data-te2-pr]');
+      if (prBtn) {
+        e.preventDefault();
+        state.filterPriority = String(prBtn.getAttribute('data-te2-pr') || 'todas');
+        render();
+        return;
+      }
+
+      const techBtn = t?.closest?.('[data-te2-tech]');
+      if (techBtn) {
+        e.preventDefault();
+        const k = String(techBtn.getAttribute('data-te2-tech') || 'todos');
+        if (k === 'todos') state.filterTech = 'todos';
+        else {
+          const v = window.prompt('Filtrar por técnico (deixe vazio para todos):') ?? '';
+          state.filterTech = String(v).trim() ? String(v).trim() : 'todos';
+        }
+        render();
+        return;
+      }
+
+      // Clique no card abre edição (modal padrão do app)
+      const card = t?.closest?.('[data-te2-id]');
+      if (card) {
+        const now = Date.now();
+        if (now < state.suppressOpenUntil) return;
+        const id = Number(card.getAttribute('data-te2-id') || 0);
+        if (id) Controllers?.opTask?.openEditModal?.(id);
+        return;
+      }
+    });
+
+    // Fechar modal: click no backdrop
+    document.addEventListener('pointerdown', (e) => {
+      const m = document.getElementById('te2Modal');
+      if (!m || !m.classList.contains('open')) return;
+      if (e.target !== m) return;
+      closeModal();
+    }, true);
+
+    // ESC fecha modal
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      const m = document.getElementById('te2Modal');
+      if (!m || !m.classList.contains('open')) return;
+      e.preventDefault();
+      closeModal();
+    });
+
+    // Autofill endereço pela CTO
+    root.addEventListener('input', (e) => {
+      const el = e.target;
+      if (el?.id === 'te2Endereco') el.dataset.te2Manual = '1';
+      if (el?.id === 'te2CtoId') {
+        const endEl = document.getElementById('te2Endereco');
+        if (endEl && endEl.dataset.te2Autofill === '1') endEl.dataset.te2Manual = '0';
+        scheduleCtoAutofill();
+      }
+    });
+
+    // Drag & drop (HTML5) — estável + supressão de clique fantasma
+    root.addEventListener('dragstart', (e) => {
+      const card = e.target?.closest?.('[data-te2-id]');
+      if (!card) return;
+      const id = Number(card.getAttribute('data-te2-id') || 0);
+      if (!id) return;
+      state.drag.id = id;
+      card.classList.add('is-dragging');
+      state.suppressOpenUntil = Date.now() + 450;
+      try {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(id));
+      } catch { /* ignore */ }
+    });
+
+    root.addEventListener('dragend', (e) => {
+      const card = e.target?.closest?.('[data-te2-id]');
+      card?.classList?.remove?.('is-dragging');
+      state.drag.id = 0;
+      root.querySelectorAll('.te2-col').forEach(c => c.classList.remove('is-drag-over'));
+    });
+
+    root.addEventListener('dragover', (e) => {
+      const zone = e.target?.closest?.('[data-te2-drop]');
+      if (!zone) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      zone.closest('.te2-col')?.classList?.add?.('is-drag-over');
+    });
+
+    root.addEventListener('dragleave', (e) => {
+      const zone = e.target?.closest?.('[data-te2-drop]');
+      if (!zone) return;
+      const col = zone.closest('.te2-col');
+      if (!col) return;
+      if (e.relatedTarget && col.contains(e.relatedTarget)) return;
+      col.classList.remove('is-drag-over');
+    });
+
+    root.addEventListener('drop', (e) => {
+      const zone = e.target?.closest?.('[data-te2-drop]');
+      if (!zone) return;
+      e.preventDefault();
+      zone.closest('.te2-col')?.classList?.remove?.('is-drag-over');
+      let id = state.drag.id;
+      if (!id) {
+        try { id = Number(e.dataTransfer.getData('text/plain') || 0); } catch { id = 0; }
+      }
+      if (!id) return;
+      const colKey = String(zone.getAttribute('data-te2-drop') || 'pendente');
+      setStatusFromDrop(id, colKey);
+      render();
+    });
+  }
+
+  function render() {
+    const root = rootEl();
+    if (!root) return;
+    ensureShell(root);
+    bindOnce(root);
+
+    const all = getAll();
+    const filtered = applyFilters(all);
+    const c = countsByStatus(filtered);
+
+    paintFilterChips(root);
+    renderMetrics(root, c);
+    const board = root.querySelector('[data-te2-board]');
+    renderBoard(board, filtered);
+  }
+
+  return { render };
+})();
+
 /** Base local de CTO/setores: JSONs em `src/data/` (formato `{ nome, lat, lng, aliases? }`); inclui export de viabilidade Ipatinga (KML→pontos). */
 const CtoLocationRegistry = (() => {
   /** @type {Map<string, { lat: number, lng: number, nome: string }>} */
@@ -6236,24 +6783,53 @@ const CtoLocationRegistry = (() => {
 })();
 
 
-/** Notificações do sininho: menções @você no chat da equipe (só mensagens incrementais, não histórico inicial). */
+/** Notificações do sininho: sistema (tarefas novas) + menções no chat (se habilitado). */
 const ChatMentionNotifs = {
   _readInbox() {
     try {
+      const r2 = localStorage.getItem(TOPBAR_NOTIF_INBOX_KEY);
+      if (r2) {
+        const p2 = JSON.parse(r2);
+        if (p2 && Array.isArray(p2.items)) return p2;
+      }
+      // Fallback: inbox antigo (somente menções)
       const r = localStorage.getItem(CHAT_MENTION_INBOX_KEY);
       if (!r) return { items: [] };
       const p = JSON.parse(r);
-      return p && Array.isArray(p.items) ? p : { items: [] };
+      if (!(p && Array.isArray(p.items))) return { items: [] };
+      return {
+        items: p.items
+          .map(it => ({
+            type: 'chat_mention',
+            id: Number(it?.id) || 0,
+            fromKey: String(it?.fromKey || ''),
+            fromName: String(it?.fromName || '—'),
+            snippet: String(it?.snippet || ''),
+            createdAt: String(it?.createdAt || ''),
+          }))
+          .filter(x => x.id > 0),
+      };
     } catch {
       return { items: [] };
     }
   },
   _writeInbox(data) {
     try {
-      localStorage.setItem(CHAT_MENTION_INBOX_KEY, JSON.stringify(data));
+      localStorage.setItem(TOPBAR_NOTIF_INBOX_KEY, JSON.stringify(data));
     } catch {
       /* ignore */
     }
+  },
+  _readLastSeenId() {
+    try {
+      const n = Number(localStorage.getItem(TOPBAR_NOTIF_LAST_SEEN_KEY) || 0);
+      return Number.isFinite(n) ? n : 0;
+    } catch {
+      return 0;
+    }
+  },
+  _writeLastSeenId(v) {
+    try { localStorage.setItem(TOPBAR_NOTIF_LAST_SEEN_KEY, String(Number(v) || 0)); } catch {}
   },
   _readHandledSet() {
     try {
@@ -6292,14 +6868,14 @@ const ChatMentionNotifs = {
       handled.add(id);
       if (String(m.userKey || '').toLowerCase() === mk) continue;
       if (!Utils.messageMentionsUser(m.body, mk)) continue;
-      if (inbox.items.some(x => x.id === id)) continue;
+      if (inbox.items.some(x => x.type === 'chat_mention' && x.id === id)) continue;
       inbox.items.unshift({
+        type: 'chat_mention',
         id,
         fromKey: String(m.userKey || ''),
         fromName: String(m.displayName || m.userKey || '—'),
         snippet: String(m.body || '').trim().slice(0, 140),
         createdAt: String(m.createdAt || ''),
-        read: false,
       });
       if (inbox.items.length > 40) inbox.items.length = 40;
       inboxChanged = true;
@@ -6308,21 +6884,43 @@ const ChatMentionNotifs = {
     if (inboxChanged) this._writeInbox(inbox);
     this.syncBellUi();
   },
+  processIncomingTaskNotifications(notifs) {
+    if (!Array.isArray(notifs) || !notifs.length) return;
+    const inbox = this._readInbox();
+    let changed = false;
+    for (const n of notifs) {
+      const id = Number(n?.id);
+      if (!Number.isFinite(id) || id <= 0) continue;
+      if (inbox.items.some(x => x.type === 'task_added' && Number(x.id) === id)) continue;
+      inbox.items.unshift({
+        type: 'task_added',
+        id,
+        title: String(n?.title || 'Nova tarefa'),
+        message: String(n?.message || ''),
+        opCategory: String(n?.opCategory || ''),
+        createdBy: String(n?.createdBy || ''),
+        createdAt: String(n?.createdAt || ''),
+      });
+      changed = true;
+    }
+    if (changed) {
+      if (inbox.items.length > 60) inbox.items.length = 60;
+      this._writeInbox(inbox);
+      this.syncBellUi();
+      const panel = document.getElementById('topbarNotifPanel');
+      if (panel && !panel.hidden) this.renderDropdown();
+    }
+  },
   markAllRead() {
     const inbox = this._readInbox();
-    let ch = false;
-    for (const it of inbox.items) {
-      if (!it.read) {
-        it.read = true;
-        ch = true;
-      }
-    }
-    if (ch) this._writeInbox(inbox);
+    const maxId = inbox.items.reduce((m, it) => Math.max(m, Number(it?.id) || 0), 0);
+    if (maxId > 0) this._writeLastSeenId(maxId);
     this.syncBellUi();
   },
   syncBellUi() {
     const inbox = this._readInbox();
-    const n = inbox.items.filter(x => !x.read).length;
+    const lastSeen = this._readLastSeenId();
+    const n = inbox.items.filter(x => Number(x?.id) > lastSeen).length;
     const badge = document.getElementById('topbarNotifBadge');
     const btn = document.getElementById('topbarNotifBtn');
     if (badge) {
@@ -6330,8 +6928,8 @@ const ChatMentionNotifs = {
       badge.hidden = n <= 0;
     }
     if (btn) {
-      btn.title = n > 0 ? `${n} menção(ões) no chat` : 'Notificações';
-      btn.setAttribute('aria-label', n > 0 ? `Notificações: ${n} menção(ões) no chat` : 'Notificações');
+      btn.title = n > 0 ? `${n} notificação(ões)` : 'Notificações';
+      btn.setAttribute('aria-label', n > 0 ? `Notificações: ${n}` : 'Notificações');
     }
   },
   _closePanel() {
@@ -6344,17 +6942,30 @@ const ChatMentionNotifs = {
     const panel = document.getElementById('topbarNotifPanel');
     if (!panel) return;
     const inbox = this._readInbox();
-    const items = inbox.items.slice(0, 25);
+    const items = inbox.items.slice(0, 30);
     if (!items.length) {
-      panel.innerHTML = '<div class="topbar-notif-empty">Nenhuma menção no chat ainda.</div>';
+      panel.innerHTML = '<div class="topbar-notif-empty">Nenhuma notificação ainda.</div>';
       return;
     }
     panel.innerHTML = items
       .map(
-        it => `<button type="button" class="topbar-notif-item" role="menuitem" data-chat-msg-id="${Number(it.id)}">
+        it => {
+          if (it.type === 'task_added') {
+            const title = String(it.title || 'Nova tarefa');
+            const msg = String(it.message || '').trim();
+            const who = String(it.createdBy || '').trim();
+            const snippet = [msg, who ? `por ${who}` : ''].filter(Boolean).join(' · ').slice(0, 160);
+            return `<button type="button" class="topbar-notif-item" role="menuitem" data-notif-id="${Number(it.id)}">
+<span class="topbar-notif-item-title">${Utils.escapeHtml(title)}</span>
+<span class="topbar-notif-item-snippet">${Utils.escapeHtml(snippet || '—')}</span>
+</button>`;
+          }
+          // chat mention
+          return `<button type="button" class="topbar-notif-item" role="menuitem" data-chat-msg-id="${Number(it.id)}">
 <span class="topbar-notif-item-title">${Utils.escapeHtml(it.fromName)} mencionou você no chat</span>
 <span class="topbar-notif-item-snippet">${Utils.escapeHtml(it.snippet)}</span>
-</button>`,
+</button>`;
+        },
       )
       .join('');
     panel.querySelectorAll('[data-chat-msg-id]').forEach(b => {
@@ -6367,6 +6978,12 @@ const ChatMentionNotifs = {
           const row = document.querySelector(`[data-chat-id="${mid}"]`);
           row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
         });
+      });
+    });
+    panel.querySelectorAll('[data-notif-id]').forEach(b => {
+      b.addEventListener('click', () => {
+        this.markAllRead();
+        this._closePanel();
       });
     });
   },
@@ -6855,6 +7472,7 @@ const Controllers = {
     _globalStatusPickerOpId: 0,
     _coordsLookupTimer: null,
     _setorCtoLookupTimer: null,
+    _qdpCtoLookupTimer: null,
     _isAtendimentoCategory(category = Store.currentOpCategory) {
       return category === 'atendimento-cliente';
     },
@@ -6999,6 +7617,43 @@ const Controllers = {
         this._resolveCoordsToAddress(coordsInput.value);
       });
     },
+
+    _applyCtoLookupFromQdpCto() {
+      const existing = Store.editingOpTaskId ? Store.findOpTask(Store.editingOpTaskId) : null;
+      const category = existing?.categoria
+        || (this._newTaskPreset && this._newTaskPreset.category)
+        || Store.currentOpCategory;
+      if (category !== 'qualidade-potencia' && category !== 'manutencao-corretiva') return;
+
+      const ctoHint = document.getElementById('op-qdp-cto-hint');
+      const ctoEl = document.getElementById('op-qdp-cto');
+      if (!ctoEl) return;
+      const q = ctoEl.value.trim();
+      if (!q) {
+        if (ctoHint) ctoHint.textContent = '';
+        return;
+      }
+
+      CtoLocationRegistry.load().then(() => {
+        const existing2 = Store.editingOpTaskId ? Store.findOpTask(Store.editingOpTaskId) : null;
+        const category2 = existing2?.categoria
+          || (this._newTaskPreset && this._newTaskPreset.category)
+          || Store.currentOpCategory;
+        if (category2 !== 'qualidade-potencia' && category2 !== 'manutencao-corretiva') return;
+
+        const hit = CtoLocationRegistry.findByQuery(q);
+        const coordsInput = document.getElementById('op-coords');
+        if (!hit) {
+          if (ctoHint && q.length >= 4) ctoHint.textContent = 'Não encontrado na base — preencha as coordenadas manualmente.';
+          else if (ctoHint) ctoHint.textContent = '';
+          return;
+        }
+        if (ctoHint) ctoHint.textContent = `Base: ${hit.nome}.`;
+        if (!coordsInput) return;
+        coordsInput.value = `${hit.lat}, ${hit.lng}`;
+        this._resolveCoordsToAddress(coordsInput.value);
+      });
+    },
     /**
      * Recoloca Prioridade/Região na linha padrão (evita ficarem presos nos slots do ATD ou no modo rompimento).
      */
@@ -7007,6 +7662,8 @@ const Controllers = {
       const priorityRow = document.getElementById('opPriorityRegionRow');
       const prioridade = document.getElementById('opPrioridadeGroup');
       const regiao = document.getElementById('opRegiaoGroup');
+      const coordsRow = document.getElementById('opRompimentoCoordsRow');
+      const setorGroup = document.getElementById('opRompimentoSetorGroup');
       const atdChild = document.getElementById('opAtdChildOnlyWrap');
       const mainRow = document.getElementById('opMainRow');
       const responsavel = document.getElementById('opResponsavelGroup');
@@ -7016,6 +7673,12 @@ const Controllers = {
       priorityRow.appendChild(regiao);
       if (atdChild && atdChild.parentNode === body) atdChild.after(priorityRow);
       else body.appendChild(priorityRow);
+      // Garante que o bloco de coordenadas volte para o lugar padrão (logo após o grupo de CTO do rompimento)
+      if (coordsRow && body.contains(coordsRow) && setorGroup && setorGroup.parentNode === body) {
+        if (coordsRow.previousElementSibling !== setorGroup) {
+          setorGroup.after(coordsRow);
+        }
+      }
       if (mainRow && responsavel && prazoGroup) {
         mainRow.appendChild(responsavel);
         mainRow.appendChild(prazoGroup);
@@ -7067,8 +7730,21 @@ const Controllers = {
       const coordsInput = document.getElementById('op-coords');
       const hint = document.getElementById('op-address-hint');
       if (!block) return;
+      const modalCat = Store.editingOpTaskId
+        ? (Store.findOpTask(Store.editingOpTaskId)?.categoria || Store.currentOpCategory)
+        : (this._newTaskPreset?.category || Store.currentOpCategory);
+      const isQdp = modalCat === 'qualidade-potencia';
       const cLab = block.querySelector('label[for="op-coords"]');
       const aLab = block.querySelector('label[for="op-address-readonly"]');
+      if (isQdp) {
+        if (cLab) cLab.textContent = 'Coordenadas';
+        if (aLab) aLab.textContent = 'Endereço (rua / bairro)';
+        if (coordsInput) coordsInput.placeholder = 'Preenchidas pela CTO ou edite manualmente';
+        if (hint && !document.getElementById('op-address-readonly')?.value) {
+          hint.textContent = 'Digite a CTO para preencher coordenadas e endereço automaticamente.';
+        }
+        return;
+      }
       if (isTrocaPoste) {
         if (cLab) cLab.textContent = 'Coordenadas';
         if (aLab) aLab.textContent = 'Endereço (rua e bairro)';
@@ -7093,6 +7769,7 @@ const Controllers = {
       const isAtendimento = this._isAtendimentoCategory(category);
       const isOtimRede = this._isOtimizacaoRedeCategory(category);
       const isCemig = category === 'certificacao-cemig';
+      const isQdp = category === 'qualidade-potencia' || category === 'manutencao-corretiva';
       const isRompimento = this._isRompimentoCategory(category);
       const isTrocaPoste = this._isTrocaPosteCategory(category);
       const modalTitle = document.getElementById('opTaskModalTitle');
@@ -7105,16 +7782,18 @@ const Controllers = {
         modalWrap.classList.toggle('troca-poste-mode', isTrocaPoste);
         modalWrap.classList.toggle('otim-rede-mode', isOtimRede);
         modalWrap.classList.toggle('cemig-mode', isCemig);
+        modalWrap.classList.toggle('qdp-mode', isQdp);
       }
 
-      this._toggleGroup('opTituloGroup', !isRompimento && !isTrocaPoste && !isCemig);
+      this._toggleGroup('opTituloGroup', !isRompimento && !isTrocaPoste && !isCemig && !isQdp);
       this._toggleGroup('opPrazoGroup', !isRompimento && !isOtimRede);
-      this._toggleGroup('opPriorityRegionRow', !isRompimento && !isOtimRede && !isCemig);
+      this._toggleGroup('opPriorityRegionRow', !isRompimento && !isOtimRede && !isCemig && !isQdp);
 
       this._toggleGroup('opParentConfig', isAtendimento);
-      this._toggleGroup('opRompimentoCoordsRow', isRompimento || isTrocaPoste);
+      this._toggleGroup('opRompimentoCoordsRow', isRompimento || isTrocaPoste || isQdp);
       this._toggleGroup('opRompimentoExtraRow', isRompimento);
       this._toggleGroup('opRompimentoSetorGroup', isRompimento);
+      this._toggleGroup('opQdpWrap', isQdp);
 
       this._syncCoordsBlockUi(isRompimento, isTrocaPoste);
 
@@ -7149,7 +7828,32 @@ const Controllers = {
       const tituloLab = document.querySelector('label[for="op-titulo"]');
       const tecRespLab = document.querySelector('label[for="op-responsavel"]');
       const prazoLab = document.querySelector('label[for="op-prazo"]');
-      if (isOtimRede) {
+      if (isQdp) {
+        this._toggleGroup('opMainRow', false);
+        this._toggleGroup('opOtimRedeWrap', false);
+        this._toggleGroup('opCemigWrap', false);
+        const qdpWrap = document.getElementById('opQdpWrap');
+        const qdpCliLab = document.querySelector('label[for="op-qdp-cliente"]');
+        const regSlot = document.getElementById('opQdpRegiaoSlot');
+        const tecSlot = document.getElementById('opQdpTecSlot');
+        const prazoSlot = document.getElementById('opQdpPrazoSlot');
+        const prioSlot = document.getElementById('opQdpPrioridadeSlot');
+        const coordsSlot = document.getElementById('opQdpCoordsSlot');
+        const coordsRow = document.getElementById('opRompimentoCoordsRow');
+        const regiao = document.getElementById('opRegiaoGroup');
+        const respG = document.getElementById('opResponsavelGroup');
+        const prazoG = document.getElementById('opPrazoGroup');
+        const prioG = document.getElementById('opPrioridadeGroup');
+        if (regSlot && regiao) regSlot.appendChild(regiao);
+        if (tecSlot && respG) tecSlot.appendChild(respG);
+        if (prazoSlot && prazoG) prazoSlot.appendChild(prazoG);
+        if (prioSlot && prioG) prioSlot.appendChild(prioG);
+        if (coordsSlot && coordsRow) coordsSlot.appendChild(coordsRow);
+        if (tecRespLab) tecRespLab.textContent = 'Técnico';
+        if (prazoLab) prazoLab.textContent = 'Data de vencimento';
+        if (qdpCliLab) qdpCliLab.textContent = category === 'manutencao-corretiva' ? 'Manutenção' : 'Nome/usuário do cliente';
+        if (qdpWrap) qdpWrap.style.display = '';
+      } else if (isOtimRede) {
         this._toggleGroup('opMainRow', false);
         this._toggleGroup('opOtimRedeWrap', true);
         this._toggleGroup('opCemigWrap', false);
@@ -7208,6 +7912,7 @@ const Controllers = {
         else if (isTrocaPoste) modalTitle.textContent = 'Nova troca de poste';
         else if (category === 'certificacao-cemig') modalTitle.textContent = 'Nova certificação Cemig';
         else if (isOtimRede) modalTitle.textContent = 'Nova otimização de rede';
+        else if (isQdp) modalTitle.textContent = 'Nova qualidade de potência';
         else if (category === 'atendimento-cliente') {
           const hid = document.getElementById('op-parent-task-id');
           const isListaPai = !String(hid?.value || '').trim();
@@ -7706,6 +8411,12 @@ const Controllers = {
       if (setorHint) setorHint.textContent = '';
       const parentHidden = document.getElementById('op-parent-task-id');
       if (parentHidden) parentHidden.value = preset.parentTaskId ? String(preset.parentTaskId) : '';
+      const qdpCli = document.getElementById('op-qdp-cliente');
+      const qdpOs = document.getElementById('op-qdp-ordem-servico');
+      const qdpCto = document.getElementById('op-qdp-cto');
+      if (qdpCli) qdpCli.value = '';
+      if (qdpOs) qdpOs.value = '';
+      if (qdpCto) qdpCto.value = '';
       // Se estiver criando subtarefa, puxa a região do pai por padrão.
       if (preset.parentTaskId) {
         const parent = Store.findOpTask(Number(preset.parentTaskId));
@@ -7743,6 +8454,9 @@ const Controllers = {
       const ordemServicoRaw = document.getElementById('op-atd-ordem-servico')?.value?.trim() || '';
       let descAtdRaw = document.getElementById('op-atd-descricao')?.value?.trim() || '';
       const nomeClienteRaw = document.getElementById('op-atd-nome-cliente')?.value?.trim() || '';
+      const qdpClienteRaw = document.getElementById('op-qdp-cliente')?.value?.trim() || '';
+      const qdpOrdemServicoRaw = document.getElementById('op-qdp-ordem-servico')?.value?.trim() || '';
+      const qdpCtoRaw = document.getElementById('op-qdp-cto')?.value?.trim() || '';
       const selectedParent = parentTaskId ? Store.findOpTask(parentTaskId) : null;
       const codeRegion = isParentTask ? regiao : (selectedParent?.regiao || regiao);
       const taskCode = existing?.taskCode || this._nextTaskCode(category, codeRegion);
@@ -7758,6 +8472,7 @@ const Controllers = {
       const isTrocaPoste = this._isTrocaPosteCategory(category);
       const isOtimRede = category === 'otimizacao-rede';
       const isCemig = category === 'certificacao-cemig';
+      const isQdp = category === 'qualidade-potencia' || category === 'manutencao-corretiva';
       const otimProto = document.getElementById('op-otim-protocolo')?.value?.trim() || '';
       const otimOs = document.getElementById('op-otim-ordem-servico')?.value?.trim() || '';
       const cemigProto = document.getElementById('op-cemig-protocolo')?.value?.trim() || '';
@@ -7768,7 +8483,7 @@ const Controllers = {
         titulo = document.getElementById('op-atd-child-titulo')?.value?.trim() || '';
       }
 
-      if (!isRompimento && !isTrocaPoste && !isCemig && !isOtimRede && !isAtdParentOnly && !isAtdChildOnly && !titulo) titulo = 'Sem título';
+      if (!isRompimento && !isTrocaPoste && !isCemig && !isOtimRede && !isQdp && !isAtdParentOnly && !isAtdChildOnly && !titulo) titulo = 'Sem título';
       if (!isAtdParentOnly && !isAtdChildOnly && isParentTask && !responsavel && !isOtimRede && !isCemig) responsavel = getSignedUserName();
       if (!isAtdParentOnly && !isAtdChildOnly && !isRompimento && !isOtimRede && !isCemig && isParentTask && !prazo) prazo = Utils.todayIso();
       const prioridadeEl = document.getElementById('op-prioridade');
@@ -7797,18 +8512,26 @@ const Controllers = {
       const normalizedStatus = (!isParentTask && this._isAtendimentoCategory(category) && (currentStatus === 'Backlog' || currentStatus === 'Criada'))
         ? 'A iniciar'
         : currentStatus;
-      const finalTitulo = isRompimento
-        ? `Rompimento - ${autoAddress}`
-        : (isTrocaPoste ? `Troca de poste - ${autoAddress}`
-          : (isCemig
-            ? (cemigProto ? `Cemig — ${cemigProto}` : (existing?.titulo || 'Certificação Cemig'))
-            : (isOtimRede
-              ? (titulo.trim() || (otimProto && otimOs ? `${otimProto} · ${otimOs}` : (otimProto || otimOs || existing?.titulo || 'Otimização de rede')))
-              : (isAtdParentOnly
-                ? (nomeClienteRaw || titulo.trim() || existing?.titulo || '')
-                : (isAtdChildOnly
-                  ? (titulo.trim() || existing?.titulo || '')
-                  : titulo)))));
+      let finalTitulo = '';
+      if (isRompimento) {
+        finalTitulo = `Rompimento - ${autoAddress}`;
+      } else if (isTrocaPoste) {
+        finalTitulo = `Troca de poste - ${autoAddress}`;
+      } else if (isCemig) {
+        finalTitulo = cemigProto ? `Cemig — ${cemigProto}` : (existing?.titulo || 'Certificação Cemig');
+      } else if (isOtimRede) {
+        finalTitulo =
+          titulo.trim() ||
+          (otimProto && otimOs ? `${otimProto} · ${otimOs}` : (otimProto || otimOs || existing?.titulo || 'Otimização de rede'));
+      } else if (isQdp) {
+        finalTitulo = titulo.trim() || qdpClienteRaw || qdpOrdemServicoRaw || existing?.titulo || 'Qualidade de potência';
+      } else if (isAtdParentOnly) {
+        finalTitulo = nomeClienteRaw || titulo.trim() || existing?.titulo || '';
+      } else if (isAtdChildOnly) {
+        finalTitulo = titulo.trim() || existing?.titulo || '';
+      } else {
+        finalTitulo = titulo;
+      }
       const finalPrazo = isRompimento
         ? Utils.todayIso()
         : isOtimRede
@@ -7825,7 +8548,7 @@ const Controllers = {
         : (isTrocaPoste ? '' : '');
       const setorField = isRompimento
         ? setorCto
-        : (isParentTask ? regiao : (selectedParent?.setor || selectedParent?.regiao || existing?.setor || ''));
+        : (isQdp ? qdpCtoRaw : (isParentTask ? regiao : (selectedParent?.setor || selectedParent?.regiao || existing?.setor || '')));
       const regiaoField = isRompimento
         ? regiao
         : (isParentTask ? regiao : (selectedParent?.regiao || selectedParent?.setor || existing?.regiao || ''));
@@ -7850,9 +8573,11 @@ const Controllers = {
         : (selectedParent?.dataInstalacao || existing?.dataInstalacao || '');
       const finalOrdemServico = isOtimRede
         ? otimOs
-        : (this._isAtendimentoClienteCategory(category) && !isParentTask)
+        : (isQdp
+          ? qdpOrdemServicoRaw
+          : (this._isAtendimentoClienteCategory(category) && !isParentTask)
           ? ordemServicoRaw
-          : (selectedParent?.ordemServico || existing?.ordemServico || '');
+          : (selectedParent?.ordemServico || existing?.ordemServico || ''));
       const finalResponsavel = isAtdParentOnly
         ? (responsavel || existing?.responsavel || '')
         : (isOtimRede || isCemig
@@ -7886,8 +8611,8 @@ const Controllers = {
         dataInstalacao: finalDataInstalacao,
         ordemServico: finalOrdemServico,
         clientesAfetados: isRompimento ? clientesAfetadosRaw : '',
-        coordenadas: (isRompimento || isTrocaPoste) ? coordsRaw : (isOtimRede ? otimGeoCoords : (isCemig ? cemigGeoCoords : '')),
-        localizacaoTexto: (isRompimento || isTrocaPoste) ? autoAddress : (isOtimRede ? otimGeoAddress : (isCemig ? cemigGeoAddress : '')),
+        coordenadas: (isRompimento || isTrocaPoste || isQdp) ? coordsRaw : (isOtimRede ? otimGeoCoords : (isCemig ? cemigGeoCoords : '')),
+        localizacaoTexto: (isRompimento || isTrocaPoste || isQdp) ? autoAddress : (isOtimRede ? otimGeoAddress : (isCemig ? cemigGeoAddress : '')),
         categoria:  category,
         prazo: finalPrazo,
         prioridade: finalPrioridade,
@@ -7897,6 +8622,7 @@ const Controllers = {
         parentTaskId: this._isAtendimentoCategory(category) ? (isParentTask ? null : parentTaskId) : null,
       };
       if (isAtdParentOnly) payload.nomeCliente = nomeClienteRaw;
+      if (isQdp) payload.nomeCliente = qdpClienteRaw;
       return payload;
     },
 
@@ -7925,7 +8651,8 @@ const Controllers = {
         task.categoria === 'troca-poste' ? 'Editar troca de poste'
           : task.categoria === 'certificacao-cemig' ? 'Editar certificação Cemig'
             : task.categoria === 'otimizacao-rede' ? 'Editar otimização de rede'
-              : 'Editar tarefa';
+              : task.categoria === 'qualidade-potencia' ? 'Editar qualidade de potência'
+                : 'Editar tarefa';
       document.getElementById('op-titulo').value =
         task.categoria === 'troca-poste' || task.categoria === 'certificacao-cemig' || task.categoria === 'atendimento-cliente'
           ? ''
@@ -7984,6 +8711,28 @@ const Controllers = {
           cemigDescEdit.innerHTML = this._normalizeOtimDescricaoImgSrcForEdit(String(task.descricao || ''));
           this._wrapBareOtimDescricaoImages(cemigDescEdit);
         }
+      } else if (task.categoria === 'qualidade-potencia') {
+        const qdpCli = document.getElementById('op-qdp-cliente');
+        const qdpOs = document.getElementById('op-qdp-ordem-servico');
+        const qdpCto = document.getElementById('op-qdp-cto');
+        if (qdpCli) qdpCli.value = String(task.nomeCliente || '').trim();
+        if (qdpOs) qdpOs.value = String(task.ordemServico || '').trim();
+        if (qdpCto) qdpCto.value = String(task.setor || '').trim();
+        if (proto) proto.value = '';
+        if (os) os.value = '';
+        if (dataEnt) dataEnt.value = '';
+        this._setOpAtdSubprocessoSelectValue('');
+        if (dataInst) dataInst.value = '';
+        if (desc) desc.value = '';
+        const childTituloQdp = document.getElementById('op-atd-child-titulo');
+        if (childTituloQdp) childTituloQdp.value = '';
+        if (opOtimProto) opOtimProto.value = '';
+        if (opOtimOs) opOtimOs.value = '';
+        if (opCemigProto) opCemigProto.value = '';
+        const otimDescQdp = document.getElementById('op-otim-descricao');
+        if (otimDescQdp) otimDescQdp.innerHTML = '';
+        const cemigDescQdp = document.getElementById('op-cemig-descricao');
+        if (cemigDescQdp) cemigDescQdp.innerHTML = '';
       } else {
         const nomeCliEdit = document.getElementById('op-atd-nome-cliente');
         if (nomeCliEdit) {
@@ -8349,6 +9098,21 @@ const Controllers = {
       });
       document.getElementById('op-setor-cto')?.addEventListener('blur', () => {
         this._applyCtoLookupFromSetor();
+      });
+      document.getElementById('op-qdp-cto')?.addEventListener('input', (e) => {
+        const el = e.target;
+        const s = el.selectionStart;
+        const k = el.selectionEnd;
+        const up = el.value.toUpperCase();
+        if (el.value !== up) {
+          el.value = up;
+          if (typeof s === 'number' && typeof k === 'number') el.setSelectionRange(s, k);
+        }
+        clearTimeout(this._qdpCtoLookupTimer);
+        this._qdpCtoLookupTimer = setTimeout(() => this._applyCtoLookupFromQdpCto(), 450);
+      });
+      document.getElementById('op-qdp-cto')?.addEventListener('blur', () => {
+        this._applyCtoLookupFromQdpCto();
       });
       ['closeOpTaskModal','cancelOpTaskModal'].forEach(id =>
         document.getElementById(id)?.addEventListener('click', () => ModalService.close('opTaskModal'))
@@ -9372,7 +10136,9 @@ async function initApp() {
     const o = Number(payload.opTasks) || 0;
     const c = Number(payload.calendarNotes) || 0;
     const g = Number(payload.config) || 0;
-    return `${t}|${o}|${c}|${g}`;
+    const n = Number(payload.notifications) || 0;
+    const a = Number(payload.activity) || 0;
+    return `${t}|${o}|${c}|${g}|${n}|${a}`;
   };
   let syncInFlight = false;
   const quickSyncTick = async () => {
@@ -9399,6 +10165,8 @@ async function initApp() {
 
       const changedTasks = Array.isArray(ch.changedTasks) ? ch.changedTasks : [];
       const changedOp = Array.isArray(ch.changedOpTasks) ? ch.changedOpTasks : [];
+      const changedNotifs = Array.isArray(ch.changedNotifications) ? ch.changedNotifications : [];
+      const changedActivity = Array.isArray(ch.changedActivity) ? ch.changedActivity : [];
 
       // FIX: calcula e persiste sig ANTES de qualquer early-return,
       // evitando re-deteccao da mesma mudanca no proximo tick.
@@ -9411,6 +10179,13 @@ async function initApp() {
         UI.renderDashboard();
         UI.refreshOperationalUi();
         UI.renderCalendarPage();
+      }
+      if (changedNotifs.length) {
+        ChatMentionNotifs.processIncomingTaskNotifications(changedNotifs);
+      }
+      if (changedActivity.length) {
+        Store.applyRemoteActivity(changedActivity);
+        window.PlannerDashboard?._renderActivityFeedFromStore?.();
       }
 
       // Se o servidor acusar mudanca mas nao vier diff (ex.: config/calendario),

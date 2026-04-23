@@ -88,6 +88,43 @@ CREATE TABLE IF NOT EXISTS app_config (
   PRIMARY KEY (cfg_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ─── Notificações do sistema (sininho) ─────────────────────────────────────
+-- "Não lido" é controlado no front por lastSeenId por usuário (localStorage).
+CREATE TABLE IF NOT EXISTS app_notification (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  kind VARCHAR(48) NOT NULL DEFAULT 'task_added',
+  title VARCHAR(255) NOT NULL DEFAULT '',
+  message VARCHAR(600) NOT NULL DEFAULT '',
+  ref_type VARCHAR(32) NOT NULL DEFAULT '',  -- 'task' | 'op_task'
+  ref_id INT NULL,
+  op_category VARCHAR(48) NOT NULL DEFAULT '',
+  created_by VARCHAR(120) NOT NULL DEFAULT '',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_app_notification_created (created_at),
+  KEY idx_app_notification_updated (updated_at),
+  KEY idx_app_notification_kind (kind)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─── Atividade recente do usuário (audit leve) ─────────────────────────────
+-- Feed do dashboard: eventos do usuário logado (criou/alterou status etc.).
+CREATE TABLE IF NOT EXISTS app_activity_event (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  username VARCHAR(120) NOT NULL,
+  event_type VARCHAR(48) NOT NULL,          -- task_created | op_task_created | op_status_changed | task_updated ...
+  severity VARCHAR(16) NOT NULL DEFAULT 'info', -- info|success|warning|danger
+  message VARCHAR(600) NOT NULL DEFAULT '',
+  ref_type VARCHAR(32) NOT NULL DEFAULT '', -- task|op_task
+  ref_id INT NULL,
+  op_category VARCHAR(48) NOT NULL DEFAULT '',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_activity_user_created (username, created_at),
+  KEY idx_activity_updated (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ─── Chat interno da equipe (polling no front; sem WebSocket) ─────────────
 CREATE TABLE IF NOT EXISTS team_chat_message (
   id BIGINT NOT NULL AUTO_INCREMENT,

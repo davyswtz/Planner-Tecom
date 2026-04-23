@@ -42,6 +42,15 @@ try {
     }
 
     $pdo = db();
+    $existsStmt = $pdo->prepare('SELECT 1 FROM op_tasks WHERE id = :id');
+    $existsStmt->execute([':id' => $id]);
+    $isNew = $existsStmt->fetchColumn() ? false : true;
+    $prevStatus = '';
+    if (!$isNew) {
+        $ps = $pdo->prepare('SELECT status FROM op_tasks WHERE id = :id');
+        $ps->execute([':id' => $id]);
+        $prevStatus = (string) ($ps->fetchColumn() ?: '');
+    }
     $coord = (string) ($data['coordenadas'] ?? '');
     $locText = (string) ($data['localizacaoTexto'] ?? '');
     $descricaoRaw = (string) ($data['descricao'] ?? '');
@@ -131,6 +140,57 @@ try {
         if ($finalDesc !== $descricaoRaw) {
             $u = $pdo->prepare('UPDATE op_tasks SET descricao = :d WHERE id = :id');
             $u->execute([':d' => $finalDesc, ':id' => $id]);
+        }
+
+        // Notificação global (sininho): apenas quando for criação.
+        if ($isNew) {
+            $who = (string) ($_SESSION['planner_user'] ?? '');
+            $cat = (string) ($data['categoria'] ?? 'rompimentos');
+            $titleN = 'Nova tarefa operacional adicionada';
+            $msgN = sprintf('%s: %s', $cat, (string) ($data['titulo'] ?? ''));
+            $n = $pdo->prepare('INSERT INTO app_notification (kind, title, message, ref_type, ref_id, op_category, created_by)
+                                VALUES (:kind, :title, :message, :ref_type, :ref_id, :op_category, :created_by)');
+            $n->execute([
+                ':kind' => 'task_added',
+                ':title' => $titleN,
+                ':message' => $msgN,
+                ':ref_type' => 'op_task',
+                ':ref_id' => $id,
+                ':op_category' => $cat,
+                ':created_by' => $who,
+            ]);
+
+            $a = $pdo->prepare('INSERT INTO app_activity_event (username, event_type, severity, message, ref_type, ref_id, op_category)
+                                VALUES (:u, :t, :s, :m, :rt, :rid, :cat)');
+            $a->execute([
+                ':u' => $who,
+                ':t' => 'op_task_created',
+                ':s' => 'success',
+                ':m' => sprintf('Criou uma tarefa operacional (%s): %s', $cat, (string) ($data['titulo'] ?? '')),
+                ':rt' => 'op_task',
+                ':rid' => $id,
+                ':cat' => $cat,
+            ]);
+        }
+
+        // Evento de mudança de status (para o feed do usuário).
+        if (!$isNew) {
+            $who = (string) ($_SESSION['planner_user'] ?? '');
+            $cat = (string) ($data['categoria'] ?? '');
+            $nextStatus = (string) ($data['status'] ?? '');
+            if ($nextStatus !== '' && $prevStatus !== '' && $nextStatus !== $prevStatus) {
+                $a2 = $pdo->prepare('INSERT INTO app_activity_event (username, event_type, severity, message, ref_type, ref_id, op_category)
+                                     VALUES (:u, :t, :s, :m, :rt, :rid, :cat)');
+                $a2->execute([
+                    ':u' => $who,
+                    ':t' => 'op_status_changed',
+                    ':s' => 'info',
+                    ':m' => sprintf('Alterou status (%s): %s → %s', $cat ?: 'op', $prevStatus, $nextStatus),
+                    ':rt' => 'op_task',
+                    ':rid' => $id,
+                    ':cat' => $cat,
+                ]);
+            }
         }
         $pdo->commit();
     } catch (Throwable $e) {

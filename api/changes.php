@@ -28,10 +28,15 @@ try {
     $opTasksTs = $getMaxTs('op_tasks');
     $calTs = $getMaxTs('calendar_notes');
     $cfgTs = $getMaxTs('app_config');
-    $maxTs = max($tasksTs, $opTasksTs, $calTs, $cfgTs);
+    $notifsTs = $getMaxTs('app_notification');
+    $actTs = $getMaxTs('app_activity_event');
+    $maxTs = max($tasksTs, $opTasksTs, $calTs, $cfgTs, $notifsTs);
+    $maxTs = max($maxTs, $actTs);
 
     $changedTasks = [];
     $changedOpTasks = [];
+    $changedNotifs = [];
+    $changedActivity = [];
     if ($since > 0) {
         // Retorna apenas alterações desde o último poll (bem mais rápido que bootstrap completo).
         // Importante: updated_at geralmente tem precisão de 1 segundo. Usar >= evita “perder” updates no mesmo segundo.
@@ -55,6 +60,19 @@ try {
             $item['parentTaskId'] = isset($item['parent_task_id']) ? (int) $item['parent_task_id'] : null;
             unset($item['is_parent_task'], $item['parent_task_id']);
         }
+
+        $stmtN = $pdo->prepare('SELECT id, kind, title, message, ref_type, ref_id, op_category AS opCategory,
+          created_by AS createdBy, created_at AS createdAt, updated_at
+          FROM app_notification WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC');
+        $stmtN->execute([':since' => $since]);
+        $changedNotifs = $stmtN->fetchAll() ?: [];
+
+        // Feed global (todos os usuários)
+        $stmtA = $pdo->prepare('SELECT id, username, event_type AS eventType, severity, message, ref_type AS refType, ref_id AS refId,
+          op_category AS opCategory, created_at AS createdAt, updated_at
+          FROM app_activity_event WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC');
+        $stmtA->execute([':since' => $since]);
+        $changedActivity = $stmtA->fetchAll() ?: [];
     }
 
     jsonResponse([
@@ -63,11 +81,15 @@ try {
         'opTasks' => $opTasksTs,
         'calendarNotes' => $calTs,
         'config' => $cfgTs,
+        'notifications' => $notifsTs,
+        'activity' => $actTs,
         'serverTime' => time(),
         'nextSince' => $maxTs,
         'since' => $since,
         'changedTasks' => $changedTasks,
         'changedOpTasks' => $changedOpTasks,
+        'changedNotifications' => $changedNotifs,
+        'changedActivity' => $changedActivity,
     ]);
 } catch (Throwable $e) {
     error_log('[changes.php] failed: ' . $e->getMessage());

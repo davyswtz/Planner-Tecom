@@ -25,6 +25,16 @@ try {
         'SELECT id, `date`, title, description, priority, createdAt FROM calendar_notes ORDER BY id ASC'
     )->fetchAll();
     $cfgRows = $pdo->query('SELECT cfg_key, cfg_value FROM app_config')->fetchAll();
+    $notifs = $pdo
+        ->query('SELECT id, kind, title, message, ref_type, ref_id, op_category AS opCategory, created_by AS createdBy, created_at AS createdAt
+                 FROM app_notification ORDER BY id DESC LIMIT 50')
+        ->fetchAll();
+    // Feed global (todos os usuários)
+    $activity = $pdo
+        ->query('SELECT id, username, event_type AS eventType, severity, message, ref_type AS refType, ref_id AS refId,
+          op_category AS opCategory, created_at AS createdAt
+          FROM app_activity_event ORDER BY id DESC LIMIT 30')
+        ->fetchAll() ?: [];
 
     $cfgMap = [];
     foreach ($cfgRows as $row) {
@@ -43,6 +53,8 @@ try {
         'tasks' => $tasks,
         'opTasks' => $opTasks,
         'calendarNotes' => $calendarNotes,
+        'notifications' => array_reverse($notifs ?: []),
+        'activity' => array_reverse($activity ?: []),
         'webhookConfig' => $cfgMap['webhookConfig'] ?? ['url' => '', 'events' => ['andamento' => true, 'concluida' => true, 'finalizada' => true]],
         'plannerConfig' => $cfgMap['plannerConfig'] ?? ['note' => ''],
     ]);
