@@ -703,12 +703,21 @@ const Store = (() => {
     // Calendar Notes
     getCalendarNotes: () => [...calendarNotes],
     getCalendarNotesByDate: (isoDate) => calendarNotes.filter(n => n.date === isoDate),
+    findCalendarNote: (id) => calendarNotes.find(n => Number(n?.id) === Number(id)) || null,
     addCalendarNote: (data) => {
       const note = { id: nextCalendarNoteId++, ...data, createdAt: new Date().toISOString() };
       calendarNotes.push(note);
       persistCalendarNotes();
       ApiService.requestAny(['/calendar_notes.php', '/calendar-notes'], { method: 'POST', body: JSON.stringify(note) });
       return note;
+    },
+    updateCalendarNote: (id, patch) => {
+      const idx = calendarNotes.findIndex(n => Number(n?.id) === Number(id));
+      if (idx === -1) return null;
+      Object.assign(calendarNotes[idx], patch);
+      persistCalendarNotes();
+      ApiService.requestAny(['/calendar_notes.php', '/calendar-notes'], { method: 'POST', body: JSON.stringify(calendarNotes[idx]) });
+      return calendarNotes[idx];
     },
     removeCalendarNote: (id) => {
       const sizeBefore = calendarNotes.length;
@@ -2676,6 +2685,10 @@ const CalendarService = {
     return Store.addCalendarNote(data);
   },
 
+  updateNote(id, patch) {
+    return Store.updateCalendarNote(id, patch);
+  },
+
   removeNote(id) {
     Store.removeCalendarNote(id);
   },
@@ -3056,6 +3069,16 @@ const CalendarV2 = (() => {
     evs.forEach(ev => {
       const card = document.createElement('div');
       card.className = `cal-ev-card ${priorityClass(ev.priority)}`;
+      card.addEventListener('click', () => {
+        if (ev.removable) {
+          Controllers.calendar?._openEditNoteModal?.(Number(ev.id));
+          return;
+        }
+        if (ev.isOpTask) {
+          Controllers.opTask?.openEditModal?.(Number(ev.id));
+          return;
+        }
+      });
 
       const pct = progressValue(ev.status);
       const badges = [
@@ -3082,13 +3105,7 @@ const CalendarV2 = (() => {
       const menuBtn = card.querySelector('.cal-ec-menu');
       menuBtn?.addEventListener('click', (e) => {
         e.stopPropagation();
-        if (ev.removable) {
-          CalendarService.removeNote(Number(ev.id));
-          UI.renderAgenda();
-          renderAll();
-          ToastService.show('Anotação removida', 'info');
-          return;
-        }
+        if (ev.removable) return Controllers.calendar?._openEditNoteModal?.(Number(ev.id));
         // Para tarefa, mantemos apenas como "menu" neutro (sem mudar comportamento existente do sistema).
         ToastService.show('Ações do item: use o status ou copie o protocolo', 'info');
       });
@@ -4890,7 +4907,7 @@ const UI = {
     })();
     const atn2Dbg = (msg, data) => {
       if (!atn2DbgOn) return;
-      try { console.log(`[atn2] ${msg}`, data || {}); } catch { /* ignore */ }
+      try { /* debug habilitado via LS/querystring */ } catch { /* ignore */ }
     };
     atn2Dbg('renderAtenuacaoDashboardPage()', { ts: Date.now() });
 
@@ -7786,7 +7803,8 @@ const Controllers = {
       }
 
       this._toggleGroup('opTituloGroup', !isRompimento && !isTrocaPoste && !isCemig && !isQdp);
-      this._toggleGroup('opPrazoGroup', !isRompimento && !isOtimRede);
+      // Rompimento: permitir definir data de vencimento (antes era fixo em "hoje")
+      this._toggleGroup('opPrazoGroup', !isOtimRede);
       this._toggleGroup('opPriorityRegionRow', !isRompimento && !isOtimRede && !isCemig && !isQdp);
 
       this._toggleGroup('opParentConfig', isAtendimento);
@@ -8533,7 +8551,7 @@ const Controllers = {
         finalTitulo = titulo;
       }
       const finalPrazo = isRompimento
-        ? Utils.todayIso()
+        ? (prazo || existing?.prazo || Utils.todayIso())
         : isOtimRede
           ? (prazo || Utils.todayIso())
           : isCemig
@@ -9223,11 +9241,34 @@ const Controllers = {
 
   /* ── Calendar ─────────────────────────────────────────── */
   calendar: {
+    _editingNoteId: null,
     _openNoteModal(prefillDate) {
+      this._editingNoteId = null;
+      const idHidden = document.getElementById('cal-note-id');
+      if (idHidden) idHidden.value = '';
+      const delBtn = document.getElementById('deleteCalendarNoteBtn');
+      if (delBtn) delBtn.style.display = 'none';
+      document.getElementById('calendarNoteModalTitle').textContent = 'Nova anotação';
       document.getElementById('cal-note-date').value = prefillDate || CalendarService.selectedDateIso;
       document.getElementById('cal-note-title').value = '';
       document.getElementById('cal-note-desc').value = '';
       document.getElementById('cal-note-priority').value = 'Média';
+      ModalService.open('calendarNoteModal');
+    },
+
+    _openEditNoteModal(noteId) {
+      const n = Store.findCalendarNote?.(noteId);
+      if (!n) return;
+      this._editingNoteId = Number(noteId) || null;
+      const idHidden = document.getElementById('cal-note-id');
+      if (idHidden) idHidden.value = String(noteId);
+      const delBtn = document.getElementById('deleteCalendarNoteBtn');
+      if (delBtn) delBtn.style.display = '';
+      document.getElementById('calendarNoteModalTitle').textContent = 'Editar anotação';
+      document.getElementById('cal-note-date').value = String(n.date || CalendarService.selectedDateIso || Utils.todayIso()).slice(0, 10);
+      document.getElementById('cal-note-title').value = String(n.title || '').trim();
+      document.getElementById('cal-note-desc').value = String(n.description || '').trim();
+      document.getElementById('cal-note-priority').value = String(n.priority || 'Média');
       ModalService.open('calendarNoteModal');
     },
 
@@ -9240,7 +9281,9 @@ const Controllers = {
       if (!date) date = CalendarService.selectedDateIso || Utils.todayIso();
       if (!title) title = 'Anotação';
 
-      CalendarService.createNote({ date, title, description, priority });
+      const editingId = Number(document.getElementById('cal-note-id')?.value || 0) || this._editingNoteId;
+      if (editingId) CalendarService.updateNote(editingId, { date, title, description, priority });
+      else CalendarService.createNote({ date, title, description, priority });
       CalendarService.selectedDateIso = date;
       ModalService.close('calendarNoteModal');
       UI.renderAgenda();
@@ -9254,6 +9297,16 @@ const Controllers = {
         CalendarV2.bindOnce();
         UI.renderCalendarPage();
         document.getElementById('saveCalendarNoteBtn').addEventListener('click', () => this._saveNote());
+        document.getElementById('deleteCalendarNoteBtn')?.addEventListener('click', () => {
+          const id = Number(document.getElementById('cal-note-id')?.value || 0) || Number(this._editingNoteId || 0);
+          if (!id) return;
+          if (!window.confirm('Excluir esta anotação do calendário?')) return;
+          CalendarService.removeNote(id);
+          ModalService.close('calendarNoteModal');
+          UI.renderAgenda();
+          UI.renderCalendarPage();
+          ToastService.show('Anotação removida', 'info');
+        });
         ['closeCalendarNoteModal', 'cancelCalendarNoteModal'].forEach(id => {
           document.getElementById(id)?.addEventListener('click', () => ModalService.close('calendarNoteModal'));
         });
@@ -10213,7 +10266,8 @@ async function initApp() {
     else if (Number(ch.serverTime) > 0) lastSince = Number(ch.serverTime);
   };
 
-  setInterval(() => { void quickSyncTick(); }, 1000);
+  // Produção (multiusuário): polling inteligente a cada 15s (mínimo possível sem sobrecarregar HostGator).
+  setInterval(() => { void quickSyncTick(); }, 15000);
   setInterval(async () => {
     const updated = await bootstrapWithTimeout(6000);
     if (!updated) return;

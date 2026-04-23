@@ -10,11 +10,9 @@
   function __triggerLateToggle(source, e, fn) {
     const now = Date.now();
     if (now - __lateToggleLastTs < 450) {
-      try { console.info('[planner] toggleLate ignored (double-fire)', { source, ts: now }); } catch { /* ignore */ }
       return;
     }
     __lateToggleLastTs = now;
-    try { console.info('[planner] toggleLate accepted', { source, ts: now }); } catch { /* ignore */ }
     fn();
   }
 
@@ -593,7 +591,6 @@
 
   function boot() {
     if (!document.getElementById('page-dashboard')) return;
-    try { console.info('[planner] dashboard-planner boot', { ts: Date.now() }); } catch { /* ignore */ }
     PlannerDashboard.init();
     PlannerDashboard.syncFromStore();
   }

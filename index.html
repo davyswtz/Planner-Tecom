@@ -512,8 +512,8 @@
               </div>
               <div class="planner-legend"><span>No prazo</span><span>Em risco</span><span>Violado</span></div>
             </div>
-            <div class="planner-card" role="region" aria-label="Equipe em campo">
-              <h2 class="planner-card-title">Equipe em campo</h2>
+            <div class="planner-card" role="region" aria-label="Técnicos que mais resolveram rompimentos">
+              <h2 class="planner-card-title">Tec que mais resolveu rompimento (TMRR)</h2>
               <div id="plannerTeamRows">
                 <div class="planner-team-row"><div class="planner-team-av planner-team-av--on" id="plannerTeamAv0">—</div><div class="planner-team-name" id="plannerTeamName0">—</div><span class="planner-team-count" id="plannerTeamCount0">0</span><span class="planner-team-dot planner-team-dot--success" id="plannerTeamDot0"></span></div>
                 <div class="planner-team-row"><div class="planner-team-av planner-team-av--on" id="plannerTeamAv1">—</div><div class="planner-team-name" id="plannerTeamName1">—</div><span class="planner-team-count" id="plannerTeamCount1">0</span><span class="planner-team-dot" id="plannerTeamDot1"></span></div>
@@ -953,6 +953,7 @@
       </button>
     </div>
     <div class="modal-body">
+      <input type="hidden" id="cal-note-id" value=""/>
       <div class="form-group">
         <label for="cal-note-date">Data</label>
         <input type="date" id="cal-note-date"/>
@@ -975,6 +976,7 @@
       </div>
     </div>
     <div class="modal-footer">
+      <button class="ghost-btn danger-btn" id="deleteCalendarNoteBtn" style="display:none">Excluir</button>
       <button class="ghost-btn" id="cancelCalendarNoteModal">Cancelar</button>
       <button class="primary-btn" id="saveCalendarNoteBtn">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
