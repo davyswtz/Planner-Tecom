@@ -22,6 +22,17 @@ try {
         $row = $stmt->fetch();
         return (int) ($row['ts'] ?? 0);
     };
+    $tableExists = function (string $table) use ($pdo): bool {
+        $stmt = $pdo->prepare(
+            'SELECT 1
+               FROM information_schema.TABLES
+              WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = :table
+              LIMIT 1'
+        );
+        $stmt->execute([':table' => $table]);
+        return (bool) $stmt->fetchColumn();
+    };
 
     // Tabelas com updated_at no schema.sql
     $tasksTs = $getMaxTs('tasks');
@@ -29,13 +40,16 @@ try {
     $cfgTs = $getMaxTs('app_config');
     $notifsTs = $getMaxTs('app_notification');
     $actTs = $getMaxTs('app_activity_event');
+    $hasDeletedLog = $tableExists('deleted_entity_log');
+    $deletedTs = $hasDeletedLog ? $getMaxTs('deleted_entity_log') : 0;
     $maxTs = max($tasksTs, $opTasksTs, $cfgTs, $notifsTs);
-    $maxTs = max($maxTs, $actTs);
+    $maxTs = max($maxTs, $actTs, $deletedTs);
 
     $changedTasks = [];
     $changedOpTasks = [];
     $changedNotifs = [];
     $changedActivity = [];
+    $changedDeleted = [];
     if ($since > 0) {
         // Retorna apenas alterações desde o último poll (bem mais rápido que bootstrap completo).
         // Importante: updated_at geralmente tem precisão de 1 segundo. Usar >= evita “perder” updates no mesmo segundo.
@@ -72,6 +86,14 @@ try {
           FROM app_activity_event WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC');
         $stmtA->execute([':since' => $since]);
         $changedActivity = $stmtA->fetchAll() ?: [];
+
+        if ($hasDeletedLog) {
+            $stmtD = $pdo->prepare('SELECT id, entity_type AS entityType, entity_id AS entityId,
+              parent_entity_id AS parentEntityId, deleted_by AS deletedBy, deleted_at AS deletedAt, updated_at
+              FROM deleted_entity_log WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC');
+            $stmtD->execute([':since' => $since]);
+            $changedDeleted = $stmtD->fetchAll() ?: [];
+        }
     }
 
     jsonResponse([
@@ -81,6 +103,7 @@ try {
         'config' => $cfgTs,
         'notifications' => $notifsTs,
         'activity' => $actTs,
+        'deleted' => $deletedTs,
         'serverTime' => time(),
         'nextSince' => $maxTs,
         'since' => $since,
@@ -88,6 +111,7 @@ try {
         'changedOpTasks' => $changedOpTasks,
         'changedNotifications' => $changedNotifs,
         'changedActivity' => $changedActivity,
+        'changedDeletedEntities' => $changedDeleted,
     ]);
 } catch (Throwable $e) {
     error_log('[changes.php] failed: ' . $e->getMessage());

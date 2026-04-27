@@ -653,6 +653,25 @@ const Store = (() => {
       }
       return changed;
     },
+    applyRemoteDeletedEntities(incoming) {
+      if (!Array.isArray(incoming) || !incoming.length) return 0;
+      let changed = 0;
+      for (const row of incoming) {
+        const type = String(row?.entityType || row?.entity_type || '').trim();
+        const id = Number(row?.entityId ?? row?.entity_id);
+        if (type !== 'op_task' || !Number.isFinite(id) || id <= 0) continue;
+        const idx = opTasks.findIndex(t => Number(t?.id) === id);
+        if (idx !== -1) {
+          opTasks.splice(idx, 1);
+          changed++;
+        }
+      }
+      if (changed) {
+        nextOpTaskId = opTasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
+        persistSnapshot();
+      }
+      return changed;
+    },
     findOpTask: (id) => opTasks.find(t => t.id === id),
     getActivityEvents: () => [...activityEvents],
 
@@ -1183,18 +1202,19 @@ const WebhookService = {
     return String(s ?? '').replace(/\*/g, '·');
   },
 
-  /** Coordenadas em formato lat,lon (Google Chat costuma tornar clicável). */
+  /** Mantém só a coordenada visível, com clique apontando para o Maps. */
   _coordsClickableForChat(raw) {
     const coordsRaw = String(raw || '').trim();
     if (!coordsRaw) return '—';
-    const normalized = coordsRaw.replace(/\s+/g, '');
-    const parts = normalized.split(',');
+    const parts = coordsRaw.split(',').map(part => part.trim());
     if (parts.length !== 2) return coordsRaw;
     const lat = Number(parts[0]);
     const lon = Number(parts[1]);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return coordsRaw;
     if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return coordsRaw;
-    return `${lat},${lon}`;
+    const display = `${parts[0]}, ${parts[1]}`;
+    const mapsUrl = `https://maps.google.com/?q=${lat},${lon}`;
+    return `<${mapsUrl}|${display}>`;
   },
 
   _formatChatMention(chatUserIdRaw) {
@@ -1287,7 +1307,7 @@ const WebhookService = {
     const taskId = s(String(task.taskCode || `CEM-${String(task.id || '').padStart(4, '0')}`).trim());
     const addrLine = this._formatCemigEnderecoLine(task);
     const notifLine = this._formatCemigNotificacaoLine(task);
-    const coords = s(String(task.coordenadas || '').trim() || '—');
+    const coords = s(this._coordsClickableForChat(task?.coordenadas));
 
     if (event === 'andamento') {
       return {
@@ -1352,7 +1372,7 @@ const WebhookService = {
     const taskId = String(
       code || synthetic || `NET-${String(task.id || '').padStart(4, '0')}`,
     ).trim();
-    const coords = String(task.coordenadas || '').trim() || '—';
+    const coords = this._coordsClickableForChat(task?.coordenadas);
     const endereco = String(task.localizacaoTexto || '').trim() || '—';
     const regiao = String(task.regiao || '').trim() || '—';
     const titulo = String(task.titulo || '').trim();
@@ -1471,10 +1491,11 @@ const WebhookService = {
 
     // Troca de poste (andamento): mensagem curta e objetiva (pedido do time).
     if (event === 'andamento') {
-      const coordsLine = coordsSaved || (() => {
+      const rawCoordsLine = coordsSaved || (() => {
         const loc = this._trocaPosteTitleAsLocation(titulo);
         return loc.mode === 'coords' ? loc.line : '—';
       })();
+      const coordsLine = this._coordsClickableForChat(rawCoordsLine);
       const enderecoLine = enderecoSaved || (() => {
         const loc = this._trocaPosteTitleAsLocation(titulo);
         return loc.mode === 'texto' ? loc.line : 'Não informado';
@@ -1512,7 +1533,7 @@ const WebhookService = {
 
     let locationBlock;
     if (coordsSaved || enderecoSaved) {
-      const cLine = coordsSaved || '—';
+      const cLine = this._coordsClickableForChat(coordsSaved);
       const eLine = enderecoSaved || '—';
       locationBlock =
         `*${this._chatSafe('📍 COORDENADAS')}*\n${this._chatSafe(cLine)}\n\n` +
@@ -1520,7 +1541,8 @@ const WebhookService = {
     } else {
       const loc = this._trocaPosteTitleAsLocation(titulo);
       const coordLabel = loc.mode === 'coords' ? '📍 COORDENADAS' : '📍 LOCAL / DESCRIÇÃO';
-      locationBlock = `*${this._chatSafe(coordLabel)}*\n${this._chatSafe(loc.line)}`;
+      const locationLine = loc.mode === 'coords' ? this._coordsClickableForChat(loc.line) : loc.line;
+      locationBlock = `*${this._chatSafe(coordLabel)}*\n${this._chatSafe(locationLine)}`;
     }
 
     const sections = [
@@ -2133,18 +2155,7 @@ const WebhookService = {
       const clientesAfetados = String(task.clientesAfetados || '').trim();
       const taskId = String(task.taskCode || `ROM-${String(task.id || '').padStart(4, '0')}`).trim();
 
-      const coordsClickable = (() => {
-        // Deixa apenas "lat,lon" (Google Chat costuma tornar clicável sem precisar link explícito).
-        if (!coordsRaw) return '';
-        const normalized = coordsRaw.replace(/\s+/g, '');
-        const parts = normalized.split(',');
-        if (parts.length !== 2) return coordsRaw;
-        const lat = Number(parts[0]);
-        const lon = Number(parts[1]);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return coordsRaw;
-        if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return coordsRaw;
-        return `${lat},${lon}`;
-      })();
+      const coordsClickable = coordsRaw ? this._coordsClickableForChat(coordsRaw) : '';
 
       return {
         text: [
@@ -2166,7 +2177,7 @@ const WebhookService = {
       const regiao = task.regiao || 'Não informada';
       const tecnico = this._resolveTechnicianDisplay(task, { mention: false });
       const assinatura = String(task?.assinadaPor || '').trim();
-      const localizacao = task.coordenadas || 'Não informada';
+      const localizacao = this._coordsClickableForChat(task.coordenadas || 'Não informada');
       const endereco = task.localizacaoTexto || 'Não informado';
       const taskId = task.taskCode || `ROM-${String(task.id || '').padStart(4, '0')}`;
       const elapsed = this._formatDurationFromStart(task);
@@ -9340,7 +9351,8 @@ async function initApp() {
     const g = Number(payload.config) || 0;
     const n = Number(payload.notifications) || 0;
     const a = Number(payload.activity) || 0;
-    return `${t}|${o}|${g}|${n}|${a}`;
+    const d = Number(payload.deleted) || 0;
+    return `${t}|${o}|${g}|${n}|${a}|${d}`;
   };
   let syncInFlight = false;
   const quickSyncTick = async () => {
@@ -9368,6 +9380,7 @@ async function initApp() {
       const changedOp = Array.isArray(ch.changedOpTasks) ? ch.changedOpTasks : [];
       const changedNotifs = Array.isArray(ch.changedNotifications) ? ch.changedNotifications : [];
       const changedActivity = Array.isArray(ch.changedActivity) ? ch.changedActivity : [];
+      const changedDeleted = Array.isArray(ch.changedDeletedEntities) ? ch.changedDeletedEntities : [];
 
       // FIX: calcula e persiste sig ANTES de qualquer early-return,
       // evitando re-deteccao da mesma mudanca no proximo tick.
@@ -9375,7 +9388,10 @@ async function initApp() {
       const sigChanged = sig && sig !== lastRemoteSig;
       if (sig) lastRemoteSig = sig;
 
-      const changedCount = Store.applyRemoteTasks(changedTasks) + Store.applyRemoteOpTasks(changedOp);
+      const changedCount =
+        Store.applyRemoteTasks(changedTasks) +
+        Store.applyRemoteOpTasks(changedOp) +
+        Store.applyRemoteDeletedEntities(changedDeleted);
       if (changedCount) {
         UI.renderDashboard();
         UI.refreshOperationalUi();
@@ -9390,7 +9406,7 @@ async function initApp() {
 
       // Se o servidor acusar mudanca mas nao vier diff (ex.: config),
       // faz bootstrap completo como fallback.
-      if (sigChanged && !changedTasks.length && !changedOp.length) {
+      if (sigChanged && !changedTasks.length && !changedOp.length && !changedDeleted.length) {
         const updated = await bootstrapWithTimeout(15000);
         if (!updated) return;
         UI.renderDashboard();

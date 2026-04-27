@@ -20,13 +20,37 @@ try {
         }
         $cascade = !empty($data['cascade']);
         $pdo = db();
+        $deletedBy = (string) ($_SESSION['planner_user'] ?? '');
         if ($cascade) {
+            $idsStmt = $pdo->prepare('SELECT id, parent_task_id FROM op_tasks WHERE id = :id OR parent_task_id = :id');
+            $idsStmt->execute([':id' => $id]);
+            $rowsToDelete = $idsStmt->fetchAll() ?: [];
             $stmt = $pdo->prepare('DELETE FROM op_tasks WHERE id = :id OR parent_task_id = :id');
             $stmt->execute([':id' => $id]);
         } else {
+            $idsStmt = $pdo->prepare('SELECT id, parent_task_id FROM op_tasks WHERE id = :id');
+            $idsStmt->execute([':id' => $id]);
+            $rowsToDelete = $idsStmt->fetchAll() ?: [];
             $pdo->prepare('DELETE FROM op_task_image WHERE op_task_id = :id')->execute([':id' => $id]);
             $stmt = $pdo->prepare('DELETE FROM op_tasks WHERE id = :id');
             $stmt->execute([':id' => $id]);
+        }
+        try {
+            $log = $pdo->prepare(
+                'INSERT INTO deleted_entity_log (entity_type, entity_id, parent_entity_id, deleted_by)
+                 VALUES (:type, :entity_id, :parent_entity_id, :deleted_by)'
+            );
+            foreach ($rowsToDelete as $row) {
+                $log->execute([
+                    ':type' => 'op_task',
+                    ':entity_id' => (int) ($row['id'] ?? 0),
+                    ':parent_entity_id' => isset($row['parent_task_id']) ? (int) $row['parent_task_id'] : null,
+                    ':deleted_by' => $deletedBy,
+                ]);
+            }
+        } catch (Throwable $e) {
+            // A migration 008 é opcional/gradual; exclusão não deve falhar se o log ainda não existir.
+            error_log('[op_tasks.php] delete log skipped: ' . $e->getMessage());
         }
         jsonResponse(['ok' => true]);
     }
