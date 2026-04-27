@@ -1,122 +1,125 @@
-<h1 align="center">🐴 BurrinhoPlanner</h1>
+📡 Planner Telecom
+<p align="center"> <strong>Plataforma inteligente para gestão de projetos e operações em telecom</strong><br> Focada em organização, eficiência e redução de custos operacionais. </p> <p align="center"> <img src="https://img.shields.io/badge/status-descontinuado-orange"> <img src="https://img.shields.io/badge/projeto-interno-IBI%20Telecom-blue"> <img src="https://img.shields.io/badge/desenvolvido%20por-Davy%20Andrade-8A2BE2"> </p>
+📌 Visão Geral
 
-<p align="center">
-  Um planner inteligente desenvolvido para otimizar a gestão de projetos da <strong>IBI Telecom</strong>.
-</p>
+O Planner Telecom é uma aplicação web desenvolvida para otimizar a gestão de projetos dentro do setor de telecomunicações.
 
-<p align="center">
-  <img src="https://chat.google.com/u/0/api/get_attachment_url?url_type=FIFE_URL&content_type=image%2Fpng&attachment_token=AOo0EEWKPv1dATaWGbYujntzEtbCSxQ62LCIeeepfikQ0fslNjBRf%2Flg4ydDlxlSIcdY%2F8tBPDHGPh%2F%2BNz0z1JoQJgkEkYA5zri%2FADn7%2FE6jxv4jmjQ0oeU0elQvBKgsV3KMPGF1sb7%2FouThWB6ZH4u1FsZpZLkdPXR4%2FnGt%2BoiL9sd9sgqOMXRvyT69IAOE4rtDvwDSCU0D0CwARceHqy9mMtAvH7cO5c0S9r9h4l3wFTbBYzAb%2FH4otSMn%2BBP%2FtsjdbxDRGZ7bto1hymSiwsDZFan6LBo%2FZo3AIi4Gvj5O3DAS0MxKid23lNk8FDclwnJTxnvEhGX4wl4%2Bx%2BughJfFIRGNI2uA11%2BlpHMn5CAsGywii98gTdd%2FiYJ3Ntdum%2FlIQftBlisbgCwPLTRaY0scq%2BWdUUG8fKB%2BC1makhsrj6j1bwEEdylFgSHiODjCES6vjD1dL1nEJkX9o%2FVpU4Godg%2BTWUfiDB%2FA2K%2FHIXzSICeVhROGnweX0hwjDMPAeu%2BBUfifhzpRbYPbzf5iktXpMZLYGOdbpAoe%2Bv7WofhNpyb3Qqi3PrxcIu%2B7N1LKGPDLVkGKxoqoiK3F411NUYcz&allow_caching=true&sz=w1920-h919-rw&auditContext=forDisplay">
-  <img src="https://img.shields.io/badge/projeto-interno-blue">
-  <img src="https://img.shields.io/badge/feito%20por-Davy%20Andrade-8A2BE2">
-</p>
+A solução foi criada para substituir uma ferramenta anterior instável e custosa, entregando um sistema próprio com maior controle, desempenho e confiabilidade.
 
----
+⚠️ Status do Projeto
 
-## 📌 Sobre o projeto
+🚧 Projeto oficialmente encerrado (sem novas funcionalidades)
 
-O **BurrinhoPlanner** é uma ferramenta desenvolvida com o objetivo de organizar, acompanhar e otimizar as atividades do setor de projetos da **IBI Telecom**.
+❌ Não receberá novas features
+🛠 Correções críticas ainda podem ser realizadas
+📦 Mantido como projeto funcional e portfólio técnico
+🎯 Problema de Negócio
 
-O projeto surgiu a partir de um cenário crítico:  
-a empresa dependia de uma ferramenta anterior que apresentou falhas, gerando **instabilidade operacional e altos custos**.
+Antes:
 
-Diante disso, foi necessário desenvolver uma solução própria, mais eficiente e econômica — e assim nasceu o BurrinhoPlanner 🐴.
+Dependência de ferramenta externa instável
+Alto custo operacional
+Baixa visibilidade dos processos
 
----
+Depois:
 
-## 🎯 Objetivo
+Sistema próprio e sob controle
+Redução significativa de custos
+Melhor organização e rastreabilidade
+🚀 Funcionalidades
+📋 Gestão de projetos e tarefas
+📊 Acompanhamento de status em tempo real
+🧠 Planejamento estratégico simplificado
+📱 Interface responsiva (desktop e mobile)
+🔒 Controle de acesso interno
+⚡ Foco em performance e usabilidade
+🧱 Tecnologias Utilizadas
 
-Criar uma solução interna capaz de:
+Frontend
 
-- Centralizar o controle de projetos  
-- Melhorar a organização das demandas  
-- Reduzir custos com ferramentas externas  
-- Aumentar a eficiência do time  
-- Garantir maior controle e visibilidade dos processos  
+HTML5
+CSS3
+JavaScript
 
----
+Backend
 
-## 🚀 Demonstração
+PHP
 
-<p align="center">
-  <img src="https://image2url.com/r2/default/images/1774382327696-2392d1ac-b5c8-4ac7-8d53-375790f22c19.png" alt="image"  width="850px"/>
-</p>
+Banco de Dados
 
-<p align="center">
-  <img src="https://image2url.com/r2/default/images/1774382420024-33dbd4ba-fc97-4afd-a3d2-5838da7c3fc6.png" alt="image"  width="45%"/>
-  <img src="./assets/mobile.png" alt="Versão mobile" width="45%">
-</p>
+MySQL
+SQL
+📊 Impacto
+📉 Redução de custos com ferramentas externas
+⚡ Aumento da produtividade da equipe
+🧩 Organização eficiente dos processos internos
+🚀 Maior autonomia tecnológica
+🛠 Configuração do Projeto
+1. Clone o repositório
+git clone https://github.com/seu-usuario/planner-telecom.git
+cd planner-telecom
+2. Configuração do Backend
 
+Copie o arquivo de exemplo:
 
----
+api/credentials.example.php -> api/credentials.php
 
-## ✨ Funcionalidades
+Configure:
 
-- 📋 Organização de tarefas e projetos  
-- 📊 Acompanhamento de status em tempo real  
-- 🧠 Planejamento estratégico simplificado  
-- 📱 Interface responsiva  
-- ⚡ Foco em performance e usabilidade  
-- 🔒 Controle interno e seguro  
+Host
+Usuário
+Senha
+Banco de dados
+3. Configuração do Frontend
+src/js/config.example.js -> src/js/config.js
 
----
+Parâmetros disponíveis:
 
-## 🛠 Tecnologias
+apiBaseUrl
+defaultWebhookUrl
+ctoDataBase
+authUsers
+🔒 Segurança
+❌ Não versionar:
+api/credentials.php
+src/js/config.js
+🔁 Caso webhook vaze:
+Gere um novo imediatamente
+▶️ Execução
 
-Este projeto foi desenvolvido utilizando:
+Utilize um servidor local:
 
-- 🧱 **HTML5**  
-- 🎨 **CSS3**  
-- ⚙️ **JavaScript**  
-- 🐘 **PHP**  
-- 🗄️ **MySQL** (Banco de dados)  
-- 📊 **SQL**  
+XAMPP
+WAMP
+Laragon
 
----
+Acesse no navegador:
 
-## 🧩 Problema resolvido
+http://localhost/planner-telecom
+📸 Demonstração
+<p align="center"> <img src="https://image2url.com/r2/default/images/1774382327696-2392d1ac-b5c8-4ac7-8d53-375790f22c19.png" width="850px"/> </p>
+🧠 Aprendizados
 
-Antes do BurrinhoPlanner:
+Durante o desenvolvimento do Planner Telecom, foram consolidadas habilidades em:
 
-- Dependência de ferramenta instável  
-- Alto custo operacional  
-- Falta de controle eficiente dos projetos  
+Desenvolvimento fullstack
+Estruturação de sistemas reais
+Resolução de problemas de negócio
+Arquitetura de aplicações simples e eficientes
+Construção de soluções com impacto direto
+🤝 Considerações Finais
 
-Depois do BurrinhoPlanner:
+O Planner Telecom cumpriu seu propósito ao entregar uma solução funcional, confiável e com impacto direto no ambiente corporativo.
 
-- Sistema próprio e confiável  
-- Redução significativa de custos  
-- Maior organização e produtividade do setor  
+Hoje, permanece como:
 
----
+📂 Projeto de portfólio
+🧠 Base de aprendizado
+🚀 Prova de capacidade de entrega
+👨‍💻 Autor
 
-## 🌐 Impacto
+Davy Andrade
 
-O BurrinhoPlanner trouxe uma melhoria direta na operação do setor de projetos da **IBI Telecom**, proporcionando:
-
-- Mais autonomia tecnológica  
-- Processos mais organizados  
-- Decisões mais rápidas e assertivas  
-
----
-
-## Configuração e segurança (deploy)
-
-- **API PHP:** copie `api/credentials.example.php` para `credentials.php` e configure o MySQL (ver `HOSTGATOR.md`).
-- **Front-end:** copie `src/js/config.example.js` para `src/js/config.js` se precisar de `apiBaseUrl`, webhook padrão (`defaultWebhookUrl`), pasta dos JSON de CTO (`ctoDataBase`) ou login (`authUsers`).
-- **Segredos:** não commitar `src/js/config.js` (webhooks) nem `api/credentials.php` (MySQL).
-- **Webhook Google Chat:** se já vazou, gere outro.
-
----
-
-## ▶ Como executar
-
-```bash
-# Clone o repositório
-git clone https://github.com/seu-usuario/burrinhoplanner.git
-
-# Acesse a pasta
-cd burrinhoplanner
-
-# Configure o banco de dados MySQL
-
-# Execute o projeto em um servidor local (ex: XAMPP, WAMP, Laragon)
+Engenharia de Software
+Desenvolvedor focado em evolução contínua
+Backend | Sistemas | Soluções reais
