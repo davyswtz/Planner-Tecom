@@ -1240,6 +1240,39 @@ const WebhookService = {
     return mention2 || name;
   },
 
+  _normalizeRompimentoTipo(value = '') {
+    const raw = String(value || '').trim().toLowerCase();
+    if (raw === 'ramal') return 'Ramal';
+    if (raw === 'anel') return 'Anel';
+    if (raw === 'cto') return 'CTO';
+    if (raw === 'setor') return 'Setor';
+    if (raw === 'backbone') return 'Backbone';
+    return 'CTO';
+  },
+
+  _getRompimentoTipoFromTask(task) {
+    if (task?.tipoRompimento) return this._normalizeRompimentoTipo(task.tipoRompimento);
+    const match = String(task?.descricao || '').match(/Tipo:\s*(Backbone|Ramal|Anel|CTO|Setor)/i);
+    return this._normalizeRompimentoTipo(match ? match[1] : '');
+  },
+
+  _formatRompimentoElementos(raw = '') {
+    const text = String(raw || '').trim();
+    if (!text) return 'Não informado';
+    const codeLike = /^[A-Z]{0,4}\d+[A-Z0-9-]*$/i;
+    const splitExplicit = text
+      .split(/\s*(?:\||,|;|\/|\n|\r|\be\b)\s*/i)
+      .map(part => part.trim())
+      .filter(Boolean);
+    if (splitExplicit.length > 1) return splitExplicit.join(' | ');
+
+    const spaceParts = text.split(/\s+/).map(part => part.trim()).filter(Boolean);
+    if (spaceParts.length > 1 && spaceParts.every(part => codeLike.test(part))) {
+      return spaceParts.join(' | ');
+    }
+    return text;
+  },
+
   /** Cada linha não vazia em negrito (*sintaxe Google Chat*); linhas vazias mantidas. */
   _rompimentoBoldLines(lines) {
     return lines
@@ -2148,18 +2181,97 @@ const WebhookService = {
     }
 
     if (opCat === 'rompimentos' && event === 'andamento') {
-      const cto = String(task.setor || '').trim() || 'Não informado';
+      const cto = this._formatRompimentoElementos(task.setor);
       const tecnico = this._resolveTechnicianDisplay(task);
       const coordsRaw = String(task.coordenadas || '').trim();
       const endereco = String(task.localizacaoTexto || '').trim() || 'Não informado';
       const clientesAfetados = String(task.clientesAfetados || '').trim();
       const taskId = String(task.taskCode || `ROM-${String(task.id || '').padStart(4, '0')}`).trim();
+      const tipoRompimento = this._getRompimentoTipoFromTask(task);
 
       const coordsClickable = coordsRaw ? this._coordsClickableForChat(coordsRaw) : '';
 
+      if (tipoRompimento === 'Ramal') {
+        return {
+          text: [
+            `*🚨 ROMPIMENTO RAMAL - ${this._chatSafe(cto)}*`,
+            '',
+            `🗺️ Endereço: ${this._chatSafe(endereco)}`,
+            `📍 Localização inicial: ${this._chatSafe(coordsClickable)}`,
+            `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
+            '',
+            '',
+            `Clientes afetados: ${this._chatSafe(clientesAfetados)}`,
+            `🆔: ${this._chatSafe(taskId)}`,
+          ].join('\n'),
+        };
+      }
+
+      if (tipoRompimento === 'Backbone') {
+        return {
+          text: [
+            `*🔴 ALERTA: ROMPIMENTO BACKBONE - ${this._chatSafe(cto)}*`,
+            '',
+            `🗺️ Trecho: ${this._chatSafe(endereco)}`,
+            `📍 Localização inicial: ${this._chatSafe(coordsClickable)}`,
+            `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
+            '',
+            `Clientes afetados: ${this._chatSafe(clientesAfetados)}`,
+            `🆔: ${this._chatSafe(taskId)}`,
+          ].join('\n'),
+        };
+      }
+
+      if (tipoRompimento === 'Anel') {
+        return {
+          text: [
+            `*🆘 EMERGÊNCIA: ROMPIMENTO ANEL - ${this._chatSafe(cto)}*`,
+            '',
+            `🗺️ Trecho: ${this._chatSafe(endereco)}`,
+            `📍 Localização inicial: ${this._chatSafe(coordsClickable)}`,
+            `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
+            '',
+            `Clientes afetados: ${this._chatSafe(clientesAfetados)}`,
+            `🆔: ${this._chatSafe(taskId)}`,
+          ].join('\n'),
+        };
+      }
+
+      if (tipoRompimento === 'CTO') {
+        return {
+          text: [
+            `*⚠️ ROMPIMENTO CTO - ${this._chatSafe(cto)}*`,
+            '',
+            `🗺️Endereço: ${this._chatSafe(endereco)}`,
+            '',
+            `📍 Localização inicial: ${this._chatSafe(coordsRaw || 'Não informada')}`,
+            `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
+            '',
+            `Clientes afetados: ${this._chatSafe(clientesAfetados)}`,
+            `🆔: ${this._chatSafe(taskId)}`,
+          ].join('\n'),
+        };
+      }
+
+      if (tipoRompimento === 'Setor') {
+        return {
+          text: [
+            `*⚠️ ROMPIMENTO SETOR - ${this._chatSafe(cto)}*`,
+            '',
+            `🗺️Endereço: ${this._chatSafe(endereco)}`,
+            '',
+            `📍 Localização inicial: ${this._chatSafe(coordsRaw || 'Não informada')}`,
+            `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
+            '',
+            `Clientes afetados: ${this._chatSafe(clientesAfetados)}`,
+            `🆔: ${this._chatSafe(taskId)}`,
+          ].join('\n'),
+        };
+      }
+
       return {
         text: [
-          `*⚠️ ROMPIMENTO CTO - ${this._chatSafe(cto)}*`,
+          `*⚠️ ROMPIMENTO ${this._chatSafe(tipoRompimento.toUpperCase())} - ${this._chatSafe(cto)}*`,
           '',
           `🗺️Endereço: ${this._chatSafe(endereco)}`,
           '',
@@ -2173,7 +2285,7 @@ const WebhookService = {
     }
 
     if (opCat === 'rompimentos' && (event === 'concluida' || event === 'finalizada')) {
-      const setor = task.setor || 'Não informado';
+      const setor = this._formatRompimentoElementos(task.setor);
       const regiao = task.regiao || 'Não informada';
       const tecnico = this._resolveTechnicianDisplay(task, { mention: false });
       const assinatura = String(task?.assinadaPor || '').trim();
@@ -6798,6 +6910,21 @@ const Controllers = {
     _isRompimentoCategory(category = Store.currentOpCategory) {
       return category === 'rompimentos';
     },
+    _normalizeRompimentoTipo(value = '') {
+      const raw = String(value || '').trim().toLowerCase();
+      if (raw === 'ramal') return 'Ramal';
+      if (raw === 'anel') return 'Anel';
+      if (raw === 'cto') return 'CTO';
+      if (raw === 'setor') return 'Setor';
+      if (raw === 'backbone') return 'Backbone';
+      return 'CTO';
+    },
+    _getRompimentoTipoFromTask(task) {
+      const direct = this._normalizeRompimentoTipo(task?.tipoRompimento || '');
+      if (task?.tipoRompimento) return direct;
+      const match = String(task?.descricao || '').match(/Tipo:\s*(Backbone|Ramal|Anel|CTO|Setor)/i);
+      return this._normalizeRompimentoTipo(match ? match[1] : '');
+    },
     _isTrocaPosteCategory(category = Store.currentOpCategory) {
       return category === 'troca-poste';
     },
@@ -6940,6 +7067,7 @@ const Controllers = {
       const regiao = document.getElementById('opRegiaoGroup');
       const coordsRow = document.getElementById('opRompimentoCoordsRow');
       const setorGroup = document.getElementById('opRompimentoSetorGroup');
+      const tipoGroup = document.getElementById('opRompimentoTipoGroup');
       const atdChild = document.getElementById('opAtdChildOnlyWrap');
       const mainRow = document.getElementById('opMainRow');
       const responsavel = document.getElementById('opResponsavelGroup');
@@ -6951,8 +7079,9 @@ const Controllers = {
       else body.appendChild(priorityRow);
       // Garante que o bloco de coordenadas volte para o lugar padrão (logo após o grupo de CTO do rompimento)
       if (coordsRow && body.contains(coordsRow) && setorGroup && setorGroup.parentNode === body) {
-        if (coordsRow.previousElementSibling !== setorGroup) {
-          setorGroup.after(coordsRow);
+        const anchor = tipoGroup && tipoGroup.parentNode === body ? tipoGroup : setorGroup;
+        if (coordsRow.previousElementSibling !== anchor) {
+          anchor.after(coordsRow);
         }
       }
       if (mainRow && responsavel && prazoGroup) {
@@ -7062,14 +7191,14 @@ const Controllers = {
       }
 
       this._toggleGroup('opTituloGroup', !isRompimento && !isTrocaPoste && !isCemig && !isQdp);
-      // Rompimento: permitir definir data de vencimento (antes era fixo em "hoje")
-      this._toggleGroup('opPrazoGroup', !isOtimRede);
+      this._toggleGroup('opPrazoGroup', !isOtimRede && !isRompimento);
       this._toggleGroup('opPriorityRegionRow', !isRompimento && !isOtimRede && !isCemig && !isQdp);
 
       this._toggleGroup('opParentConfig', isAtendimento);
       this._toggleGroup('opRompimentoCoordsRow', isRompimento || isTrocaPoste || isQdp);
       this._toggleGroup('opRompimentoExtraRow', isRompimento);
       this._toggleGroup('opRompimentoSetorGroup', isRompimento);
+      this._toggleGroup('opRompimentoTipoGroup', isRompimento);
       this._toggleGroup('opQdpWrap', isQdp);
 
       this._syncCoordsBlockUi(isRompimento, isTrocaPoste);
@@ -7277,7 +7406,11 @@ const Controllers = {
 
       [responsavelGroup, prazoGroup, regiaoGroup].forEach(group => {
         if (!group) return;
-        if (isRompimento || isTrocaPoste) {
+        if (isRompimento) {
+          group.style.display = group === prazoGroup ? 'none' : '';
+          return;
+        }
+        if (isTrocaPoste) {
           group.style.display = '';
           return;
         }
@@ -7684,6 +7817,8 @@ const Controllers = {
       if (cemigGeoH) cemigGeoH.textContent = 'Opcional. Informe lat, long — o endereço é buscado automaticamente.';
       const setorCtoInput = document.getElementById('op-setor-cto');
       if (setorCtoInput) setorCtoInput.value = '';
+      const tipoRompimentoSelect = document.getElementById('op-tipo-rompimento');
+      if (tipoRompimentoSelect) tipoRompimentoSelect.value = 'CTO';
       const setorHint = document.getElementById('op-setor-cto-hint');
       if (setorHint) setorHint.textContent = '';
       const parentHidden = document.getElementById('op-parent-task-id');
@@ -7745,6 +7880,7 @@ const Controllers = {
       const cemigGeoAddress = document.getElementById('op-cemig-address')?.value.trim() || '';
       let clientesAfetadosRaw = document.getElementById('op-clientes-afetados')?.value.trim() || '';
       let setorCto = document.getElementById('op-setor-cto')?.value.trim() || '';
+      const tipoRompimento = this._normalizeRompimentoTipo(document.getElementById('op-tipo-rompimento')?.value || '');
       const isRompimento = this._isRompimentoCategory(category);
       const isTrocaPoste = this._isTrocaPosteCategory(category);
       const isOtimRede = category === 'otimizacao-rede';
@@ -7810,7 +7946,7 @@ const Controllers = {
         finalTitulo = titulo;
       }
       const finalPrazo = isRompimento
-        ? (prazo || existing?.prazo || Utils.todayIso())
+        ? (existing?.prazo || Utils.todayIso())
         : isOtimRede
           ? (prazo || Utils.todayIso())
           : isCemig
@@ -7821,7 +7957,7 @@ const Controllers = {
       const prioPick = prioridadeEl ? prioridadeEl.value : '';
       const finalPrioridade = isRompimento ? 'Alta' : (isOtimRede || isCemig ? 'Média' : prioPick);
       const finalDescricaoMeta = isRompimento
-        ? `Coordenadas: ${coordsRaw} | Local: ${autoAddress}`
+        ? `Tipo: ${tipoRompimento} | Coordenadas: ${coordsRaw} | Local: ${autoAddress}`
         : (isTrocaPoste ? '' : '');
       const setorField = isRompimento
         ? setorCto
@@ -7887,6 +8023,7 @@ const Controllers = {
         subProcesso: finalSubProcesso,
         dataInstalacao: finalDataInstalacao,
         ordemServico: finalOrdemServico,
+        tipoRompimento: isRompimento ? tipoRompimento : '',
         clientesAfetados: isRompimento ? clientesAfetadosRaw : '',
         coordenadas: (isRompimento || isTrocaPoste || isQdp) ? coordsRaw : (isOtimRede ? otimGeoCoords : (isCemig ? cemigGeoCoords : '')),
         localizacaoTexto: (isRompimento || isTrocaPoste || isQdp) ? autoAddress : (isOtimRede ? otimGeoAddress : (isCemig ? cemigGeoAddress : '')),
@@ -8042,6 +8179,8 @@ const Controllers = {
       if (hidden) hidden.value = task.parentTaskId ? String(task.parentTaskId) : '';
       const setorCtoInput = document.getElementById('op-setor-cto');
       if (setorCtoInput) setorCtoInput.value = (task.setor || '').toUpperCase();
+      const tipoRompimentoSelect = document.getElementById('op-tipo-rompimento');
+      if (tipoRompimentoSelect) tipoRompimentoSelect.value = this._getRompimentoTipoFromTask(task);
       const setorHintEdit = document.getElementById('op-setor-cto-hint');
       if (setorHintEdit) setorHintEdit.textContent = '';
       const coordsInput = document.getElementById('op-coords');

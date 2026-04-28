@@ -1229,3 +1229,76 @@ body.planner-dash-mode .sidebar.collapsed .nav-badge {
     grid-column: auto;
   }
 }
+
+/* Responsividade principal: o planner carrega depois do main.css, então reforça os pontos críticos. */
+@media (max-width: 960px) {
+  body.planner-dash-mode .sidebar,
+  body.planner-dash-mode .sidebar.collapsed {
+    width: min(304px, 88vw) !important;
+    min-width: 0 !important;
+  }
+
+  body.planner-dash-mode .sidebar.collapsed .nav-item {
+    justify-content: flex-start;
+    padding: 10px 12px;
+  }
+
+  body.planner-dash-mode .sidebar.collapsed .nav-label,
+  body.planner-dash-mode .sidebar.collapsed .nav-badge,
+  body.planner-dash-mode .sidebar.collapsed .planner-sidebar-meta,
+  body.planner-dash-mode .sidebar.collapsed .planner-logo-name {
+    opacity: 1;
+    width: auto;
+    overflow: visible;
+  }
+
+  body.planner-dash-mode .planner-menu-btn.mobile-nav-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 768px) {
+  body.planner-dash-mode #page-dashboard.planner-page {
+    width: 100%;
+    margin-inline: 0;
+  }
+
+  .planner-dash {
+    --pd-pad: 12px;
+    padding-inline: var(--pd-pad);
+  }
+
+  .planner-dash-toolbar {
+    align-items: stretch;
+    margin-bottom: 12px;
+  }
+
+  .planner-dash-search {
+    flex-basis: 100%;
+    min-width: 0;
+    max-width: none;
+    height: 42px;
+  }
+
+  .planner-kpis,
+  .planner-mid,
+  .planner-bottom {
+    gap: 10px;
+  }
+
+  .planner-kpi,
+  .planner-card {
+    padding: 14px;
+  }
+}
+
+@media (max-width: 420px) {
+  .planner-kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .planner-kpi-value {
+    font-size: 24px;
+  }
+}

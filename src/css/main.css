@@ -3822,6 +3822,10 @@ input[type=number]::-webkit-inner-spin-button { margin: 0; }
   display: none !important;
 }
 
+#opTaskModal.rompimento-mode #opPrazoGroup {
+  display: none !important;
+}
+
 /* FIX: em Troca de poste o nome/título é gerado automaticamente */
 #opTaskModal.troca-poste-mode #opTituloGroup {
   display: none !important;
@@ -4393,6 +4397,416 @@ input[type=date]::-webkit-calendar-picker-indicator { filter: invert(1) opacity(
   .filter-btn {
     min-height: 40px;
     padding: 8px 12px;
+  }
+}
+
+/* Responsividade principal: shell, navegação e áreas roláveis */
+@media (max-width: 960px) {
+  .app {
+    min-height: 100dvh;
+    height: 100dvh;
+  }
+
+  .sidebar {
+    width: min(304px, 88vw) !important;
+    min-width: 0 !important;
+    max-width: 88vw;
+  }
+
+  .sidebar-backdrop {
+    background: rgba(0, 0, 0, 0.54);
+  }
+
+  .main {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .content {
+    overflow: hidden;
+  }
+
+  .page.active {
+    overscroll-behavior: contain;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+@media (max-width: 768px) {
+  .topbar {
+    align-items: flex-start;
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .topbar-left {
+    flex: 1 1 min(100%, 320px);
+    width: auto;
+  }
+
+  .topbar-titles {
+    max-width: 100%;
+  }
+
+  .topbar-actions {
+    flex: 1 1 100%;
+    width: 100%;
+    justify-content: flex-start;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 2px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .topbar-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .topbar-actions > * {
+    flex: 0 0 auto;
+  }
+
+  .planner-status-pill,
+  .date-chip {
+    min-height: 34px;
+  }
+
+  .content {
+    gap: 12px;
+    min-height: 0;
+  }
+
+  .page.active {
+    gap: 12px;
+  }
+}
+
+@media (max-width: 480px) {
+  .topbar {
+    gap: 8px;
+  }
+
+  .mobile-nav-btn,
+  .icon-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .page-title {
+    font-size: 15px;
+  }
+
+  .breadcrumb {
+    max-width: 100%;
+  }
+}
+
+/* Responsividade principal: páginas operacionais, cards e Kanban */
+@media (max-width: 768px) {
+  .toolbar,
+  .planner-dash-toolbar,
+  .atd-list-toolbar,
+  #page-troca-etiqueta .te2__topbar {
+    align-items: stretch;
+  }
+
+  .toolbar-left,
+  .toolbar-right,
+  .atd-toolbar-right,
+  .app-toolbar-actions {
+    width: 100%;
+  }
+
+  .toolbar-left,
+  .atd-toolbar-right {
+    align-items: stretch;
+  }
+
+  .search-box {
+    flex-basis: 100%;
+    height: 42px;
+  }
+
+  .filter-group {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #page-tarefas .op-content-panel {
+    padding: 10px;
+    gap: 10px;
+  }
+
+  #page-tarefas .op-kanban-wrap {
+    max-height: none;
+    overflow-y: visible;
+    overflow-x: auto;
+    padding-right: 0;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .kanban-board:not(.kanban-board--cemig) {
+    gap: 10px;
+  }
+
+  #page-tarefas .kanban-board.kanban-board--otim-scroll .kanban-cards {
+    overflow-y: visible;
+    max-height: none;
+  }
+
+  .kanban-col-header {
+    min-height: 48px;
+    padding: 12px;
+  }
+
+  .kanban-card {
+    padding: 13px 14px;
+  }
+
+  .kanban-card-meta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .kanban-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .kanban-col-add,
+  .status-action-btn,
+  .sm-btn {
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 480px) {
+  .tasks-tabs {
+    margin-inline: -2px;
+  }
+
+  .tasks-tab {
+    min-width: max-content;
+    padding-inline: 12px;
+  }
+
+  .stat-card {
+    min-height: auto;
+  }
+
+  #page-dashboard .stat-card,
+  #page-tarefas .stat-card {
+    min-height: 100px;
+  }
+
+  .stat-row {
+    align-items: center;
+  }
+
+  .stat-icon {
+    width: 34px;
+    height: 34px;
+  }
+}
+
+/* Responsividade principal: páginas específicas com grids próprios */
+@media (max-width: 768px) {
+  #page-correcao-atenuacao .atn2-page {
+    height: auto;
+    min-height: 100%;
+    padding: 10px;
+  }
+
+  #page-correcao-atenuacao .atn2-topbar {
+    height: auto;
+    min-height: 44px;
+    flex-wrap: wrap;
+    padding-block: 8px;
+  }
+
+  #page-correcao-atenuacao .atn2-layout-3,
+  #page-correcao-atenuacao .atn2-metrics,
+  #page-correcao-atenuacao .atn2-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  #page-troca-etiqueta .te2__topbar {
+    flex-direction: column;
+  }
+
+  #page-troca-etiqueta .te2__topbar-right,
+  #page-troca-etiqueta .te2__filters,
+  #page-troca-etiqueta .te2__actions {
+    width: 100%;
+  }
+
+  #page-troca-etiqueta .te2__metrics,
+  #page-troca-etiqueta .te2__grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .atd-card-dates,
+  .atd-book-foot {
+    grid-template-columns: 1fr;
+  }
+
+  .atd-card-dates {
+    gap: 4px;
+  }
+}
+
+@media (max-width: 480px) {
+  .atd-card-toprow,
+  .atd-card-mid,
+  .atd-kanban-card-foot,
+  .atd-book-foot {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .atd-card-taskid {
+    margin-left: 0;
+    width: fit-content;
+  }
+
+  .atd-book-card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .atd-book-inner {
+    max-width: none;
+  }
+
+  #page-correcao-atenuacao .atn2-actions,
+  #page-correcao-atenuacao .atn2-panel-actions,
+  #page-correcao-atenuacao .atn2-filters,
+  #page-troca-etiqueta .te2__filter-group,
+  #page-troca-etiqueta .te2__topbar-right {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  #page-correcao-atenuacao .atn2-primary,
+  #page-correcao-atenuacao .atn2-refresh,
+  #page-correcao-atenuacao .atn2-filter-btn,
+  #page-troca-etiqueta .te2__chip,
+  #page-troca-etiqueta .te2__primary {
+    min-height: 42px;
+    justify-content: center;
+    width: 100%;
+  }
+
+  #page-correcao-atenuacao .atn2-metric,
+  #page-troca-etiqueta .te2__metric {
+    min-height: 86px;
+  }
+
+  .app-placeholder-page .page-placeholder-panel {
+    max-width: none;
+  }
+
+  .app-placeholder-page .page-placeholder-body {
+    padding: 18px 16px 22px;
+  }
+}
+
+/* Responsividade principal: modais e formulários em telas de toque */
+@media (max-width: 768px) {
+  .modal-overlay {
+    padding: 12px;
+    align-items: center;
+  }
+
+  .modal {
+    width: min(100%, 720px);
+    max-height: calc(100dvh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  }
+
+  .modal-head,
+  .modal-footer {
+    flex-shrink: 0;
+  }
+
+  .modal-body {
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .modal-head {
+    gap: 10px;
+  }
+
+  .form-row,
+  .form-grid,
+  .op-form-grid,
+  .wh-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .modal-footer {
+    gap: 10px;
+  }
+
+  .modal-footer .primary-btn,
+  .modal-footer .ghost-btn,
+  .modal-footer button {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 480px) {
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    max-height: min(92dvh, 100%);
+  }
+
+  .modal-head,
+  .modal-body,
+  .modal-footer {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .modal-title {
+    font-size: 14px;
+    line-height: 1.3;
+  }
+
+  #opTaskModal.modal-overlay > .modal {
+    max-height: min(84dvh, calc(100dvh - env(safe-area-inset-top, 0px) - 18px));
+  }
+
+  #page-correcao-atenuacao .atn2-modal {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  #page-correcao-atenuacao .atn2-modal-panel {
+    width: 100%;
+    max-width: none;
+    max-height: min(90dvh, 100%);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
+
+  #page-correcao-atenuacao .atn2-modal-foot,
+  #page-correcao-atenuacao .atn2-modal-foot-end {
+    align-items: stretch;
+    flex-direction: column-reverse;
   }
 }
 

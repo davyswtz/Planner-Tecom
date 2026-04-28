@@ -517,6 +517,7 @@ html:has(body.auth-locked) {
 @media (max-width: 900px) {
   #loginScreen .page {
     grid-template-columns: 1fr;
+    min-height: 100dvh;
   }
 
   #loginScreen .left {
@@ -524,6 +525,53 @@ html:has(body.auth-locked) {
   }
 
   #loginScreen .right {
-    padding: 2.5rem 2rem;
+    min-height: 100dvh;
+    padding: max(2rem, env(safe-area-inset-top, 0px)) 2rem max(5rem, env(safe-area-inset-bottom, 0px));
+    justify-content: center;
+  }
+}
+
+@media (max-width: 520px) {
+  #loginScreen .right {
+    padding-inline: 1.25rem;
+  }
+
+  #loginScreen .form-title {
+    font-size: clamp(3rem, 18vw, 5.5rem);
+    line-height: 0.9;
+  }
+
+  #loginScreen .form-sub {
+    font-size: 12px;
+  }
+
+  #loginScreen .input-wrap input {
+    font-size: 16px;
+  }
+
+  #loginScreen .row-opts {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  #loginScreen .status-pill {
+    left: 1rem;
+    right: 1rem;
+    bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+    transform: none;
+    max-width: calc(100vw - 2rem);
+    justify-content: center;
+    white-space: normal;
+    text-align: center;
+  }
+
+  #loginScreen .status-txt {
+    line-height: 1.35;
+  }
+
+  #loginScreen .version {
+    right: 1.25rem;
+    bottom: 4.25rem;
   }
 }
