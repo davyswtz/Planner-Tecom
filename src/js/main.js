@@ -417,6 +417,13 @@ const Store = (() => {
     writeLocal(STORAGE_KEYS.note, plannerConfig.note || '');
     writeLocal(STORAGE_KEYS.activity, activityEvents);
   };
+  const stableStringify = (value) => {
+    if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+    if (value && typeof value === 'object') {
+      return `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
+    }
+    return JSON.stringify(value);
+  };
   const syncUpTask = (task) => { ApiService.saveTask(task); };
   const syncUpOpTask = (task) => {
     if (!ApiService.enabled()) return;
@@ -540,8 +547,11 @@ const Store = (() => {
           tasks.push(inc);
           changed++;
         } else {
-          Object.assign(tasks[i], inc);
-          changed++;
+          const next = { ...tasks[i], ...inc };
+          if (stableStringify(tasks[i]) !== stableStringify(next)) {
+            Object.assign(tasks[i], inc);
+            changed++;
+          }
         }
       }
       if (changed) {
@@ -601,8 +611,11 @@ const Store = (() => {
           changed++;
         } else {
           mergeLocalOpTaskIntoIncomingPatch(opTasks[i], inc);
-          Object.assign(opTasks[i], inc);
-          changed++;
+          const next = { ...opTasks[i], ...inc };
+          if (stableStringify(opTasks[i]) !== stableStringify(next)) {
+            Object.assign(opTasks[i], inc);
+            changed++;
+          }
         }
       }
       if (changed) {
@@ -623,8 +636,12 @@ const Store = (() => {
           byId.set(id, inc);
           changed++;
         } else {
-          Object.assign(byId.get(id), inc);
-          changed++;
+          const cur = byId.get(id);
+          const next = { ...cur, ...inc };
+          if (stableStringify(cur) !== stableStringify(next)) {
+            Object.assign(cur, inc);
+            changed++;
+          }
         }
       }
       if (changed) {
@@ -9498,6 +9515,43 @@ async function initApp() {
     const d = Number(payload.deleted) || 0;
     return `${t}|${o}|${g}|${n}|${a}|${d}`;
   };
+  const appDataSig = () => {
+    const compactTasks = Store.getTasks().map(t => [
+      Number(t?.id) || 0,
+      String(t?.status || ''),
+      String(t?.prazo || ''),
+      String(t?.updated_at || t?.updatedAt || ''),
+    ]);
+    const compactOp = Store.getOpTasks().map(t => [
+      Number(t?.id) || 0,
+      String(t?.taskCode || ''),
+      String(t?.categoria || ''),
+      String(t?.status || ''),
+      String(t?.regiao || ''),
+      String(t?.responsavel || ''),
+      String(t?.prazo || ''),
+      String(t?.coordenadas || ''),
+      String(t?.updated_at || t?.updatedAt || ''),
+      Array.isArray(t?.historico) ? t.historico.length : 0,
+    ]);
+    const compactActivity = Store.getActivityEvents().map(e => [
+      Number(e?.id) || 0,
+      String(e?.eventType || e?.event_type || ''),
+      String(e?.message || ''),
+      String(e?.updated_at || e?.updatedAt || e?.createdAt || ''),
+    ]);
+    return JSON.stringify({ compactTasks, compactOp, compactActivity });
+  };
+  const bootstrapAndRenderIfChanged = async (timeoutMs) => {
+    const before = appDataSig();
+    const updated = await bootstrapWithTimeout(timeoutMs);
+    if (!updated) return false;
+    void seedRemoteSigIfPossible();
+    if (appDataSig() === before) return false;
+    UI.renderDashboard();
+    UI.refreshOperationalUi();
+    return true;
+  };
   let syncInFlight = false;
   const quickSyncTick = async () => {
     if (!ApiService.enabled()) return;
@@ -9508,12 +9562,8 @@ async function initApp() {
       const ch = await ApiService.getChanges(lastSince);
       if (!ch || ch.ok !== true) {
         // Se /changes falhar (cache/proxy/endpoint ausente), faz bootstrap direto com timeout maior.
-        const updated = await bootstrapWithTimeout(15000);
-        if (!updated) return;
-        void seedRemoteSigIfPossible();
-        UI.renderDashboard();
-        UI.refreshOperationalUi();
-              return;
+        await bootstrapAndRenderIfChanged(15000);
+        return;
       }
 
       // Usa o maior updated_at das tabelas (mais confiável que serverTime para não perder updates no mesmo segundo).
@@ -9551,11 +9601,8 @@ async function initApp() {
       // Se o servidor acusar mudanca mas nao vier diff (ex.: config),
       // faz bootstrap completo como fallback.
       if (sigChanged && !changedTasks.length && !changedOp.length && !changedDeleted.length) {
-        const updated = await bootstrapWithTimeout(15000);
-        if (!updated) return;
-        UI.renderDashboard();
-        UI.refreshOperationalUi();
-            }
+        await bootstrapAndRenderIfChanged(15000);
+      }
     } finally {
       syncInFlight = false;
     }
@@ -9575,12 +9622,9 @@ async function initApp() {
   // Produção (multiusuário): polling inteligente a cada 15s (mínimo possível sem sobrecarregar HostGator).
   setInterval(() => { void quickSyncTick(); }, 15000);
   setInterval(async () => {
-    const updated = await bootstrapWithTimeout(6000);
-    if (!updated) return;
-    void seedRemoteSigIfPossible();
-    UI.renderDashboard();
-    UI.refreshOperationalUi();
-    }, 25000);
+    if (syncInFlight) return;
+    await bootstrapAndRenderIfChanged(8000);
+  }, 120000);
 
   void seedRemoteSigIfPossible();
 

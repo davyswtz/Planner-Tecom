@@ -108,6 +108,7 @@
     _leafletHeatZoomHandler: null,
     _leafletModalHeatZoomHandler: null,
     _heatSelectedRegion: '',
+    _heatMapSignature: '',
     _lastHeatRows: [],
     _lastHeatPoints: [],
 
@@ -574,7 +575,8 @@
           iconAnchor: [17, 10],
         });
         const labelMarker = L.marker([cluster.lat, cluster.lng], { icon: label, interactive: false }).addTo(map);
-        const popup = `<strong>${escapeHtml(cluster.regiao)}</strong><br>${cluster.count} rompimento(s) com coordenada<br>${cluster.abertas} abertos · ${cluster.atrasadas} atrasados<br><small>Zoom ${zoom}: agrupamento ${clusters.length === points.length ? 'por ponto' : 'por proximidade'}</small>`;
+        const coordText = `${cluster.lat.toFixed(6)}, ${cluster.lng.toFixed(6)}`;
+        const popup = `<strong>${escapeHtml(cluster.regiao)}</strong><br>${cluster.count} rompimento(s) com coordenada<br>${cluster.abertas} abertos · ${cluster.atrasadas} atrasados<br><span>Coordenada: <code>${escapeHtml(coordText)}</code></span><br><small>Zoom ${zoom}: agrupamento ${clusters.length === points.length ? 'por ponto' : 'por proximidade'}</small>`;
         circle.bindPopup(popup);
         marker.bindPopup(popup);
         this[overlaysKey].push(circle, marker, labelMarker);
@@ -740,6 +742,34 @@
         `;
       }).join('');
 
+      const heatSignature = JSON.stringify({
+        selectedRegion,
+        rows: rows.map(r => [
+          r.nome,
+          r.total,
+          r.abertas,
+          r.atrasadas,
+          r.rompimentos,
+          r.rompAbertos,
+          r.rompAtrasados,
+          r.rompConcluidos,
+        ]),
+        points: heatPointsForMap.map(p => [
+          Number(p.lat).toFixed(6),
+          Number(p.lng).toFixed(6),
+          p.regiao,
+          p.aberta ? 1 : 0,
+          p.atrasada ? 1 : 0,
+        ]),
+      });
+
+      if (this._heatMapSignature === heatSignature && document.getElementById('plannerLeafletHeatMap')) {
+        this._lastHeatRows = rows;
+        this._lastHeatPoints = heatPointsForMap;
+        return;
+      }
+      this._heatMapSignature = heatSignature;
+
       root.innerHTML = `
         <div class="planner-heat-geo" role="img" aria-label="Mapa visual de calor por região">
           <div class="planner-leaflet-heat-map" id="plannerLeafletHeatMap" aria-label="Mapa gratuito com calor por região"></div>
@@ -756,16 +786,18 @@
     },
 
     _applyTeam() {
-      // Top técnicos por rompimentos na aba Finalizado (técnico atribuído em `responsavel`).
+      // Top técnicos por rompimentos na aba finalizada/finalizado.
+      // O campo "Técnico responsável" do modal de rompimento é salvo em `responsavel`.
       const allOp = (typeof Store !== 'undefined' && Store.getOpTasks) ? Store.getOpTasks() : [];
+      const finalStatus = new Set(['Finalizada', 'Finalizado']);
       const rompDone = allOp.filter(t =>
         String(t?.categoria || '').trim() === 'rompimentos' &&
-        String(t?.status || '').trim() === 'Finalizado',
+        finalStatus.has(String(t?.status || '').trim()),
       );
 
       const byTech = new Map(); // nome -> { count, regions: Map(region->count) }
       rompDone.forEach(t => {
-        const nome = String(t?.responsavel || '').trim();
+        const nome = String(t?.responsavel || t?.tecnico || '').trim();
         if (!nome) return;
         const reg = String(t?.regiao || '').trim() || '—';
         if (!byTech.has(nome)) byTech.set(nome, { count: 0, regions: new Map() });

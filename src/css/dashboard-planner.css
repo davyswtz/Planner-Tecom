@@ -695,6 +695,11 @@ body.planner-dash-mode .planner-dash-search {
   min-height: 0;
 }
 
+.planner-activity-card {
+  display: flex;
+  flex-direction: column;
+}
+
 .planner-card-title {
   font-family: var(--pl-font-ui);
   font-weight: 500;
@@ -888,7 +893,9 @@ body.planner-dash-mode .planner-dash-search {
 }
 
 .planner-activity-feed {
-  max-height: 300px;
+  flex: 1;
+  min-height: 0;
+  max-height: none;
   overflow-y: auto;
   padding-right: 4px;
 }
