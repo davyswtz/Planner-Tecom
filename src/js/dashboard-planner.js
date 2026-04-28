@@ -100,6 +100,16 @@
     _kpiAnimated: false,
     _kpiLateMode: false,
     _kpiLateModeKey: 'planner.dashboard.kpiLateMode.v1',
+    _leafletMap: null,
+    _leafletModalMap: null,
+    _leafletHeatOverlays: [],
+    _leafletModalHeatOverlays: [],
+    _leafletLoadPromise: null,
+    _leafletHeatZoomHandler: null,
+    _leafletModalHeatZoomHandler: null,
+    _heatSelectedRegion: '',
+    _lastHeatRows: [],
+    _lastHeatPoints: [],
 
     init() {
       try {
@@ -141,6 +151,30 @@
       document.getElementById('plannerSettingsBtn')?.addEventListener('click', () => {
         if (typeof UI !== 'undefined' && UI.navigateTo) UI.navigateTo('config');
       });
+
+      document.getElementById('plannerHeatClearRegionBtn')?.addEventListener('click', () => {
+        this._heatSelectedRegion = '';
+        this._kpiAnimated = false;
+        if (typeof UI !== 'undefined' && UI.renderDashboard) UI.renderDashboard();
+      });
+      document.getElementById('plannerHeatExpandBtn')?.addEventListener('click', () => this._openHeatMapModal());
+      document.getElementById('closeHeatMapModal')?.addEventListener('click', () => ModalService?.close?.('heatMapModal'));
+
+      if (!document.documentElement.dataset.plannerHeatMapBound) {
+        document.documentElement.dataset.plannerHeatMapBound = '1';
+        document.addEventListener('click', (e) => {
+          const cell = e.target?.closest?.('[data-planner-heat-region]');
+          if (!cell) return;
+          const region = String(cell.dataset.plannerHeatRegion || '').trim();
+          if (!region) return;
+          this._heatSelectedRegion = region;
+          this._kpiAnimated = false;
+          if (typeof UI !== 'undefined' && UI.renderDashboard) UI.renderDashboard();
+          if (typeof ToastService !== 'undefined' && ToastService?.show) {
+            ToastService.show(`Mapa filtrado por ${region}`, 'info');
+          }
+        });
+      }
 
       const sb = document.getElementById('plannerSidebarBuild');
       if (sb && window.APP_CONFIG && APP_CONFIG.appBuild) sb.textContent = String(APP_CONFIG.appBuild);
@@ -356,37 +390,351 @@
       }
     },
 
-    _applyRegions() {
-      const tasks = TaskService.getFilteredTasks();
-      const map = {};
-      tasks.forEach(t => {
-        const r = String(t.regiao || 'Outras').trim() || 'Outras';
-        map[r] = (map[r] || 0) + 1;
+    _getRegionCenters() {
+      const defaults = {
+        Goval: { lat: -18.8545, lng: -41.9555 },
+        'Vale do Aço': { lat: -19.4703, lng: -42.5476 },
+        Caratinga: { lat: -19.7897, lng: -42.1392 },
+        Backup: { lat: -19.9191, lng: -43.9386 },
+        Outras: { lat: -19.25, lng: -42.75 },
+      };
+      const custom = window.APP_CONFIG?.leafletRegionCenters || window.APP_CONFIG?.googleMapsRegionCenters;
+      if (!custom || typeof custom !== 'object') return defaults;
+      return { ...defaults, ...custom };
+    },
+
+    _loadLeaflet() {
+      if (window.L?.map) return Promise.resolve(window.L);
+      if (this._leafletLoadPromise) return this._leafletLoadPromise;
+      this._leafletLoadPromise = new Promise((resolve, reject) => {
+        if (!document.querySelector('link[data-planner-leaflet-css]')) {
+          const link = document.createElement('link');
+          link.rel = 'stylesheet';
+          link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+          link.dataset.plannerLeafletCss = '1';
+          document.head.appendChild(link);
+        }
+        const script = document.createElement('script');
+        script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+        script.async = true;
+        script.onload = () => resolve(window.L);
+        script.onerror = () => {
+          this._leafletLoadPromise = null;
+          reject(new Error('leaflet_load_failed'));
+        };
+        document.head.appendChild(script);
       });
-      const LIMIT = 3;
-      let rows = Object.keys(map).length
-        ? Object.entries(map)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, LIMIT)
-          .map(([nome, tarefas]) => ({ nome, tarefas }))
-        : DADOS.regioes;
-      const max = Math.max(1, ...rows.map(r => r.tarefas));
-      rows.forEach((row, i) => {
-        const lbl = document.getElementById(`plannerRegLabel${i}`);
-        const bar = document.querySelector(`[data-planner-reg-bar="${i}"]`);
-        if (lbl) lbl.textContent = row.nome;
-        const nEl = document.getElementById(`plannerRegNum${i}`);
-        if (nEl) nEl.textContent = String(row.tarefas);
-        if (bar) bar.style.width = `${pct(row.tarefas, max)}%`;
+      return this._leafletLoadPromise;
+    },
+
+    _heatColor(level, alpha = 0.42) {
+      if (level >= 4) return `rgba(255, 69, 69, ${alpha})`;
+      if (level === 3) return `rgba(255, 162, 47, ${alpha})`;
+      if (level === 2) return `rgba(255, 209, 102, ${alpha})`;
+      if (level === 1) return `rgba(44, 255, 130, ${alpha})`;
+      return `rgba(255, 255, 255, ${Math.min(alpha, 0.18)})`;
+    },
+
+    _parseTaskCoords(raw) {
+      const s = String(raw || '').trim();
+      if (!s) return null;
+      const parts = s.split(',').map(part => part.trim());
+      if (parts.length < 2) return null;
+      const lat = Number(parts[0]);
+      const lng = Number(parts[1]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+      return { lat, lng };
+    },
+
+    _rompimentoHeatPoints(tasks, today, done) {
+      return tasks
+        .filter(t => String(t?.categoria || '').trim() === 'rompimentos')
+        .map((t) => {
+          const pos = this._parseTaskCoords(t?.coordenadas);
+          if (!pos) return null;
+          const status = String(t?.effectiveStatus || t?.status || '').trim();
+          const prazo = String(t?.prazo || '').slice(0, 10);
+          return {
+            task: t,
+            lat: pos.lat,
+            lng: pos.lng,
+            regiao: String(t?.regiao || 'Outras').trim() || 'Outras',
+            aberta: !done.has(status),
+            atrasada: Boolean(prazo && prazo < today && !done.has(status)),
+          };
+        })
+        .filter(Boolean);
+    },
+
+    _clusterHeatPoints(points, zoom) {
+      const cellSize =
+        zoom >= 15 ? 0.0015 :
+          zoom >= 13 ? 0.004 :
+            zoom >= 11 ? 0.012 :
+              zoom >= 9 ? 0.035 :
+                0.09;
+      const clusters = new Map();
+      points.forEach((p) => {
+        const key = `${Math.round(p.lat / cellSize)}:${Math.round(p.lng / cellSize)}`;
+        if (!clusters.has(key)) {
+          clusters.set(key, {
+            latSum: 0,
+            lngSum: 0,
+            count: 0,
+            abertas: 0,
+            atrasadas: 0,
+            regioes: new Map(),
+            tasks: [],
+          });
+        }
+        const c = clusters.get(key);
+        c.latSum += p.lat;
+        c.lngSum += p.lng;
+        c.count += 1;
+        if (p.aberta) c.abertas += 1;
+        if (p.atrasada) c.atrasadas += 1;
+        c.regioes.set(p.regiao, (c.regioes.get(p.regiao) || 0) + 1);
+        c.tasks.push(p.task);
       });
-      for (let i = rows.length; i < LIMIT; i++) {
-        const lbl = document.getElementById(`plannerRegLabel${i}`);
-        const nEl = document.getElementById(`plannerRegNum${i}`);
-        const bar = document.querySelector(`[data-planner-reg-bar="${i}"]`);
-        if (lbl) lbl.textContent = '—';
-        if (nEl) nEl.textContent = '0';
-        if (bar) bar.style.width = '0%';
+      return [...clusters.values()].map((c) => {
+        let mainRegion = 'Outras';
+        let best = -1;
+        c.regioes.forEach((n, reg) => {
+          if (n > best) {
+            best = n;
+            mainRegion = reg;
+          }
+        });
+        const score = c.count + (c.abertas * 0.8) + (c.atrasadas * 2.2);
+        return {
+          lat: c.latSum / c.count,
+          lng: c.lngSum / c.count,
+          count: c.count,
+          abertas: c.abertas,
+          atrasadas: c.atrasadas,
+          regiao: mainRegion,
+          score,
+          tasks: c.tasks,
+        };
+      });
+    },
+
+    _renderLeafletHeatOverlays(L, points) {
+      return this._renderLeafletHeatOverlaysOnMap(L, this._leafletMap, points, false);
+    },
+
+    _renderLeafletHeatOverlaysOnMap(L, map, points, isModal = false) {
+      if (!map) return;
+      const overlaysKey = isModal ? '_leafletModalHeatOverlays' : '_leafletHeatOverlays';
+      this[overlaysKey].forEach(o => o.remove());
+      this[overlaysKey] = [];
+
+      const zoom = map.getZoom();
+      const clusters = this._clusterHeatPoints(points, zoom);
+      const maxScore = Math.max(1, ...clusters.map(c => c.score));
+      clusters.forEach((cluster) => {
+        const intensity = cluster.score / maxScore;
+        const level = cluster.count === 0 ? 0 : Math.max(1, Math.min(4, Math.ceil(intensity * 4)));
+        const fillColor = this._heatColor(level, level >= 4 ? 0.56 : 0.44);
+        const strokeColor = this._heatColor(level, 0.96);
+        const meters = Math.max(90, Math.round((90000 / Math.pow(2, Math.max(0, zoom - 7))) * (0.9 + intensity)));
+        const radius = Math.min(18000, meters + (cluster.count * 75));
+        const circle = L.circle([cluster.lat, cluster.lng], {
+          radius,
+          color: strokeColor,
+          weight: 1.5,
+          opacity: 0.95,
+          fillColor,
+          fillOpacity: 0.58,
+        }).addTo(map);
+        const marker = L.circleMarker([cluster.lat, cluster.lng], {
+          radius: Math.max(8, Math.min(22, 8 + intensity * 12 + Math.sqrt(cluster.count))),
+          color: 'rgba(255,255,255,0.82)',
+          weight: 1,
+          fillColor: strokeColor,
+          fillOpacity: 0.97,
+        }).addTo(map);
+        const label = L.divIcon({
+          className: 'planner-leaflet-heat-label',
+          html: `<span>${cluster.count}</span>`,
+          iconSize: [34, 20],
+          iconAnchor: [17, 10],
+        });
+        const labelMarker = L.marker([cluster.lat, cluster.lng], { icon: label, interactive: false }).addTo(map);
+        const popup = `<strong>${escapeHtml(cluster.regiao)}</strong><br>${cluster.count} rompimento(s) com coordenada<br>${cluster.abertas} abertos · ${cluster.atrasadas} atrasados<br><small>Zoom ${zoom}: agrupamento ${clusters.length === points.length ? 'por ponto' : 'por proximidade'}</small>`;
+        circle.bindPopup(popup);
+        marker.bindPopup(popup);
+        this[overlaysKey].push(circle, marker, labelMarker);
+      });
+    },
+
+    async _renderLeafletHeatMap(rows, heatPoints, opts = {}) {
+      const isModal = Boolean(opts.isModal);
+      const mapEl = document.getElementById(isModal ? 'plannerLeafletHeatMapExpanded' : 'plannerLeafletHeatMap');
+      const statusEl = document.getElementById(isModal ? 'plannerLeafletHeatStatusExpanded' : 'plannerLeafletHeatStatus');
+      if (!mapEl) return;
+      try {
+        const L = await this._loadLeaflet();
+        const centers = this._getRegionCenters();
+        const center = window.APP_CONFIG?.leafletMapCenter || { lat: -19.35, lng: -42.55 };
+        const mapKey = isModal ? '_leafletModalMap' : '_leafletMap';
+        const overlaysKey = isModal ? '_leafletModalHeatOverlays' : '_leafletHeatOverlays';
+        const handlerKey = isModal ? '_leafletModalHeatZoomHandler' : '_leafletHeatZoomHandler';
+        if (this[mapKey]) {
+          this[mapKey].remove();
+          this[mapKey] = null;
+          this[overlaysKey] = [];
+        }
+        const map = L.map(mapEl, {
+          center: [center.lat, center.lng],
+          zoom: 8,
+          zoomControl: true,
+          attributionControl: true,
+          scrollWheelZoom: true,
+          wheelPxPerZoomLevel: 80,
+        });
+        this[mapKey] = map;
+        const tileUrl = window.APP_CONFIG?.leafletTileUrl || 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+        const tileAttribution = window.APP_CONFIG?.leafletTileAttribution || '&copy; OpenStreetMap contributors &copy; CARTO';
+        L.tileLayer(tileUrl, {
+          maxZoom: 19,
+          attribution: tileAttribution,
+        }).addTo(map);
+
+        const bounds = [];
+        heatPoints.forEach(p => bounds.push([p.lat, p.lng]));
+        if (!bounds.length) {
+          rows.forEach((row) => {
+            const pos = centers[row.nome] || centers.Outras;
+            if (pos) bounds.push([pos.lat, pos.lng]);
+          });
+        }
+        this._renderLeafletHeatOverlaysOnMap(L, map, heatPoints, isModal);
+        if (this[handlerKey]) map.off('zoomend', this[handlerKey]);
+        this[handlerKey] = () => this._renderLeafletHeatOverlaysOnMap(L, map, heatPoints, isModal);
+        map.on('zoomend', this[handlerKey]);
+        if (bounds.length) map.fitBounds(bounds, { padding: isModal ? [52, 52] : [26, 26], maxZoom: heatPoints.length ? 13 : 8 });
+        window.setTimeout(() => map.invalidateSize(), 80);
+        if (statusEl) {
+          statusEl.textContent = heatPoints.length
+            ? `${heatPoints.length} rompimento(s) com coordenada · zoom detalha os pontos`
+            : 'Sem coordenadas de rompimento no filtro';
+        }
+      } catch (err) {
+        if (statusEl) statusEl.textContent = 'Mapa gratuito indisponível. Usando fallback visual.';
       }
+    },
+
+    _openHeatMapModal() {
+      const shell = document.getElementById('plannerHeatModalShell');
+      if (!shell) return;
+      shell.innerHTML = `
+        <div class="planner-heat-modal-map-wrap">
+          <div class="planner-leaflet-heat-map planner-leaflet-heat-map--expanded" id="plannerLeafletHeatMapExpanded" aria-label="Mapa de calor expandido"></div>
+          <span class="planner-leaflet-heat-status" id="plannerLeafletHeatStatusExpanded">Carregando mapa...</span>
+        </div>
+      `;
+      ModalService?.open?.('heatMapModal');
+      window.setTimeout(() => this._renderLeafletHeatMap(this._lastHeatRows, this._lastHeatPoints, { isModal: true }), 60);
+    },
+
+    _applyRegions() {
+      const root = document.getElementById('plannerRegionHeatMap');
+      if (!root) return;
+
+      const today = Utils.todayIso();
+      const done = new Set(['Concluída', 'Finalizada', 'Finalizado', 'Cancelada']);
+      const normalizeRegion = (raw) => {
+        const s = String(raw || '').trim();
+        if (!s) return 'Outras';
+        if (s.toLowerCase() === 'vale do aco') return 'Vale do Aço';
+        return s;
+      };
+      const isLate = (t) => {
+        const prazo = String(t?.prazo || '').slice(0, 10);
+        const status = String(t?.effectiveStatus || t?.status || '').trim();
+        return Boolean(prazo && prazo < today && !done.has(status));
+      };
+      const isOpen = (t) => !done.has(String(t?.effectiveStatus || t?.status || '').trim());
+
+      const filtered = TaskService.getFilteredTasks()
+        .filter(t => String(t?.source || '') === 'operacional');
+      const heatPoints = this._rompimentoHeatPoints(filtered, today, done);
+      const selectedRegion = String(this._heatSelectedRegion || '').trim();
+      const heatPointsForMap = selectedRegion
+        ? heatPoints.filter(p => normalizeRegion(p.regiao) === selectedRegion)
+        : heatPoints;
+      const map = new Map();
+      filtered.forEach((t) => {
+        const regiao = normalizeRegion(t?.regiao);
+        if (!map.has(regiao)) {
+          map.set(regiao, { nome: regiao, total: 0, abertas: 0, atrasadas: 0, rompimentos: 0, rompAbertos: 0, rompAtrasados: 0 });
+        }
+        const row = map.get(regiao);
+        const isRompimento = String(t?.categoria || '').trim() === 'rompimentos';
+        row.total += 1;
+        if (isOpen(t)) row.abertas += 1;
+        if (isLate(t)) row.atrasadas += 1;
+        if (isRompimento) {
+          row.rompimentos += 1;
+          if (isOpen(t)) row.rompAbertos += 1;
+          if (isLate(t)) row.rompAtrasados += 1;
+        }
+      });
+
+      ['Goval', 'Vale do Aço', 'Caratinga', 'Backup'].forEach((nome) => {
+        if (!map.has(nome)) map.set(nome, { nome, total: 0, abertas: 0, atrasadas: 0, rompimentos: 0, rompAbertos: 0, rompAtrasados: 0 });
+      });
+
+      const rows = [...map.values()]
+        .map((row) => ({
+          ...row,
+          score: row.total + (row.abertas * 0.7) + (row.rompimentos * 1.2) + (row.atrasadas * 2.4),
+        }))
+        .sort((a, b) => b.score - a.score || b.total - a.total || a.nome.localeCompare(b.nome, 'pt-BR'));
+
+      const maxScore = Math.max(1, ...rows.map(r => r.score));
+      const clearRegionBtn = document.getElementById('plannerHeatClearRegionBtn');
+      if (clearRegionBtn) {
+        clearRegionBtn.hidden = !selectedRegion;
+        clearRegionBtn.textContent = selectedRegion ? `Limpar ${selectedRegion}` : 'Limpar região';
+      }
+
+      const maxRompimentos = Math.max(1, ...rows.map(r => r.rompimentos));
+      const rankingHtml = rows.map((row, i) => {
+        const intensity = row.rompimentos / maxRompimentos;
+        const level = row.rompimentos === 0 ? 0 : Math.max(1, Math.min(4, Math.ceil(intensity * 4)));
+        const width = row.rompimentos === 0 ? 0 : Math.max(8, Math.round(intensity * 100));
+        const meta = row.rompimentos
+          ? `${row.rompAbertos} abertos · ${row.rompAtrasados} atrasados · ${row.total} tarefas`
+          : 'Sem rompimentos no filtro';
+        const isSelected = selectedRegion === row.nome;
+        return `
+          <button type="button" class="planner-heat-row planner-heat-row--level-${level}${isSelected ? ' is-selected' : ''}" data-planner-heat-region="${escapeHtml(row.nome)}">
+            <span class="planner-heat-row-main">
+              <strong>${escapeHtml(row.nome)}</strong>
+              <small id="plannerRegMeta${i}">${escapeHtml(meta)}</small>
+            </span>
+            <span class="planner-heat-row-count">${row.rompimentos}</span>
+            <span class="planner-heat-row-bar"><span style="width:${width}%"></span></span>
+          </button>
+        `;
+      }).join('');
+
+      root.innerHTML = `
+        <div class="planner-heat-geo" role="img" aria-label="Mapa visual de calor por região">
+          <div class="planner-leaflet-heat-map" id="plannerLeafletHeatMap" aria-label="Mapa gratuito com calor por região"></div>
+          <span class="planner-leaflet-heat-status" id="plannerLeafletHeatStatus">Carregando mapa gratuito...</span>
+          <span class="planner-heat-map-grid" aria-hidden="true"></span>
+        </div>
+        <div class="planner-heat-ranking" aria-label="Ranking de calor por região">
+          ${rankingHtml}
+        </div>
+      `;
+      this._lastHeatRows = rows;
+      this._lastHeatPoints = heatPointsForMap;
+      this._renderLeafletHeatMap(rows, heatPointsForMap);
     },
 
     _applyTeam() {

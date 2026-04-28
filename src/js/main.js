@@ -2493,7 +2493,12 @@ const TaskService = {
         t.titulo.toLowerCase().includes(query) ||
         t.responsavel.toLowerCase().includes(query) ||
         t.status.toLowerCase().includes(query) ||
-        t.sourceLabel.toLowerCase().includes(query);
+        t.sourceLabel.toLowerCase().includes(query) ||
+        String(t.regiao || '').toLowerCase().includes(query) ||
+        String(t.categoria || '').toLowerCase().includes(query) ||
+        String(t.taskCode || '').toLowerCase().includes(query) ||
+        String(t.protocolo || '').toLowerCase().includes(query) ||
+        String(t.nomeCliente || '').toLowerCase().includes(query);
       return matchFilter && matchSearch;
     });
   },

@@ -12,6 +12,10 @@
  *   authUsers?: AuthUser[],
  *   sidebarAvatarUrl?: string,
  *   avatarOptions?: { label?: string, url: string }[],
+ *   leafletTileUrl?: string,
+ *   leafletTileAttribution?: string,
+ *   leafletMapCenter?: {lat:number,lng:number},
+ *   leafletRegionCenters?: Record<string,{lat:number,lng:number}>,
  * }} AppConfig
  */
 window.APP_CONFIG = {
@@ -46,6 +50,20 @@ window.APP_CONFIG = {
    * Só necessário se os arquivos não estiverem relativos ao `main.js`.
    */
   // ctoDataBase: 'https://meusite.com/subpasta/src/data/',
+
+  /**
+   * Mapa de calor gratuito do dashboard (Leaflet + OpenStreetMap/CARTO).
+   * Não precisa API key. O padrão usa CARTO dark tiles.
+   */
+  // leafletTileUrl: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+  // leafletTileAttribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+  // leafletMapCenter: { lat: -19.35, lng: -42.55 },
+  // leafletRegionCenters: {
+  //   Goval: { lat: -18.8545, lng: -41.9555 },
+  //   'Vale do Aço': { lat: -19.4703, lng: -42.5476 },
+  //   Caratinga: { lat: -19.7897, lng: -42.1392 },
+  //   Backup: { lat: -19.9191, lng: -43.9386 },
+  // },
 
   /** Credenciais de login (fallback apenas quando API remota estiver desabilitada). */
   // authUsers: [{ user: 'nome', pass: 'senha-segura' }],

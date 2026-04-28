@@ -464,12 +464,35 @@
               <h2 class="planner-card-title">Atividade recente</h2>
               <div class="planner-activity-feed" id="plannerActivityFeed"></div>
             </div>
-            <div class="planner-card" role="region" aria-label="Por região">
-              <h2 class="planner-card-title">Por região</h2>
-              <div id="plannerRegRows">
-                <div class="planner-reg-row"><div class="planner-reg-label"><span id="plannerRegLabel0">Goval</span><span id="plannerRegNum0">0</span></div><div class="planner-reg-bar"><span data-planner-reg-bar="0"></span></div></div>
-                <div class="planner-reg-row"><div class="planner-reg-label"><span id="plannerRegLabel1">Vale do Aço</span><span id="plannerRegNum1">0</span></div><div class="planner-reg-bar"><span data-planner-reg-bar="1"></span></div></div>
-                <div class="planner-reg-row"><div class="planner-reg-label"><span id="plannerRegLabel2">Caratinga</span><span id="plannerRegNum2">0</span></div><div class="planner-reg-bar"><span data-planner-reg-bar="2"></span></div></div>
+            <div class="planner-card planner-heat-card" role="region" aria-label="Mapa de calor por região">
+              <div class="planner-card-title-row">
+                <h2 class="planner-card-title">Mapa de calor por região</h2>
+                <div class="planner-heat-title-actions">
+                  <button type="button" class="planner-heat-clear-btn" id="plannerHeatClearRegionBtn" hidden>Limpar região</button>
+                  <button type="button" class="planner-heat-expand-btn" id="plannerHeatExpandBtn" aria-label="Expandir mapa" title="Expandir mapa">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M8 3H3v5"/>
+                      <path d="M3 3l7 7"/>
+                      <path d="M16 3h5v5"/>
+                      <path d="M21 3l-7 7"/>
+                      <path d="M8 21H3v-5"/>
+                      <path d="M3 21l7-7"/>
+                      <path d="M16 21h5v-5"/>
+                      <path d="M21 21l-7-7"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="planner-heat-map" id="plannerRegionHeatMap" aria-live="polite">
+                <div class="planner-heat-geo" role="img" aria-label="Mapa visual de calor por região">
+                  <span class="planner-heat-map-label planner-heat-map-label--n">N</span>
+                  <span class="planner-heat-empty">Carregando mapa...</span>
+                </div>
+              </div>
+              <div class="planner-heat-legend" aria-label="Legenda do mapa de calor">
+                <span>Baixo</span>
+                <span class="planner-heat-scale" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                <span>Crítico</span>
               </div>
               <div class="planner-mini-grid">
                 <div class="planner-mini"><div class="planner-mini-lbl">SLA geral (rompimentos)</div><div class="planner-mini-val" id="plannerMiniSla">0%</div></div>
@@ -1168,6 +1191,24 @@
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
         Conectar
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL: MAPA DE CALOR EXPANDIDO ═══ -->
+<div class="modal-overlay" id="heatMapModal" role="dialog" aria-modal="true" aria-labelledby="heatMapModalTitle">
+  <div class="modal heat-map-modal" role="document">
+    <div class="modal-head">
+      <div class="modal-head-main">
+        <span class="modal-title" id="heatMapModalTitle">Mapa de calor expandido</span>
+        <span class="modal-subtitle">Rompimentos com coordenadas agrupados por zoom.</span>
+      </div>
+      <button class="close-btn" id="closeHeatMapModal" aria-label="Fechar modal">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body heat-map-modal-body">
+      <div class="planner-heat-modal-shell" id="plannerHeatModalShell"></div>
     </div>
   </div>
 </div>
