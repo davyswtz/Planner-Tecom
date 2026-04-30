@@ -61,6 +61,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 try {
+    // Evita CSRF de login (forçar sessão do usuário em outra conta).
+    requireSameOriginForMutation();
+
     $data = readJsonBody();
     $username = strtolower(trim((string) ($data['username'] ?? '')));
     $password = (string) ($data['password'] ?? '');
@@ -80,11 +83,8 @@ try {
         jsonResponse(['ok' => false]);
     }
 
-    // MySQL CHAR(n) faz padding com espaços no fim — hex2bin() falha (PHP 8.4+: ValueError) e vira erro 500.
-    $saltHex = preg_replace('/\s+/', '', (string) $row['pass_salt']);
-    $hashHex = preg_replace('/\s+/', '', (string) $row['pass_hash']);
-    $salt = hex2bin($saltHex);
-    $expected = hex2bin($hashHex);
+    $salt = hex2bin((string) $row['pass_salt']);
+    $expected = hex2bin((string) $row['pass_hash']);
     // Limite defensivo (evita corpos POST com iterations absurdas se o esquema for alterado).
     $iterations = (int) ($row['pass_iterations'] ?? 60000);
     if ($iterations < 10000 || $iterations > 600000) {
@@ -111,7 +111,8 @@ try {
     jsonResponse(['ok' => $valid]);
 } catch (Throwable $e) {
     // Não vazar detalhes de erro para o front.
-    error_log('[login.php] failed: ' . $e->getMessage());
-    jsonResponse(['ok' => false, 'error' => 'internal_error'], 500);
+    $errorId = bin2hex(random_bytes(6));
+    error_log('[login.php][' . $errorId . '] failed: ' . $e->getMessage());
+    jsonResponse(['ok' => false, 'error' => 'internal_error', 'error_id' => $errorId], 500);
 }
 

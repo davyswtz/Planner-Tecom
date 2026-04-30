@@ -73,7 +73,8 @@ try {
         $stmtO->execute([':since' => $since]);
         $changedOpTasks = $stmtO->fetchAll() ?: [];
         foreach ($changedOpTasks as &$item) {
-            $item['descricao'] = sanitizeOpTaskDescricaoHtml((string) ($item['descricao'] ?? ''));
+            // A descrição já é sanitizada no momento do save (op_tasks.php). Evita custo alto no poll de changes.
+            $item['descricao'] = (string) ($item['descricao'] ?? '');
             $item['historico'] = json_decode((string) ($item['historico'] ?? '[]'), true) ?: [];
             $item['isParentTask'] = ((int) ($item['is_parent_task'] ?? 0)) === 1;
             $item['parentTaskId'] = isset($item['parent_task_id']) ? (int) $item['parent_task_id'] : null;

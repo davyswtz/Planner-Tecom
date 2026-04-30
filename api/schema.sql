@@ -18,7 +18,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_tasks_prazo (prazo),
-  KEY idx_tasks_status (status)
+  KEY idx_tasks_status (status),
+  KEY idx_tasks_updated_at (updated_at),
+  KEY idx_tasks_status_prazo (status, prazo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ─── Tarefas operacionais (Rompimentos, Troca de poste, Atendimento) ──────
@@ -52,7 +54,13 @@ CREATE TABLE IF NOT EXISTS op_tasks (
   PRIMARY KEY (id),
   KEY idx_op_tasks_categoria (categoria),
   KEY idx_op_tasks_status (status),
-  KEY idx_op_tasks_parent (parent_task_id)
+  KEY idx_op_tasks_parent (parent_task_id),
+  KEY idx_op_tasks_updated_at (updated_at),
+  KEY idx_op_tasks_categoria_status (categoria, status),
+  KEY idx_op_tasks_categoria_regiao (categoria, regiao),
+  KEY idx_op_tasks_status_prazo (status, prazo),
+  KEY idx_op_tasks_taskCode (taskCode),
+  KEY idx_op_tasks_parent_status (parent_task_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ─── Imagens embutidas na descrição (op_tasks) ─────────────────────────────
@@ -127,8 +135,8 @@ CREATE TABLE IF NOT EXISTS team_chat_message (
 -- Senhas armazenadas como PBKDF2 (sha256) com salt por usuário.
 CREATE TABLE IF NOT EXISTS usuario (
   username VARCHAR(120) NOT NULL,
-  pass_salt VARCHAR(64) NOT NULL,
-  pass_hash VARCHAR(64) NOT NULL,
+  pass_salt CHAR(64) NOT NULL,
+  pass_hash CHAR(64) NOT NULL,
   pass_iterations INT NOT NULL DEFAULT 60000,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (username)

@@ -12,6 +12,20 @@ try {
         jsonResponse(['ok' => false, 'error' => 'unauthorized'], 401);
     }
 
+    // Cache curto por usuário: reduz TTFB em hospedagem compartilhada (HostGator).
+    // TTL baixo para não “atrasar” atualizações; changes.php continua sendo o caminho recomendado.
+    $cacheTtl = 5;
+    $cacheUser = (string) ($_SESSION['planner_user'] ?? 'anon');
+    $cacheKey = 'planner_bootstrap_' . hash('sha256', $cacheUser . '|' . ($_SERVER['HTTP_HOST'] ?? '') . '|v1');
+    $cacheFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $cacheKey . '.json';
+    if (is_readable($cacheFile)) {
+        $raw = (string) @file_get_contents($cacheFile);
+        $cached = json_decode($raw, true);
+        if (is_array($cached) && isset($cached['ts']) && (time() - (int) $cached['ts']) <= $cacheTtl && isset($cached['payload']) && is_array($cached['payload'])) {
+            jsonResponse($cached['payload']);
+        }
+    }
+
     $pdo = db();
     $tableExists = function (string $table) use ($pdo): bool {
         $stmt = $pdo->prepare(
@@ -64,14 +78,15 @@ try {
     }
 
     foreach ($opTasks as &$item) {
-        $item['descricao'] = sanitizeOpTaskDescricaoHtml((string) ($item['descricao'] ?? ''));
+        // A descrição já é sanitizada no momento do save (op_tasks.php). Evita custo alto aqui no bootstrap.
+        $item['descricao'] = (string) ($item['descricao'] ?? '');
         $item['historico'] = json_decode((string) ($item['historico'] ?? '[]'), true) ?: [];
         $item['isParentTask'] = ((int) ($item['is_parent_task'] ?? 0)) === 1;
         $item['parentTaskId'] = isset($item['parent_task_id']) ? (int) $item['parent_task_id'] : null;
         unset($item['is_parent_task'], $item['parent_task_id']);
     }
 
-    jsonResponse([
+    $payload = [
         'ok' => true,
         'tasks' => $tasks,
         'opTasks' => $opTasks,
@@ -79,7 +94,12 @@ try {
         'activity' => array_reverse($activity ?: []),
         'webhookConfig' => $cfgMap['webhookConfig'] ?? ['url' => '', 'events' => ['andamento' => true, 'concluida' => true, 'finalizada' => true]],
         'plannerConfig' => $cfgMap['plannerConfig'] ?? ['note' => ''],
-    ]);
+    ];
+
+    // Best-effort: grava cache (não deve quebrar o endpoint se falhar).
+    @file_put_contents($cacheFile, json_encode(['ts' => time(), 'payload' => $payload], JSON_UNESCAPED_UNICODE), LOCK_EX);
+
+    jsonResponse($payload);
 } catch (Throwable $e) {
     // FIX: não vazar detalhes internos; logar com contexto.
     error_log('[bootstrap.php] failed: ' . $e->getMessage());

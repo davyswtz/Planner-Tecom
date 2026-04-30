@@ -1,12 +1,58 @@
 # Credenciais MySQL
 api/credentials.php
 
+# Diagnósticos locais (NUNCA subir para produção)
+public_html/teste_db.php
+
 # Config local
 src/js/config.js
 
 # Variáveis de ambiente
 .env
 .env.*
+
+# Segredos e credenciais (geral)
+**/*secret*
+**/*secrets*
+**/*credential*
+**/*credentials*
+**/*password*
+**/*passwd*
+**/*token*
+**/*apikey*
+**/*api_key*
+
+# Chaves/certificados
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.crt
+**/*.cer
+**/*.jks
+
+# Dumps/backups (podem conter PII/segredos)
+**/*.dump
+**/*.bak
+**/*.backup
+**/*.sql.gz
+**/*_dump.sql
+**/*backup*.sql
+
+# SQLs gerados de import de usuários (contêm senha/hash)
+api/tools/import_usuario_*.sql
+
+# SQLs ad-hoc de reset/login (contêm hash/salt)
+api/reset-login-*.sql
+
+# Logs
+**/*.log
+**/logs/
+
+# IDE / Cursor / VSCode
+.vscode/
+.idea/
+.cursor/
 
 # Dependências locais / SO
 node_modules/

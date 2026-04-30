@@ -5,6 +5,10 @@ declare(strict_types=1);
  * Sessão compartilhada pelos endpoints da API.
  */
 if (session_status() === PHP_SESSION_NONE) {
+    // Hardening básico de sessão (hospedagem compartilhada).
+    @ini_set('session.use_strict_mode', '1');
+    @ini_set('session.use_only_cookies', '1');
+    @ini_set('session.cookie_httponly', '1');
     $secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
     session_set_cookie_params([
         'lifetime' => 0,
@@ -53,11 +57,17 @@ function db(): PDO
     }
 
     $dsn = "mysql:host={$host};port={$port};dbname={$name};charset=utf8mb4";
-    $pdo = new PDO($dsn, $user, $pass, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci",
-    ]);
+    try {
+        $pdo = new PDO($dsn, $user, $pass, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci",
+        ]);
+    } catch (PDOException $e) {
+        // Mensagem completa vai para o log do servidor; response fica genérica.
+        error_log('[db.php] PDO connect failed: ' . $e->getMessage());
+        throw new RuntimeException('Falha ao conectar no banco de dados.');
+    }
 
     return $pdo;
 }
@@ -79,6 +89,7 @@ function jsonResponse(array $payload, int $status = 200): void
     header('X-Content-Type-Options: nosniff');
     header('X-Frame-Options: SAMEORIGIN');
     header('Referrer-Policy: strict-origin-when-cross-origin');
+    header('Vary: Accept-Encoding');
     // HostGator/cPanel pode ter cache/proxy agressivo: nunca cachear respostas JSON da API.
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
     header('Pragma: no-cache');
@@ -93,7 +104,20 @@ function jsonResponse(array $payload, int $status = 200): void
     }
     header('Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS');
     header('Access-Control-Allow-Headers: Content-Type');
-    echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+    $body = json_encode($payload, JSON_UNESCAPED_UNICODE);
+    if ($body === false) {
+        $body = '{"ok":false,"error":"json_encode_failed"}';
+    }
+
+    $accept = (string) ($_SERVER['HTTP_ACCEPT_ENCODING'] ?? '');
+    $canGzip = (stripos($accept, 'gzip') !== false) && function_exists('gzencode') && !headers_sent();
+    // Evita gzip em respostas muito pequenas (overhead pode piorar).
+    if ($canGzip && strlen($body) > 1024) {
+        header('Content-Encoding: gzip');
+        echo gzencode($body, 6);
+    } else {
+        echo $body;
+    }
     exit;
 }
 
