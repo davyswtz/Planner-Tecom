@@ -319,22 +319,22 @@
     },
 
     _applyKpis(anim) {
-      const scale = this._periodScale();
       const counts = TaskService.getCounts();
       const all = TaskService.getAllDashboardTasks();
       const tod = Utils.todayIso();
-      const criadas = all.filter(t => TaskService._isPendingStatus(t.effectiveStatus)).length;
       const hoje = all.filter(
-        t => t.prazo === tod || String(t.criadaEm || '')
-          .slice(0, 10) === tod,
+        t => String(t.criadaEm || '').slice(0, 10) === tod,
       ).length;
-      const romp = Store.getOpTasks().filter(t => t.categoria === 'rompimentos').length;
+      const opTasks = Store.getOpTasks();
+      const romp = opTasks.filter(
+        t => t.categoria === 'rompimentos' && !TaskService._isDoneStatus(t.status),
+      ).length;
 
-      const vCriadas = Math.max(0, Math.round(criadas * scale));
-      const vAnd = Math.max(0, Math.round(counts.progress * scale));
-      const vDone = Math.max(0, Math.round(counts.done * scale));
-      const vRomp = Math.max(0, Math.round(romp * (scale > 0.5 ? 1 : scale)));
-      const vLate = Math.max(0, Math.round((Number(counts.late) || 0) * scale));
+      const vCriadas = counts.pending;
+      const vAnd = counts.progress;
+      const vDone = counts.done;
+      const vLate = Number(counts.late) || 0;
+      const vRomp = romp;
 
       const setKpi = (idVal, end, barFrac) => {
         const el = document.getElementById(idVal);
@@ -350,20 +350,20 @@
       setKpi('plannerKpiRompimentos', this._kpiLateMode ? vLate : vRomp, Math.min(1, (this._kpiLateMode ? vLate : vRomp) / 10));
 
       const tagC = document.getElementById('plannerKpiTagCriadas');
-      if (tagC) tagC.textContent = `+${hoje} hoje`;
+      if (tagC) tagC.textContent = hoje > 0 ? `+${hoje} hoje` : '—';
       const tagA = document.getElementById('plannerKpiTagAndamento');
       if (tagA) tagA.textContent = vAnd ? 'ativo' : '—';
       const tagD = document.getElementById('plannerKpiTagConcluidas');
-      if (tagD) tagD.textContent = `▲ ${Math.min(vDone, 12)}`;
+      if (tagD) tagD.textContent = `▲ ${vDone}`;
       const tagR = document.getElementById('plannerKpiTagRompimentos');
       if (tagR) tagR.textContent = this._kpiLateMode ? (vLate ? 'atraso' : 'ok') : (vRomp ? 'urgente' : 'ok');
 
       const subC = document.getElementById('plannerKpiSubCriadas');
       if (subC) subC.textContent = `${all.length} tarefas no pipeline`;
       const subA = document.getElementById('plannerKpiSubAndamento');
-      if (subA) subA.textContent = vAnd ? 'Em execução no período' : 'Nenhuma ativa';
+      if (subA) subA.textContent = vAnd ? 'Em execução agora' : 'Nenhuma ativa';
       const subD = document.getElementById('plannerKpiSubConcluidas');
-      if (subD) subD.textContent = vDone ? 'Encerradas no período selecionado' : 'Nenhuma ainda';
+      if (subD) subD.textContent = vDone ? 'Total encerradas no sistema' : 'Nenhuma ainda';
       const subR = document.getElementById('plannerKpiSubRompimentos');
       if (subR) subR.textContent = this._kpiLateMode
         ? (vLate ? 'Tarefas com prazo vencido' : 'Sem tarefas atrasadas')

@@ -480,9 +480,8 @@ const Store = (() => {
 
   applyDefaultWebhookUrlIfNeeded();
   persistSnapshot();
-  if (ApiService.enabled()) {
-    void syncConfig();
-  }
+  // syncConfig é chamado após bootstrap autenticado (bootstrapFromRemote) e ao salvar config pelo usuário.
+  // Não disparar aqui: Store é inicializado antes do login, gerando 401 no console.
 
   // UI state
   let currentPage = 'dashboard';
@@ -1055,7 +1054,8 @@ const Utils = {
 
   /** Extrai iniciais de um nome (até 2 letras) */
   getInitials(name) {
-    return name.trim().split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    const raw = String(name ?? '').trim().split(/\s+/).map(w => w[0] ?? '').join('').toUpperCase().slice(0, 2);
+    return this.escapeHtml(raw);
   },
 
   /** Verifica se uma tarefa está atrasada */
@@ -2674,9 +2674,12 @@ const OpTaskService = {
   },
 
   /** Retorna contagens por status para estatísticas */
-  getStatusCounts() {
+  getStatusCounts(category = null) {
     const counts = { Criada: 0, 'Em andamento': 0, Concluída: 0, Finalizada: 0, Backlog: 0 };
-    Store.getOpTasks().forEach(t => {
+    const tasks = category
+      ? Store.getOpTasks().filter(t => t.categoria === category)
+      : Store.getOpTasks();
+    tasks.forEach(t => {
       // No "Atendimento ao Cliente", subtarefas não devem inflar contadores de tarefas.
       if (t.categoria === 'atendimento-cliente' && t.parentTaskId) return;
       if (t.categoria === 'certificacao-cemig') {
@@ -2910,7 +2913,7 @@ const UI = {
     const label = String(regiao || '').trim();
     if (!label) return '';
     const cls = this._regionBadgeClass(regiao) || 'reg-unknown';
-    return `<span class="badge ${cls}">${label}</span>`;
+    return `<span class="badge ${cls}">${Utils.escapeHtml(label)}</span>`;
   },
 
   /** Badge de subprocesso (Atendimento ao Cliente): cor fixa do tema. */
@@ -2931,12 +2934,12 @@ const UI = {
 
   statusBadge(status) {
     const cls = this._statusBadgeMap[status] || 's-pendente';
-    return `<span class="badge ${cls}"><span class="badge-dot" aria-hidden="true"></span>${status}</span>`;
+    return `<span class="badge ${cls}"><span class="badge-dot" aria-hidden="true"></span>${Utils.escapeHtml(status)}</span>`;
   },
 
   priorityBadge(priority) {
     const cls = this._priorityBadgeMap[priority] || 'p-med';
-    return `<span class="badge ${cls}">${priority}</span>`;
+    return `<span class="badge ${cls}">${Utils.escapeHtml(priority)}</span>`;
   },
 
   checkSvg() {
@@ -3035,7 +3038,8 @@ const UI = {
 
   /* ── Op Stats ───────────────────────────────────────────── */
   renderOpStats() {
-    const counts = OpTaskService.getStatusCounts();
+    const category = Store.currentOpCategory;
+    const counts = OpTaskService.getStatusCounts(category);
     document.getElementById('op-count-criada').textContent    = counts['Criada'];
     document.getElementById('op-count-andamento').textContent = counts['Em andamento'];
     document.getElementById('op-count-concluida').textContent = counts['Concluída'];
@@ -6587,6 +6591,10 @@ const Controllers = {
       if (passInput) passInput.value = '';
       this._syncSidebarUser();
       ToastService.show('Sessão encerrada', 'info');
+      // Destrói a sessão PHP no servidor para invalidar o cookie imediatamente.
+      if (ApiService.enabled()) {
+        void ApiService.request('/logout.php', { method: 'POST' }).catch(() => {});
+      }
     },
     init() {
       if (!this._isAuthenticated()) {

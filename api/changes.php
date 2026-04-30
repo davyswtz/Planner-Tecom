@@ -17,9 +17,13 @@ try {
     $pdo = db();
     $since = isset($_GET['since']) ? (int) $_GET['since'] : 0;
 
-    $getMaxTs = function (string $table) use ($pdo): int {
+    $allowedTables = ['tasks', 'op_tasks', 'app_config', 'app_notification', 'app_activity_event', 'deleted_entity_log'];
+    $getMaxTs = function (string $table) use ($pdo, $allowedTables): int {
+        if (!in_array($table, $allowedTables, true)) {
+            return 0;
+        }
         // Retorna epoch seconds (UTC) para comparar rápido no front.
-        $stmt = $pdo->query("SELECT UNIX_TIMESTAMP(COALESCE(MAX(updated_at), '1970-01-01 00:00:00')) AS ts FROM {$table}");
+        $stmt = $pdo->query("SELECT UNIX_TIMESTAMP(COALESCE(MAX(updated_at), '1970-01-01 00:00:00')) AS ts FROM `{$table}`");
         $row = $stmt->fetch();
         return (int) ($row['ts'] ?? 0);
     };

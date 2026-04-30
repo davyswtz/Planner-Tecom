@@ -12,8 +12,10 @@ AddDefaultCharset utf-8
   Header always set X-Frame-Options "SAMEORIGIN"
   Header always set Referrer-Policy "strict-origin-when-cross-origin"
   Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
-  # CSP mínima com Leaflet/CARTO para o mapa gratuito do dashboard.
-  Header always set Content-Security-Policy "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; connect-src 'self' https:; frame-ancestors 'self'"
+  # Força HTTPS por 1 ano (ativar somente após SSL estar ativo no cPanel).
+  # Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  # CSP com Leaflet/CARTO + Google Fonts.
+  Header always set Content-Security-Policy "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; connect-src 'self' https:; frame-ancestors 'none'"
 </IfModule>
 
 # Não expor arquivos sensíveis por engano

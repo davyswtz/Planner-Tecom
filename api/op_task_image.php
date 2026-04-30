@@ -36,8 +36,10 @@ try {
 
     http_response_code(200);
     header('Content-Type: ' . $mime);
-    header('Cache-Control: public, max-age=86400');
-    // FIX: CORS conservador (sessão). Imagem deve ser consumida pelo mesmo domínio.
+    header('X-Content-Type-Options: nosniff');
+    header('Cache-Control: private, max-age=86400');
+    header('Content-Disposition: inline');
+    // CORS conservador: imagem deve ser consumida pelo mesmo domínio.
     $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
     $host = (string) ($_SERVER['HTTP_HOST'] ?? '');
     if ($host !== '') {
