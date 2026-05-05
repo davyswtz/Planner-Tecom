@@ -15,7 +15,7 @@ try {
     requireSameOriginForMutation();
 
     $data = readJsonBody();
-    $id = (int) ($data['id'] ?? 0);
+    $id = (int) ($data['id'] ?? 0); // BIGINT ok em PHP 64-bit
     if ($id <= 0) {
         jsonResponse(['ok' => false, 'error' => 'id invalido'], 422);
     }

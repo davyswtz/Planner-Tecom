@@ -71,6 +71,15 @@ try {
           op_category AS opCategory, created_at AS createdAt
           FROM app_activity_event ORDER BY id DESC LIMIT 30', 'app_activity_event')
         : [];
+    $escalas = $tableExists('escalas')
+        ? $safeFetchAll('SELECT id, client_uid AS clientUid, data, mes, dia_semana AS diaSemana,
+            TIME_FORMAT(horario, "%H:%i") AS horario,
+            TIME_FORMAT(COALESCE(horario_inicio, horario), "%H:%i") AS horarioInicio,
+            TIME_FORMAT(COALESCE(horario_fim, horario), "%H:%i") AS horarioFim,
+            horas, nome,
+            created_by AS createdBy, created_at AS createdAt, updated_at AS updatedAt
+            FROM escalas ORDER BY data ASC, mes ASC, dia_semana ASC, COALESCE(horario_inicio, horario) ASC, nome ASC, id ASC', 'escalas')
+        : [];
 
     $cfgMap = [];
     foreach ($cfgRows as $row) {
@@ -90,6 +99,7 @@ try {
         'ok' => true,
         'tasks' => $tasks,
         'opTasks' => $opTasks,
+        'escalas' => $escalas,
         'notifications' => array_reverse($notifs ?: []),
         'activity' => array_reverse($activity ?: []),
         'webhookConfig' => $cfgMap['webhookConfig'] ?? ['url' => '', 'events' => ['andamento' => true, 'concluida' => true, 'finalizada' => true]],

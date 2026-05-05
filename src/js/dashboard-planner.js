@@ -377,17 +377,14 @@
         tog.setAttribute('aria-label', this._kpiLateMode ? 'Alternar para rompimentos' : 'Alternar para atrasadas');
         tog.setAttribute('title', this._kpiLateMode ? 'Alternar para rompimentos' : 'Alternar para atrasadas');
       }
-
-      const nbR = document.getElementById('navBadgeRomp');
-      if (nbR) {
-        nbR.textContent = String(romp);
-        nbR.hidden = romp === 0;
-      }
-      const manut = Store.getOpTasks().filter(t => t.categoria === 'manutencao-corretiva').length;
-      const nbM = document.getElementById('navBadgeManut');
-      if (nbM) {
-        nbM.textContent = String(manut);
-        nbM.hidden = manut === 0;
+      // Badges do menu lateral são controlados pela UI e mostram apenas itens "em andamento".
+      // (Evita inconsistência: aqui o KPI "Rompimentos" é "abertos", mas o badge lateral é "em andamento".)
+      try {
+        if (typeof UI !== 'undefined' && typeof UI.updateSidebarInProgressBadges === 'function') {
+          UI.updateSidebarInProgressBadges();
+        }
+      } catch {
+        /* ignore */
       }
     },
 

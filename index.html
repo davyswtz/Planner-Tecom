@@ -278,6 +278,14 @@
 
       <span class="nav-section-label">Gestão</span>
 
+      <button type="button" class="nav-item" data-page="escalas" aria-label="Escalas">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <path d="M8 2v3"/><path d="M16 2v3"/><path d="M3 7h18"/><rect x="3" y="4.5" width="18" height="17" rx="2"/>
+          <path d="M7 11h4"/><path d="M7 15h6"/><path d="M16 11h1"/><path d="M16 15h1"/>
+        </svg>
+        <span class="nav-label">Escalas</span>
+      </button>
+
       <button type="button" class="nav-item" data-page="atendimento" aria-label="Atendimento ao cliente">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
           <path d="M21 15a4 4 0 01-4 4H8l-5 3V7a4 4 0 014-4h10a4 4 0 014 4z"/>
@@ -707,6 +715,133 @@
         </div>
       </section>
 
+      <!-- ═══ PAGE: ESCALAS ═══ -->
+      <section class="page" id="page-escalas" aria-label="Escalas">
+        <div class="esc-shell">
+          <header class="esc-header" role="banner">
+            <div class="esc-header-left">
+              <div class="esc-header-title">ESCALAS</div>
+              <div class="esc-header-sub">Cadastro de turnos e acompanhamento de horas</div>
+            </div>
+            <div class="esc-header-right">
+              <button type="button" class="esc-btn esc-btn-secondary" id="escExportBtn">Exportar</button>
+              <span id="escHeaderCount">0 registros</span>
+            </div>
+          </header>
+
+          <div class="esc-content">
+            <div class="esc-left">
+              <div class="esc-form" aria-label="Cadastro de escala">
+                <div class="esc-grid-5">
+                  <div class="esc-field">
+                    <div class="esc-label">Data</div>
+                    <input type="date" id="escalaData"/>
+                  </div>
+                  <div class="esc-field">
+                    <div class="esc-label">Mês</div>
+                    <select id="escalaMes"></select>
+                  </div>
+                  <div class="esc-field">
+                    <div class="esc-label">Dia da semana</div>
+                    <select id="escalaDiaSemana"></select>
+                  </div>
+                  <div class="esc-field">
+                    <div class="esc-label">Entrada</div>
+                    <input type="time" id="escalaHorarioIni"/>
+                  </div>
+                  <div class="esc-field">
+                    <div class="esc-label">Saída</div>
+                    <input type="time" id="escalaHorarioFim"/>
+                  </div>
+                </div>
+
+                <div class="esc-grid-2">
+                  <div class="esc-field">
+                    <div class="esc-label">Nome do funcionário</div>
+                    <select id="escalaNome" aria-label="Nome do funcionário">
+                      <option value="">Selecione...</option>
+                      <option value="Davy">Davy</option>
+                      <option value="Matheus">Matheus</option>
+                      <option value="Mauricio">Mauricio</option>
+                      <option value="João Vitro">João Vitro</option>
+                      <option value="João Pedro">João Pedro</option>
+                    </select>
+                  </div>
+                  <div class="esc-field">
+                    <div class="esc-label">Carga horária (h)</div>
+                    <input type="number" id="escalaHoras" min="0" step="0.5" placeholder="Ex.: 8"/>
+                  </div>
+                </div>
+
+                <div class="esc-actions">
+                  <button type="button" class="esc-btn esc-btn-secondary" id="escalaLimparBtn">Limpar</button>
+                  <button type="button" class="esc-btn esc-btn-primary" id="escalaAddBtn">
+                    <span class="esc-plus mono">+</span>
+                    <span id="escalaAddLabel">Adicionar</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="esc-list" aria-label="Lista de escalas">
+                <div class="esc-list-head">
+                  <div>Data</div>
+                  <div>Entrada</div>
+                  <div>Saída</div>
+                  <div class="esc-col-weekday">Dia</div>
+                  <div class="esc-col-month">Mês</div>
+                  <div>Funcionário</div>
+                  <div></div>
+                </div>
+                <div id="escRows"></div>
+              </div>
+            </div>
+
+            <aside class="esc-right" aria-label="Painel de totais e filtros">
+              <div class="esc-side-sec">
+                <div class="esc-side-title">TOTAL POR FUNCIONÁRIO</div>
+                <div class="esc-field esc-side-field">
+                  <div class="esc-label">Funcionário</div>
+                  <select id="escalaFiltroFuncionario"></select>
+                </div>
+                <div class="esc-field esc-side-field">
+                  <div class="esc-label">Mês</div>
+                  <select id="escalaFiltroMes"></select>
+                </div>
+                <div class="esc-side-grid-2">
+                  <div class="esc-field">
+                    <div class="esc-label">De</div>
+                    <input type="date" id="escalaFiltroDataIni"/>
+                  </div>
+                  <div class="esc-field">
+                    <div class="esc-label">Até</div>
+                    <input type="date" id="escalaFiltroDataFim"/>
+                  </div>
+                </div>
+                <div class="esc-side-actions">
+                  <button type="button" class="esc-btn esc-btn-secondary" id="escalaLimparPeriodoBtn">Limpar período</button>
+                </div>
+              </div>
+
+              <div class="esc-side-sec">
+                <div class="esc-stat-card">
+                  <div class="esc-stat-label">Total no filtro</div>
+                  <div class="esc-stat-val">
+                    <div class="esc-stat-num" id="escStatTotal">0</div>
+                    <div class="esc-stat-unit">h</div>
+                  </div>
+                  <div class="esc-stat-empty" id="escStatMsg" hidden>Sem dados no filtro.</div>
+                </div>
+              </div>
+
+              <div class="esc-side-sec">
+                <div class="esc-side-title">RANKING DE HORAS</div>
+                <div class="esc-rank" id="escRank"></div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </section>
+
       <!-- ═══ PAGE: CORREÇÃO DE ATENUAÇÃO (Radar) ═══ -->
       <section class="page" id="page-correcao-atenuacao" aria-label="Correção de atenuação">
         <div class="atn2-page" id="atn2Root" aria-label="Correção de Atenuação">
@@ -766,6 +901,9 @@
               <div class="panel-title">Integrações</div>
               <div class="panel-subtitle" style="color:var(--white4);font-size:13px;margin-top:2px">Gerencie conexões externas do planner.</div>
             </div>
+            <button type="button" class="primary-btn" id="configSecretBtn" hidden>
+              aperte
+            </button>
           </div>
 
           <div style="margin-top:14px;display:grid;gap:10px">

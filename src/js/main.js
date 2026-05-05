@@ -109,6 +109,14 @@ function getSessionUserKey() {
   }
 }
 
+function getCargoForUserKey() {
+  const u = getSessionUserKey();
+  if (u === 'davyibipar') return 'Desenvolvedor';
+  if (u === 'joaoibipar') return 'Supervisor';
+  if (u === 'jobertibipar') return 'Gestor';
+  return u ? 'Projetista' : '—';
+}
+
 /** Sincronizado com `APP_CONFIG.appBuild` em `config.js`. A cada deploy novo, limpa caches do app. */
 const CLIENT_BUNDLE_STORAGE_KEY = 'planner.clientBundle.v1';
 const DEPLOY_CACHE_KEEP_KEYS = new Set([
@@ -162,6 +170,7 @@ const Store = (() => {
     webhook: 'planner.webhook.v1',
     note: 'planner.note.v2',
     activity: 'planner.activity.v1',
+    escalas: 'planner.escalas.v1',
   };
 
   /** Campos ATD / thread: o servidor pode devolver vazio ou prazo 0000-00-00; não sobrescrever valor bom do cliente. */
@@ -356,6 +365,29 @@ const Store = (() => {
     async saveConfig(payload) {
       return this.requestAny(['/config.php', '/config'], { method: 'POST', body: JSON.stringify(payload) });
     },
+    async sendUserPing(payload) {
+      const body = JSON.stringify(payload || {});
+      return this.requestAny(['/notify.php', '/notify'], { method: 'POST', body });
+    },
+    async saveEscala(payload) {
+      // Normaliza payload para o formato esperado no PHP.
+      const p = (payload && typeof payload === 'object') ? payload : {};
+      const body = {
+        clientUid: p.clientUid,
+        data: p.data ?? null,
+        mes: p.mes,
+        diaSemana: p.diaSemana,
+        horario: p.horario || p.horarioInicio || '',
+        horarioInicio: p.horarioInicio || p.horario || '',
+        horarioFim: p.horarioFim || p.horario || '',
+        horas: p.horas,
+        nome: p.nome,
+      };
+      return this.requestAny(['/escalas.php', '/escalas'], { method: 'POST', body: JSON.stringify(body) });
+    },
+    async deleteEscala(id) {
+      return this.requestAny(['/escalas.php', '/escalas'], { method: 'DELETE', body: JSON.stringify({ id }) });
+    },
     /** Chat interno: `since=0` → últimas 100; `since>0` → apenas mensagens novas. `_` evita cache agressivo de proxies. */
     async getTeamChat() {
       // Chat interno desativado.
@@ -396,6 +428,10 @@ const Store = (() => {
   /** @type {any[]} */
   const activityEvents = readLocal(STORAGE_KEYS.activity, []);
 
+  /** @type {{id:number, clientUid?:string, data?:string|null, mes:number, diaSemana:number, horario?:string, horarioInicio?:string, horarioFim?:string, horas:number, nome:string, createdAt:string}[]} */
+  const escalasRaw = readLocal(STORAGE_KEYS.escalas, []);
+  const escalas = Array.isArray(escalasRaw) ? escalasRaw : [];
+
   const WEBHOOK_EVENTS_DEFAULT = { andamento: true, concluida: true, finalizada: true };
   /** @type {WebhookConfig} */
   const webhookConfig = {
@@ -416,6 +452,7 @@ const Store = (() => {
     writeLocal(STORAGE_KEYS.webhook, webhookConfig);
     writeLocal(STORAGE_KEYS.note, plannerConfig.note || '');
     writeLocal(STORAGE_KEYS.activity, activityEvents);
+    writeLocal(STORAGE_KEYS.escalas, escalas);
   };
   const stableStringify = (value) => {
     if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
@@ -442,6 +479,24 @@ const Store = (() => {
         }
       }
     });
+  };
+  const syncUpEscala = (escala) => {
+    if (!ApiService.enabled()) return;
+    void ApiService.saveEscala(escala).then((resp) => {
+      if (!resp || resp.ok !== true) return;
+      const id = Number(resp.id) || 0;
+      const clientUid = String(resp.clientUid || escala?.clientUid || '').trim();
+      if (!id || !clientUid) return;
+      const t = escalas.find(e => String(e?.clientUid || '') === clientUid);
+      if (t && Number(t.id) !== id) {
+        t.id = id;
+        persistSnapshot();
+      }
+    });
+  };
+  const syncDeleteEscala = (id) => {
+    if (!ApiService.enabled()) return;
+    void ApiService.deleteEscala(id);
   };
   const syncDeleteOpTask = (id, cascade = false) => { ApiService.deleteOpTask(id, cascade); };
   const syncConfig = () =>
@@ -598,6 +653,76 @@ const Store = (() => {
       }
       return opTasks[i];
     },
+
+    // Escalas (local)
+    getEscalas: () => [...escalas],
+    addEscala: (data) => {
+      const now = new Date().toISOString();
+      const clientUid = String(data?.clientUid || '').trim() || (`esc_${Date.now()}_${Math.floor(Math.random() * 1e9)}`);
+      const wantsRemote = ApiService.enabled();
+      const id = wantsRemote ? (-(Date.now() + Math.floor(Math.random() * 1000))) : (Date.now() + Math.floor(Math.random() * 1000));
+      const entry = {
+        id,
+        clientUid,
+        data: (data && typeof data.data === 'string') ? data.data : null,
+        mes: Number(data?.mes) || 0,
+        diaSemana: Number(data?.diaSemana) || 0,
+        horario: String(data?.horario || '').trim(),
+        horarioInicio: String(data?.horarioInicio || data?.horario || '').trim(),
+        horarioFim: String(data?.horarioFim || data?.horario || '').trim(),
+        horas: Number(data?.horas) || 0,
+        nome: String(data?.nome || '').trim(),
+        createdAt: now,
+      };
+      escalas.push(entry);
+      persistSnapshot();
+      syncUpEscala(entry);
+      return entry;
+    },
+    updateEscala: (id, patch) => {
+      const n = Number(id);
+      const i = escalas.findIndex(e => Number(e?.id) === n);
+      if (i === -1) return null;
+      Object.assign(escalas[i], patch || {});
+      persistSnapshot();
+      syncUpEscala(escalas[i]);
+      return escalas[i];
+    },
+    deleteEscala: (id) => {
+      const n = Number(id);
+      const i = escalas.findIndex(e => Number(e?.id) === n);
+      if (i === -1) return false;
+      const serverId = Number(escalas[i]?.id) || 0;
+      escalas.splice(i, 1);
+      persistSnapshot();
+      if (serverId > 0) syncDeleteEscala(serverId);
+      return true;
+    },
+
+    applyRemoteEscalas(incoming) {
+      if (!Array.isArray(incoming) || !incoming.length) return 0;
+      let changed = 0;
+      for (const inc of incoming) {
+        const id = Number(inc?.id);
+        if (!Number.isFinite(id) || id <= 0) continue;
+        const i = escalas.findIndex(e => Number(e?.id) === id);
+        if (i === -1) {
+          escalas.push(inc);
+          changed++;
+        } else {
+          const next = { ...escalas[i], ...inc };
+          if (stableStringify(escalas[i]) !== stableStringify(next)) {
+            Object.assign(escalas[i], inc);
+            changed++;
+          }
+        }
+      }
+      if (changed) {
+        escalas.sort((a, b) => (Number(a?.id) || 0) - (Number(b?.id) || 0));
+        persistSnapshot();
+      }
+      return changed;
+    },
     applyRemoteOpTasks(incoming) {
       if (!Array.isArray(incoming) || !incoming.length) return 0;
       let changed = 0;
@@ -675,11 +800,22 @@ const Store = (() => {
       for (const row of incoming) {
         const type = String(row?.entityType || row?.entity_type || '').trim();
         const id = Number(row?.entityId ?? row?.entity_id);
-        if (type !== 'op_task' || !Number.isFinite(id) || id <= 0) continue;
-        const idx = opTasks.findIndex(t => Number(t?.id) === id);
-        if (idx !== -1) {
-          opTasks.splice(idx, 1);
-          changed++;
+        if (!Number.isFinite(id) || id <= 0) continue;
+        if (type === 'op_task') {
+          const idx = opTasks.findIndex(t => Number(t?.id) === id);
+          if (idx !== -1) {
+            opTasks.splice(idx, 1);
+            changed++;
+          }
+          continue;
+        }
+        if (type === 'escala') {
+          const idx = escalas.findIndex(e => Number(e?.id) === id);
+          if (idx !== -1) {
+            escalas.splice(idx, 1);
+            changed++;
+          }
+          continue;
         }
       }
       if (changed) {
@@ -770,6 +906,10 @@ const Store = (() => {
         opTasks.splice(0, opTasks.length, ...payload.opTasks);
         nextOpTaskId = opTasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
       }
+      if (Array.isArray(payload.escalas)) {
+        escalas.splice(0, escalas.length, ...payload.escalas);
+        persistSnapshot();
+      }
       if (payload.webhookConfig && typeof payload.webhookConfig === 'object') {
         Object.assign(webhookConfig, payload.webhookConfig);
       }
@@ -856,18 +996,34 @@ function getAtenuacaoThresholds() {
 
 function updateThermometer(dbm) {
   const { minDbm, maxDbm } = THERMO_CONFIG;
-  const n = Number(dbm);
-  if (!Number.isFinite(n)) return;
+  const raw = typeof dbm === 'string' ? dbm.replace(',', '.') : dbm;
+  const n = Number(raw);
   const clamped = Math.min(Math.max(n, minDbm), maxDbm);
   const percent = ((maxDbm - clamped) / (maxDbm - minDbm)) * 100;
   const needle = document.getElementById('thermo-needle');
-  if (needle) needle.style.left = `${percent.toFixed(1)}%`;
+  const bar = needle?.parentElement;
+  if (!needle) return;
+  if (!Number.isFinite(n) || n === 0) {
+    // Sem leitura: esconde a agulha e posiciona no início (estável).
+    needle.style.left = `0%`;
+    needle.style.opacity = '0';
+    if (bar) bar.dataset.thermoState = 'nd';
+    return;
+  }
+  needle.style.opacity = '1';
+  needle.style.left = `${percent.toFixed(1)}%`;
+  if (bar) bar.dataset.thermoState = 'ok';
 }
 
 function updateStats(totalItems, criticalPercent, dbm) {
   const el = document.getElementById('thermo-stats');
   if (!el) return;
-  el.textContent = `${Number(totalItems) || 0} itens · ${Number(criticalPercent) || 0}% crítico/alto · Indicador posicionado na média atual`;
+  const raw = typeof dbm === 'string' ? dbm.replace(',', '.') : dbm;
+  const n = Number(raw);
+  const hasDbm = Number.isFinite(n) && n !== 0;
+  el.textContent = `${Number(totalItems) || 0} itens · ${Number(criticalPercent) || 0}% crítico/alto · ${
+    hasDbm ? 'Indicador posicionado na média atual' : 'Sem leitura média (N/D)'
+  }`;
 }
 
 
@@ -2438,16 +2594,23 @@ const TaskService = {
     'manutencao-corretiva': 'Manutenção corretiva',
   },
 
+  _normStatus(status) {
+    return String(status ?? '').trim().toLowerCase();
+  },
+
   _isDoneStatus(status) {
-    return status === 'Concluída' || status === 'Finalizada' || status === 'Finalizado';
+    const s = this._normStatus(status);
+    return s === 'concluída' || s === 'concluida' || s === 'finalizada' || s === 'finalizado';
   },
 
   _isPendingStatus(status) {
-    return status === 'Pendente' || status === 'Criada' || status === 'Backlog';
+    const s = this._normStatus(status);
+    return s === 'pendente' || s === 'criada' || s === 'backlog' || s === 'a iniciar';
   },
 
   _isProgressStatus(status) {
-    return status === 'Em andamento' || status === 'Validação' || status === 'Envio pendente' || status === 'Necessário adequação';
+    const s = this._normStatus(status);
+    return s === 'em andamento' || s === 'validação' || s === 'validacao' || s === 'envio pendente' || s === 'necessário adequação' || s === 'necessario adequação' || s === 'necessario adequacao' || s === 'necessário adequacao';
   },
 
   _isLateTask(task) {
@@ -2683,17 +2846,29 @@ const OpTaskService = {
       // No "Atendimento ao Cliente", subtarefas não devem inflar contadores de tarefas.
       if (t.categoria === 'atendimento-cliente' && t.parentTaskId) return;
       if (t.categoria === 'certificacao-cemig') {
-        const s = t.status;
-        if (s === 'Backlog') counts.Criada++;
-        else if (['Em andamento', 'Validação', 'Envio pendente', 'Necessário adequação'].includes(s)) counts['Em andamento']++;
-        else if (s === 'Finalizado') counts.Finalizada++;
+        const s = TaskService._normStatus(t.status);
+        if (s === 'backlog') counts.Criada++;
+        else if (TaskService._isProgressStatus(t.status)) counts['Em andamento']++;
+        else if (s === 'finalizado' || s === 'finalizada') counts.Finalizada++;
         return;
       }
-      if (t.status === 'Backlog' || t.status === 'Criada' || t.status === 'A iniciar') {
+      if (TaskService._isPendingStatus(t.status) || TaskService._normStatus(t.status) === 'backlog') {
         counts.Criada++;
         counts.Backlog++;
         return;
       }
+      if (TaskService._isProgressStatus(t.status)) {
+        counts['Em andamento']++;
+        return;
+      }
+      if (TaskService._isDoneStatus(t.status)) {
+        // Distingue concluída x finalizada quando for possível; caso contrário, cai em Finalizada.
+        const s = TaskService._normStatus(t.status);
+        if (s.startsWith('conclu')) counts.Concluída++;
+        else counts.Finalizada++;
+        return;
+      }
+      // Fallback: se bater exatamente, soma no bucket
       if (counts[t.status] !== undefined) counts[t.status]++;
     });
     return counts;
@@ -3498,6 +3673,7 @@ const UI = {
       'troca-poste': { title: 'Troca de Poste', crumb: 'Atividade de manutenção' },
       'otimizacao-rede': { title: 'Otimização de Rede', crumb: 'Projetos de rede' },
       'certificacao-cemig': { title: 'Certificação Cemig', crumb: 'Projetos de rede' },
+      escalas: { title: 'Escalas', crumb: 'Gestão' },
       atendimento: { title: 'Atendimento ao cliente', crumb: 'Central de atendimento' },
       'correcao-atenuacao': { title: 'Correção de atenuação', crumb: 'Atividade de manutenção' },
       'troca-etiqueta': { title: 'Troca de etiqueta', crumb: 'Atividade de manutenção' },
@@ -3537,9 +3713,11 @@ const UI = {
       document.getElementById('page-tarefas')?.classList.add('active');
       this.renderOpPage();
     }
+    if (page === 'escalas') this.renderEscalasPage();
     if (page === 'correcao-atenuacao') this.renderAtenuacaoDashboardPage();
     if (page === 'troca-etiqueta') this.renderTrocaEtiquetaPage();
     if (page === 'atendimento') this.renderAtendimentoPage();
+    if (page === 'config') Controllers.configSecret?.syncUi?.();
     if (page === 'dashboard') {
       this.renderDashboard();
       // Garante atualização imediata do ranking/atividade ao entrar no dashboard
@@ -3565,6 +3743,7 @@ const UI = {
       'troca-poste',
       'otimizacao-rede',
       'certificacao-cemig',
+      'escalas',
       'atendimento',
       'correcao-atenuacao',
       'troca-etiqueta',
@@ -3627,6 +3806,588 @@ const UI = {
     this.renderTaskTable();
     // Atualiza widgets do dashboard (Equipe/Atividade) sem precisar de F5
     queueMicrotask(() => window.PlannerDashboard?.syncFromStore?.());
+  },
+
+  /* ── Página: Escalas ────────────────────────────────────── */
+  renderEscalasPage() {
+    const els = {
+      // header count
+      headerCount: document.getElementById('escHeaderCount'),
+      exportBtn: document.getElementById('escExportBtn'),
+      // form
+      data: document.getElementById('escalaData'),
+      mes: document.getElementById('escalaMes'),
+      dia: document.getElementById('escalaDiaSemana'),
+      horaIni: document.getElementById('escalaHorarioIni'),
+      horaFim: document.getElementById('escalaHorarioFim'),
+      nome: document.getElementById('escalaNome'),
+      horas: document.getElementById('escalaHoras'),
+      btnAdd: document.getElementById('escalaAddBtn'),
+      btnAddLabel: document.getElementById('escalaAddLabel'),
+      btnClear: document.getElementById('escalaLimparBtn'),
+      // list
+      rows: document.getElementById('escRows'),
+      // panel filters
+      fFunc: document.getElementById('escalaFiltroFuncionario'),
+      fMes: document.getElementById('escalaFiltroMes'),
+      fDe: document.getElementById('escalaFiltroDataIni'),
+      fAte: document.getElementById('escalaFiltroDataFim'),
+      btnClearPeriod: document.getElementById('escalaLimparPeriodoBtn'),
+      // stats
+      statTotal: document.getElementById('escStatTotal'),
+      statMsg: document.getElementById('escStatMsg'),
+      rank: document.getElementById('escRank'),
+    };
+    if (!els.data || !els.mes || !els.dia || !els.horaIni || !els.horaFim || !els.nome || !els.horas) return;
+    if (!els.btnAdd || !els.btnClear || !els.rows) return;
+    if (!els.fFunc || !els.fMes || !els.fDe || !els.fAte || !els.btnClearPeriod) return;
+    if (!els.statTotal || !els.statMsg || !els.rank || !els.headerCount) return;
+    if (!els.btnAddLabel) return;
+    if (!els.exportBtn) return;
+
+    const canMutateEscalas = () => {
+      const u = String(getSessionUserKey() || '').trim().toLowerCase();
+      if (u === 'davyibipar' || u === 'joaoibipar' || u === 'localhost') return true;
+      // Ambiente local: libera mutações para facilitar testes.
+      try {
+        const h = String(location.hostname || '').toLowerCase();
+        if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true;
+      } catch {}
+      return false;
+    };
+
+    const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    const WEEKDAYS = [
+      { v: 1, l: 'Segunda' },
+      { v: 2, l: 'Terça' },
+      { v: 3, l: 'Quarta' },
+      { v: 4, l: 'Quinta' },
+      { v: 5, l: 'Sexta' },
+      { v: 6, l: 'Sábado' },
+      { v: 7, l: 'Domingo' },
+    ];
+
+    const norm = (s) => String(s || '').trim();
+    const key = (s) => norm(s).toLowerCase();
+    const colorClassForName = (nome) => {
+      const k = key(nome);
+      if (k === 'davy') return 'davy';
+      if (k === 'matheus') return 'matheus';
+      if (k === 'mauricio') return 'mauricio';
+      if (k === 'joão vitro' || k === 'joao vitro' || k === 'joão vitor' || k === 'joao vitor') return 'joao-vitor';
+      if (k === 'joão pedro' || k === 'joao pedro') return 'joao-pedro';
+      return '';
+    };
+    const fmtMonth = (m) => MONTHS[(Number(m) || 1) - 1] || '—';
+    const fmtWeekday = (d) => (WEEKDAYS.find(x => Number(x.v) === Number(d))?.l) || '—';
+    const fmtDateBr = (ymd) => {
+      const s = String(ymd || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '—';
+      const dd = s.slice(8, 10);
+      const mm = s.slice(5, 7);
+      return `${dd}/${mm}`;
+    };
+    const fmtHours = (h) => {
+      const n = Number(h) || 0;
+      return (n % 1 === 0) ? String(Math.round(n)) : n.toFixed(1);
+    };
+    const shiftHoursFromTimes = (ini, fim) => {
+      const a = String(ini || '').trim();
+      const b = String(fim || '').trim();
+      if (!/^\d{2}:\d{2}$/.test(a) || !/^\d{2}:\d{2}$/.test(b)) return null;
+      const [h1, m1] = a.split(':').map(Number);
+      const [h2, m2] = b.split(':').map(Number);
+      if (![h1, m1, h2, m2].every(Number.isFinite)) return null;
+      let x = h1 * 60 + m1;
+      let y = h2 * 60 + m2;
+      if (y < x) y += 24 * 60; // virada de dia
+      const diff = (y - x) / 60;
+      return diff > 0 ? diff : null;
+    };
+    const safeHours = (h) => {
+      const n = Number(h);
+      if (!Number.isFinite(n) || n <= 0) return 8;
+      return n;
+    };
+    const hoursForItem = (e) => {
+      const ini = e?.horarioInicio || e?.horario || '';
+      const fim = e?.horarioFim || e?.horario || '';
+      const calc = shiftHoursFromTimes(ini, fim);
+      if (Number.isFinite(calc) && calc > 0) return calc;
+      // Fim de semana: 06:00 -> 06:00 equivale a 24h (virada completa)
+      const diaSemana = Number(e?.diaSemana) || 0;
+      if ((diaSemana === 6 || diaSemana === 7) && String(ini).slice(0, 5) === String(fim).slice(0, 5)) return 24;
+      return safeHours(e?.horas);
+    };
+    const jsDayToDiaSemana = (jsDay) => (jsDay === 0 ? 7 : jsDay);
+
+    const clearError = (input) => input?.classList?.remove?.('esc-is-error');
+    const setError = (input) => input?.classList?.add?.('esc-is-error');
+
+    const ensureSelectOptions = () => {
+      if (!els.mes.options.length) {
+        els.mes.innerHTML = `<option value="">Selecione...</option>` + MONTHS.map((m, i) => `<option value="${i + 1}">${Utils.escapeHtml(m)}</option>`).join('');
+      }
+      if (!els.dia.options.length) {
+        els.dia.innerHTML = `<option value="">Selecione...</option>` + WEEKDAYS.map((d) => `<option value="${d.v}">${Utils.escapeHtml(d.l)}</option>`).join('');
+      }
+      if (!els.fMes.options.length) {
+        els.fMes.innerHTML = `<option value="">Todos</option>` + MONTHS.map((m, i) => `<option value="${i + 1}">${Utils.escapeHtml(m)}</option>`).join('');
+      }
+    };
+
+    const applyDefaultMonthFilterOnce = () => {
+      if (els.fMes.dataset.escDefaultMonthApplied === '1') return;
+      els.fMes.dataset.escDefaultMonthApplied = '1';
+      // Só aplica default se o usuário ainda não escolheu nada.
+      if (String(els.fMes.value || '').trim()) return;
+      const now = new Date();
+      const cur = String(now.getMonth() + 1);
+      els.fMes.value = cur;
+    };
+
+    const limpar = () => {
+      els.data.value = '';
+      els.mes.value = '';
+      els.dia.value = '';
+      els.horaIni.value = '';
+      els.horaFim.value = '';
+      els.nome.value = '';
+      els.horas.value = '';
+      clearError(els.nome);
+      clearError(els.horaIni);
+      clearError(els.horaFim);
+      clearError(els.horas);
+      els.rows.dataset.escEditingId = '0';
+      els.btnAddLabel.textContent = 'Adicionar';
+      try { els.nome.focus(); } catch {}
+    };
+
+    const aplicarDerivacaoData = () => {
+      const s = String(els.data.value || '').trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return;
+      const d = new Date(`${s}T00:00:00`);
+      if (!Number.isFinite(d.getTime())) return;
+      els.mes.value = String(d.getMonth() + 1);
+      els.dia.value = String(jsDayToDiaSemana(d.getDay()));
+    };
+
+    const aplicarHorarioPadraoDiaSemana = ({ force = false } = {}) => {
+      const diaSemana = Number(els.dia.value) || 0;
+      const isDiaUtil = diaSemana >= 1 && diaSemana <= 5; // segunda a sexta
+      const isFimSemana = diaSemana === 6 || diaSemana === 7; // sábado/domingo
+      if (!isDiaUtil && !isFimSemana) return;
+
+      const isEditing = String(els.rows.dataset.escEditingId || '0') !== '0';
+      const horaIniAtual = String(els.horaIni.value || '').trim();
+      const horaFimAtual = String(els.horaFim.value || '').trim();
+      const wasAuto =
+        String(els.horaIni.dataset.escAuto || '') === '1' &&
+        String(els.horaFim.dataset.escAuto || '') === '1';
+
+      // Em edição, não sobrescreve horário já definido.
+      if (isEditing && (horaIniAtual || horaFimAtual)) return;
+
+      // Fora de edição, preenche quando estiver vazio ou quando era auto-preenchido e o dia mudou.
+      if (force || (!horaIniAtual && !horaFimAtual) || wasAuto) {
+        if (isDiaUtil) {
+          els.horaIni.value = '19:00';
+          els.horaFim.value = '06:00';
+        } else {
+          els.horaIni.value = '06:00';
+          els.horaFim.value = '06:00';
+        }
+        els.horaIni.dataset.escAuto = '1';
+        els.horaFim.dataset.escAuto = '1';
+        clearError(els.horaIni);
+        clearError(els.horaFim);
+      }
+    };
+
+    const FIXED_NAMES = ['Davy', 'Matheus', 'Mauricio', 'João Vitro', 'João Pedro'];
+    const updateFuncOptions = () => {
+      const prev = String(els.fFunc.value || '');
+      els.fFunc.innerHTML =
+        `<option value="">Todos</option>` +
+        FIXED_NAMES.map(n => `<option value="${Utils.escapeHtml(n)}">${Utils.escapeHtml(n)}</option>`).join('');
+      if (prev && FIXED_NAMES.includes(prev)) els.fFunc.value = prev;
+    };
+
+    const applyFilters = (items) => {
+      const selectedName = norm(els.fFunc.value);
+      const selectedMes = Number(els.fMes.value) || 0;
+      const de = String(els.fDe.value || '').trim();
+      const ate = String(els.fAte.value || '').trim();
+      return items.filter((e) => {
+        if (!e) return false;
+        const nome = norm(e?.nome);
+        const horaIni = norm(e?.horarioInicio || e?.horario);
+        const horaFim = norm(e?.horarioFim || e?.horario);
+        if (!nome || !horaIni || !horaFim) return false;
+        const ymd = String(e?.data || '').slice(0, 10);
+        if (selectedName && key(nome) !== key(selectedName)) return false;
+        if (selectedMes && Number(e?.mes) !== selectedMes) return false;
+        if ((de || ate)) {
+          if (!ymd) return false;
+          if (de && ymd < de) return false;
+          if (ate && ymd > ate) return false;
+        }
+        return true;
+      });
+    };
+
+    const renderRows = () => {
+      const all = Store.getEscalas();
+      const filtered = applyFilters(all);
+
+      els.headerCount.textContent = `${filtered.length} registro${filtered.length === 1 ? '' : 's'}`;
+
+      if (!filtered.length) {
+        els.rows.innerHTML = `
+          <div class="esc-empty">
+            <div class="esc-empty-ic" aria-hidden="true"></div>
+            <div class="esc-empty-txt">Nenhuma escala cadastrada ainda.</div>
+          </div>
+        `;
+        return;
+      }
+
+      const rows = filtered.slice().sort((a, b) =>
+        String(a?.data || '').localeCompare(String(b?.data || '')) ||
+        String(a?.horarioInicio || a?.horario || '').localeCompare(String(b?.horarioInicio || b?.horario || '')) ||
+        key(a?.nome).localeCompare(key(b?.nome), 'pt-BR'),
+      );
+
+      const can = canMutateEscalas();
+      els.rows.innerHTML = rows.map((r) => {
+        const id = Number(r?.id) || 0;
+        const ymd = String(r?.data || '').slice(0, 10) || '';
+        const ini = String(r?.horarioInicio || r?.horario || '').slice(0, 5);
+        const fim = String(r?.horarioFim || r?.horario || '').slice(0, 5);
+        const diaTxt = fmtWeekday(r?.diaSemana);
+        const mesTxt = fmtMonth(r?.mes);
+        const nome = norm(r?.nome) || '—';
+        const c = colorClassForName(nome);
+        return `
+          <div class="esc-row" data-esc-id="${id}">
+            <div class="esc-cell mono">${Utils.escapeHtml(fmtDateBr(ymd))}</div>
+            <div class="esc-cell mono">${Utils.escapeHtml(ini)}</div>
+            <div class="esc-cell mono">${Utils.escapeHtml(fim)}</div>
+            <div class="esc-cell esc-col-weekday">${Utils.escapeHtml(diaTxt)}</div>
+            <div class="esc-cell esc-col-month">${Utils.escapeHtml(mesTxt)}</div>
+            <div class="esc-cell"><span class="esc-pill ${c ? `esc-pill--${c}` : ''}" title="${Utils.escapeHtml(nome)}">${Utils.escapeHtml(nome)}</span></div>
+            ${can ? `
+              <div class="esc-row-actions">
+                <button class="esc-edit" type="button" aria-label="Editar" title="Editar">✎</button>
+                <button class="esc-del" type="button" aria-label="Remover" title="Remover">✕</button>
+              </div>
+            ` : `<div></div>`}
+          </div>
+        `;
+      }).join('');
+    };
+
+    const renderStats = () => {
+      const all = Store.getEscalas();
+      const selectedMes = Number(els.fMes.value) || 0;
+      const de = String(els.fDe.value || '').trim();
+      const ate = String(els.fAte.value || '').trim();
+      const selectedName = norm(els.fFunc.value);
+
+      const inPeriod = (ymd) => {
+        const d = String(ymd || '').slice(0, 10);
+        if (!d) return false;
+        if (de && d < de) return false;
+        if (ate && d > ate) return false;
+        return true;
+      };
+
+      // total no filtro (inclui funcionário selecionado)
+      const filteredTotal = all.filter((e) => {
+        if (!e) return false;
+        if (selectedName && key(e?.nome) !== key(selectedName)) return false;
+        if (selectedMes && Number(e?.mes) !== selectedMes) return false;
+        if ((de || ate) && !inPeriod(e?.data)) return false;
+        return true;
+      });
+      const totalHours = filteredTotal.reduce((s, e) => s + hoursForItem(e), 0);
+      els.statTotal.textContent = fmtHours(totalHours);
+      els.statMsg.hidden = totalHours > 0;
+
+      // ranking (mês + período, independente do funcionário selecionado)
+      const base = all.filter((e) => {
+        if (!e) return false;
+        if (selectedMes && Number(e?.mes) !== selectedMes) return false;
+        if ((de || ate) && !inPeriod(e?.data)) return false;
+        return true;
+      });
+      const map = new Map(); // key -> { nome, horas, turnos }
+      base.forEach((e) => {
+        const k = key(e?.nome);
+        if (!k) return;
+        if (!map.has(k)) map.set(k, { nome: norm(e?.nome), horas: 0, turnos: 0 });
+        const obj = map.get(k);
+        obj.horas += hoursForItem(e);
+        obj.turnos += 1;
+      });
+      const rank = [...map.values()].sort((a, b) => (b.horas - a.horas) || a.nome.localeCompare(b.nome, 'pt-BR'));
+      if (!rank.length) {
+        els.rank.innerHTML = `<div class="esc-rank-empty">Sem dados no filtro.</div>`;
+        return;
+      }
+      els.rank.innerHTML = rank.map((r) => {
+        const c = colorClassForName(r.nome);
+        return `
+          <div class="esc-rank-card">
+            <div class="esc-rank-left">
+              <div class="esc-rank-name">${Utils.escapeHtml(r.nome)}</div>
+              <div class="esc-rank-sub">${Utils.escapeHtml(String(r.turnos))} turnos</div>
+            </div>
+            <div class="esc-rank-hours mono ${c ? `esc-rank-hours--${c}` : ''}">${Utils.escapeHtml(fmtHours(r.horas))}h</div>
+          </div>
+        `;
+      }).join('');
+    };
+
+    const renderAll = () => {
+      updateFuncOptions();
+      renderRows();
+      renderStats();
+      // Permissões (somente Davy e João podem mutar)
+      const can = canMutateEscalas();
+      els.btnAdd.hidden = !can;
+      els.btnClear.hidden = !can;
+      // Bloqueia campos de edição quando não pode mutar
+      [els.data, els.mes, els.dia, els.horaIni, els.horaFim, els.nome, els.horas].forEach((x) => {
+        if (x) x.disabled = !can;
+      });
+    };
+
+    const exportCsv = () => {
+      const all = Store.getEscalas();
+      const filtered = applyFilters(all)
+        .slice()
+        .sort((a, b) =>
+          String(a?.data || '').localeCompare(String(b?.data || '')) ||
+          String(a?.horarioInicio || a?.horario || '').localeCompare(String(b?.horarioInicio || b?.horario || '')) ||
+          key(a?.nome).localeCompare(key(b?.nome), 'pt-BR')
+        );
+
+      const csvEsc = (v) => {
+        const s = String(v ?? '');
+        const safe = s.replace(/"/g, '""');
+        return `"${safe}"`;
+      };
+
+      const hoursForExport = (e) => {
+        const ini = e?.horarioInicio || e?.horario || '';
+        const fim = e?.horarioFim || e?.horario || '';
+        const calc = shiftHoursFromTimes(ini, fim);
+      let n = (Number.isFinite(calc) && calc > 0) ? calc : null;
+      if (!(Number.isFinite(n) && n > 0)) {
+        const diaSemana = Number(e?.diaSemana) || 0;
+        if ((diaSemana === 6 || diaSemana === 7) && String(ini).slice(0, 5) === String(fim).slice(0, 5)) n = 24;
+        else n = safeHours(e?.horas);
+      }
+        return (n % 1 === 0) ? String(Math.round(n)) : n.toFixed(2);
+      };
+
+      const header = ['Data', 'Entrada', 'Saída', 'Dia', 'Mês', 'Funcionário', 'Horas'];
+      const rows = filtered.map((e) => ([
+        fmtDateBr(String(e?.data || '').slice(0, 10)),
+        String(e?.horarioInicio || e?.horario || '').slice(0, 5),
+        String(e?.horarioFim || e?.horario || '').slice(0, 5),
+        fmtWeekday(e?.diaSemana),
+        fmtMonth(e?.mes),
+        norm(e?.nome),
+        hoursForExport(e),
+      ]));
+
+      const sep = ';'; // melhor pra pt-BR (Excel)
+      const bom = '\uFEFF';
+      const body =
+        bom +
+        header.map(csvEsc).join(sep) + '\r\n' +
+        rows.map(r => r.map(csvEsc).join(sep)).join('\r\n');
+
+      const name = `escalas_${new Date().toISOString().slice(0,10)}.csv`;
+      const blob = new Blob([body], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 800);
+    };
+
+    const adicionar = () => {
+      const dataYmd = String(els.data.value || '').trim();
+      const horaIni = String(els.horaIni.value || '').trim();
+      const horaFim = String(els.horaFim.value || '').trim();
+      const nome = norm(els.nome.value);
+      let horas = Number(String(els.horas.value || '').replace(',', '.'));
+      // Se horas não foi informado, calcula automaticamente (considera virada de dia).
+      const calcHoras = () => {
+        if (!/^\d{2}:\d{2}$/.test(horaIni) || !/^\d{2}:\d{2}$/.test(horaFim)) return null;
+        const [h1, m1] = horaIni.split(':').map(Number);
+        const [h2, m2] = horaFim.split(':').map(Number);
+        if (![h1, m1, h2, m2].every(Number.isFinite)) return null;
+        let a = h1 * 60 + m1;
+        let b = h2 * 60 + m2;
+        if (b < a) b += 24 * 60; // virou o dia
+        const diff = (b - a) / 60;
+        return diff > 0 ? diff : null;
+      };
+      if (!Number.isFinite(horas) || horas <= 0) {
+        // Se data foi escolhida, deriva mês/dia antes do auto-cálculo.
+        aplicarDerivacaoData();
+        const diaSemanaTmp = Number(els.dia.value) || 0;
+
+        const auto = calcHoras();
+        if (auto) horas = auto;
+        else if ((diaSemanaTmp === 6 || diaSemanaTmp === 7) && String(horaIni).slice(0, 5) === String(horaFim).slice(0, 5)) horas = 24;
+        else horas = 8;
+      }
+
+      let ok = true;
+      if (!nome) { setError(els.nome); ok = false; }
+      if (!horaIni) { setError(els.horaIni); ok = false; }
+      if (!horaFim) { setError(els.horaFim); ok = false; }
+      if (!ok) return;
+
+      // Se data foi escolhida, deriva mês/dia.
+      aplicarDerivacaoData();
+      const mes = Number(els.mes.value) || 0;
+      const diaSemana = Number(els.dia.value) || 0;
+
+      const editingId = Number(els.rows.dataset.escEditingId || 0);
+      if (editingId > 0) {
+        Store.updateEscala(editingId, {
+          data: dataYmd,
+          mes,
+          diaSemana,
+          horario: horaIni,
+          horarioInicio: horaIni,
+          horarioFim: horaFim,
+          nome,
+          horas,
+        });
+        try { ToastService?.show?.('Escala atualizada.', 'success'); } catch {}
+      } else {
+        Store.addEscala({ data: dataYmd, mes, diaSemana, horario: horaIni, horarioInicio: horaIni, horarioFim: horaFim, nome, horas });
+        try { ToastService?.show?.('Escala adicionada.', 'success'); } catch {}
+      }
+      limpar();
+      renderAll();
+    };
+
+    ensureSelectOptions();
+    applyDefaultMonthFilterOnce();
+    renderAll();
+
+    if (!els.rows.dataset.escBound) {
+      els.rows.dataset.escBound = '1';
+      els.rows.addEventListener('click', (e) => {
+        if (!canMutateEscalas()) return;
+        const row = e.target?.closest?.('[data-esc-id]');
+        if (!row) return;
+        const id = Number(row?.getAttribute?.('data-esc-id') || 0);
+        if (!id) return;
+
+        const editBtn = e.target?.closest?.('.esc-edit');
+        if (editBtn) {
+          const item = Store.getEscalas().find(x => Number(x?.id) === id);
+          if (!item) return;
+          els.rows.dataset.escEditingId = String(id);
+          els.btnAddLabel.textContent = 'Atualizar';
+          els.data.value = String(item?.data || '').slice(0, 10);
+          els.mes.value = String(Number(item?.mes) || '');
+          els.dia.value = String(Number(item?.diaSemana) || '');
+          els.horaIni.value = String(item?.horarioInicio || item?.horario || '').slice(0, 5);
+          els.horaFim.value = String(item?.horarioFim || item?.horario || '').slice(0, 5);
+          els.nome.value = String(item?.nome || '');
+          els.horas.value = String(Number(item?.horas) || '');
+          clearError(els.nome);
+          clearError(els.horaIni);
+          clearError(els.horaFim);
+          clearError(els.horas);
+          try { els.nome.focus(); } catch {}
+          return;
+        }
+
+        const delBtn = e.target?.closest?.('.esc-del');
+        if (!delBtn) return;
+        Store.deleteEscala(id);
+        renderAll();
+        try { ToastService?.show?.('Escala removida.', 'info'); } catch {}
+      });
+    }
+    if (!els.btnAdd.dataset.escBound) {
+      els.btnAdd.dataset.escBound = '1';
+      els.btnAdd.addEventListener('click', adicionar);
+    }
+    if (!els.btnClear.dataset.escBound) {
+      els.btnClear.dataset.escBound = '1';
+      els.btnClear.addEventListener('click', limpar);
+    }
+    if (!els.exportBtn.dataset.escBound) {
+      els.exportBtn.dataset.escBound = '1';
+      els.exportBtn.addEventListener('click', exportCsv);
+    }
+
+    // filtros
+    const bindRecalc = (node) => {
+      if (!node || node.dataset.escBound) return;
+      node.dataset.escBound = '1';
+      node.addEventListener('change', () => renderAll());
+      node.addEventListener('input', () => renderAll());
+    };
+    bindRecalc(els.fFunc);
+    bindRecalc(els.fMes);
+    bindRecalc(els.fDe);
+    bindRecalc(els.fAte);
+
+    if (!els.btnClearPeriod.dataset.escBound) {
+      els.btnClearPeriod.dataset.escBound = '1';
+      els.btnClearPeriod.addEventListener('click', () => {
+        els.fDe.value = '';
+        els.fAte.value = '';
+        renderAll();
+      });
+    }
+
+    // validação: remove borda ao digitar
+    const bindClearError = (node) => {
+      if (!node || node.dataset.escClearBound) return;
+      node.dataset.escClearBound = '1';
+      node.addEventListener('input', () => {
+        clearError(node);
+        if (node === els.horaIni || node === els.horaFim) node.dataset.escAuto = '0';
+      });
+    };
+    bindClearError(els.nome);
+    bindClearError(els.horaIni);
+    bindClearError(els.horaFim);
+    bindClearError(els.horas);
+
+    if (!els.data.dataset.escBound) {
+      els.data.dataset.escBound = '1';
+      els.data.addEventListener('change', () => {
+        aplicarDerivacaoData();
+        aplicarHorarioPadraoDiaSemana();
+        renderAll();
+      });
+    }
+
+    if (!els.dia.dataset.escBound) {
+      els.dia.dataset.escBound = '1';
+      els.dia.addEventListener('change', () => {
+        aplicarHorarioPadraoDiaSemana();
+        renderAll();
+      });
+    }
   },
 
   /* ── Página dedicada: Atendimento ao cliente (quadro estilo kanban) ───── */
@@ -5127,16 +5888,30 @@ const UI = {
     const s = String(text || '');
     if (!s) return null;
     // Aceita "-22.01 dBm" / "-28 dB" etc.
-    const m = s.match(/(-?\d{1,3}(?:[.,]\d{1,2})?)\s*d\s*b\s*m?\b/i);
-    if (!m) return null;
-    const n = Number(String(m[1]).replace(',', '.'));
-    return Number.isFinite(n) ? n : null;
+    const m1 = s.match(/(-?\d{1,3}(?:[.,]\d{1,2})?)\s*d\s*b\s*m?\b/i);
+    if (m1) {
+      const n1 = Number(String(m1[1]).replace(',', '.'));
+      return Number.isFinite(n1) ? n1 : null;
+    }
+    // Fallback: alguns registros salvam sem unidade (ex.: "Atenuação: -23.5" ou "ATN -27").
+    const m2 = s.match(/\b(atenua(?:ção|cao)|atn)\b[^-0-9]{0,12}(-?\d{1,3}(?:[.,]\d{1,2})?)\b/i);
+    if (m2) {
+      const n2 = Number(String(m2[2]).replace(',', '.'));
+      return Number.isFinite(n2) ? n2 : null;
+    }
+    return null;
   },
   _atnDb(task) {
     if (!task || typeof task !== 'object') return null;
     const direct =
       task.atenuacaoDb ??
       task.atenuacaoDB ??
+      task.atenuacaoDbm ??
+      task.atenuacaoDBM ??
+      task.atenuacao_db ??
+      task.atenuacao_dbm ??
+      task.dbm ??
+      task.DBM ??
       task.atenuacao ??
       task.db ??
       task.dB ??
@@ -6343,12 +7118,23 @@ const ChatMentionNotifs = {
   },
   processIncomingTaskNotifications(notifs) {
     if (!Array.isArray(notifs) || !notifs.length) return;
+    const myKey = String(getSessionUserKey() || '').trim().toLowerCase();
     const inbox = this._readInbox();
     let changed = false;
     for (const n of notifs) {
       const id = Number(n?.id);
       if (!Number.isFinite(id) || id <= 0) continue;
       if (inbox.items.some(x => x.type === 'task_added' && Number(x.id) === id)) continue;
+      const kind = String(n?.kind || '').trim();
+      if (kind === 'user_ping') {
+        const msg = String(n?.message || '');
+        // Convenção: "@userKey ..." no início da mensagem
+        const m = msg.match(/^@([a-z0-9._-]+)\b/i);
+        const target = String(m?.[1] || '').toLowerCase();
+        if (!target || target !== myKey) continue;
+        // Som alto de "burro" para o joaoibipar ao receber a notificação.
+        if (myKey === 'joaoibipar') Controllers.burroNotif?.play?.(id);
+      }
       inbox.items.unshift({
         type: 'task_added',
         id,
@@ -6576,7 +7362,7 @@ const Controllers = {
       const display = logged ? (storedName || 'Usuário') : '—';
 
       nameEl.textContent = display;
-      roleEl.textContent = logged ? 'Administrador' : '—';
+      roleEl.textContent = logged ? getCargoForUserKey() : '—';
     },
     async _login(user, pass) {
       if (!user || !pass) {
@@ -8838,6 +9624,173 @@ const Controllers = {
     },
   },
 
+  /* ── Easter egg: sequência numérica (Configurações) ─────── */
+  configSecret: {
+    _seq: '91166734',
+    _buf: '',
+    init() {
+      if (this._inited) return;
+      this._inited = true;
+
+      const onKeyDown = (e) => {
+        if (Store.currentPage !== 'config') return;
+        const k = String(e.key || '');
+        if (!/^\d$/.test(k)) return;
+
+        this._buf = (this._buf + k).slice(-32);
+        if (!this._buf.endsWith(this._seq)) return;
+
+        const btn = document.getElementById('configSecretBtn');
+        if (btn) btn.hidden = false;
+      };
+
+      document.addEventListener('keydown', onKeyDown, true);
+
+      document.getElementById('configSecretBtn')?.addEventListener('click', async () => {
+        try {
+          const res = await ApiService.sendUserPing({
+            to: 'joaoibipar',
+            title: 'Código secreto',
+            message: 'Você recebeu uma notificação do botão "aperte".',
+          });
+          if (res && res.ok) {
+            ToastService?.show?.('Notificação enviada para joaoibipar.', 'success');
+          } else {
+            ToastService?.show?.('Não consegui enviar a notificação no servidor.', 'warning');
+          }
+        } catch {
+          ToastService?.show?.('Falha ao enviar notificação.', 'danger');
+        }
+      });
+    },
+    syncUi() {
+      const btn = document.getElementById('configSecretBtn');
+      if (!btn) return;
+      // Sempre começa oculto ao entrar/atualizar Configurações.
+      btn.hidden = true;
+      this._buf = '';
+    },
+  },
+
+  /* ── Som de notificação (burro) ───────────────────────── */
+  burroNotif: {
+    _audioCtx: null,
+    _unlocked: false,
+    _audioEl: null,
+    _lastPlayedIdKey: 'planner.burroNotif.lastPlayedId.v1',
+    init() {
+      if (this._inited) return;
+      this._inited = true;
+      const unlock = async () => {
+        if (this._unlocked) return;
+        try {
+          // Preferir MP3 (som real). WebAudio fica como fallback.
+          if (!this._audioEl) {
+            const v = (window.APP_CONFIG && window.APP_CONFIG.appBuild) ? String(window.APP_CONFIG.appBuild) : '';
+            const qs = v ? `?v=${encodeURIComponent(v)}` : '';
+            this._audioEl = new Audio(`./assets/sounds/burro.mp3${qs}`);
+            this._audioEl.preload = 'auto';
+            this._audioEl.volume = 1.0;
+          }
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          if (!Ctx) return;
+          this._audioCtx = this._audioCtx || new Ctx();
+          if (this._audioCtx.state === 'suspended') await this._audioCtx.resume();
+          this._unlocked = true;
+        } catch {
+          /* ignore */
+        }
+      };
+      // Browsers bloqueiam áudio sem gesto do usuário: destrava no 1º clique/tecla.
+      document.addEventListener('pointerdown', unlock, { once: true, capture: true });
+      document.addEventListener('keydown', unlock, { once: true, capture: true });
+    },
+    _getLastPlayedId() {
+      try { return Number(localStorage.getItem(this._lastPlayedIdKey) || 0) || 0; } catch { return 0; }
+    },
+    _setLastPlayedId(id) {
+      try { localStorage.setItem(this._lastPlayedIdKey, String(Number(id) || 0)); } catch {}
+    },
+    play(notifId) {
+      const id = Number(notifId) || 0;
+      if (id <= 0) return;
+      if (id <= this._getLastPlayedId()) return;
+      this._setLastPlayedId(id);
+
+      try {
+        // Preferência: tocar o MP3 real do burro.
+        if (this._audioEl) {
+          this._audioEl.pause();
+          this._audioEl.currentTime = 0;
+          const p = this._audioEl.play();
+          // Se o browser bloquear (sem gesto), cai pro fallback WebAudio quando desbloquear.
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+          return;
+        }
+
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        const ctx = this._audioCtx || new Ctx();
+        this._audioCtx = ctx;
+        if (ctx.state === 'suspended') {
+          // Se não desbloqueou ainda, não dá pra tocar — vai tocar no próximo ping.
+          return;
+        }
+        const t0 = ctx.currentTime + 0.01;
+
+        const osc = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const comp = ctx.createDynamicsCompressor();
+        const filter = ctx.createBiquadFilter();
+
+        // Timbre "bray": serrilhado + sweep forte + leve tremolo.
+        osc.type = 'sawtooth';
+        osc2.type = 'square';
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(700, t0);
+        filter.Q.setValueAtTime(6, t0);
+
+        // Volume bem alto + compressor (evita clipping feio).
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.exponentialRampToValueAtTime(3.0, t0 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.10);
+
+        comp.threshold.setValueAtTime(-18, t0);
+        comp.knee.setValueAtTime(12, t0);
+        comp.ratio.setValueAtTime(14, t0);
+        comp.attack.setValueAtTime(0.003, t0);
+        comp.release.setValueAtTime(0.12, t0);
+
+        // Sweep: sobe e desce (bem característico)
+        osc.frequency.setValueAtTime(220, t0);
+        osc.frequency.exponentialRampToValueAtTime(520, t0 + 0.20);
+        osc.frequency.exponentialRampToValueAtTime(180, t0 + 0.55);
+        osc.frequency.exponentialRampToValueAtTime(420, t0 + 0.80);
+        osc.frequency.exponentialRampToValueAtTime(200, t0 + 1.05);
+
+        osc2.frequency.setValueAtTime(110, t0);
+        osc2.frequency.exponentialRampToValueAtTime(260, t0 + 0.20);
+        osc2.frequency.exponentialRampToValueAtTime(90, t0 + 0.55);
+        osc2.frequency.exponentialRampToValueAtTime(210, t0 + 0.80);
+        osc2.frequency.exponentialRampToValueAtTime(100, t0 + 1.05);
+
+        osc.connect(filter);
+        osc2.connect(filter);
+        filter.connect(gain);
+        gain.connect(comp);
+        comp.connect(ctx.destination);
+
+        osc.start(t0);
+        osc2.start(t0);
+        osc.stop(t0 + 1.12);
+        osc2.stop(t0 + 1.12);
+      } catch {
+        /* ignore */
+      }
+    },
+  },
+
   /* ── Notes (removido) ─────────────────────────────────── */
   notes: {
     init() {
@@ -9532,6 +10485,8 @@ async function initApp() {
   Controllers.categoryTabs.init();
   Controllers.opFolders.init();
   Controllers.webhook.init();
+  Controllers.configSecret.init();
+  Controllers.burroNotif.init();
   Controllers.notes.init();
   Controllers.teamChat.init();
   ChatMentionNotifs.init();
@@ -9543,6 +10498,7 @@ async function initApp() {
     const p = Store.currentPage;
     if (p === 'dashboard') UI.renderDashboard();
     else if (p === 'tarefas' || p === 'atendimento') UI.refreshOperationalUi();
+    else if (p === 'escalas') UI.renderEscalasPage();
   });
 
   UI.renderAgenda();
@@ -9561,11 +10517,12 @@ async function initApp() {
     if (!payload || typeof payload !== 'object') return '';
     const t = Number(payload.tasks) || 0;
     const o = Number(payload.opTasks) || 0;
+    const e = Number(payload.escalas) || 0;
     const g = Number(payload.config) || 0;
     const n = Number(payload.notifications) || 0;
     const a = Number(payload.activity) || 0;
     const d = Number(payload.deleted) || 0;
-    return `${t}|${o}|${g}|${n}|${a}|${d}`;
+    return `${t}|${o}|${e}|${g}|${n}|${a}|${d}`;
   };
   const appDataSig = () => {
     const compactTasks = Store.getTasks().map(t => [
@@ -9592,7 +10549,17 @@ async function initApp() {
       String(e?.message || ''),
       String(e?.updated_at || e?.updatedAt || e?.createdAt || ''),
     ]);
-    return JSON.stringify({ compactTasks, compactOp, compactActivity });
+    const compactEscalas = Store.getEscalas().map(e => [
+      Number(e?.id) || 0,
+      String(e?.clientUid || ''),
+      Number(e?.mes) || 0,
+      Number(e?.diaSemana) || 0,
+      String(e?.horario || ''),
+      Number(e?.horas) || 0,
+      String(e?.nome || ''),
+      String(e?.updatedAt || e?.updated_at || ''),
+    ]);
+    return JSON.stringify({ compactTasks, compactOp, compactEscalas, compactActivity });
   };
   const bootstrapAndRenderIfChanged = async (timeoutMs) => {
     const before = appDataSig();
@@ -9624,6 +10591,7 @@ async function initApp() {
 
       const changedTasks = Array.isArray(ch.changedTasks) ? ch.changedTasks : [];
       const changedOp = Array.isArray(ch.changedOpTasks) ? ch.changedOpTasks : [];
+      const changedEscalas = Array.isArray(ch.changedEscalas) ? ch.changedEscalas : [];
       const changedNotifs = Array.isArray(ch.changedNotifications) ? ch.changedNotifications : [];
       const changedActivity = Array.isArray(ch.changedActivity) ? ch.changedActivity : [];
       const changedDeleted = Array.isArray(ch.changedDeletedEntities) ? ch.changedDeletedEntities : [];
@@ -9637,10 +10605,12 @@ async function initApp() {
       const changedCount =
         Store.applyRemoteTasks(changedTasks) +
         Store.applyRemoteOpTasks(changedOp) +
+        Store.applyRemoteEscalas(changedEscalas) +
         Store.applyRemoteDeletedEntities(changedDeleted);
       if (changedCount) {
         UI.renderDashboard();
-        UI.refreshOperationalUi();
+        if (Store.currentPage === 'escalas') UI.renderEscalasPage();
+        else UI.refreshOperationalUi();
             }
       if (changedNotifs.length) {
         ChatMentionNotifs.processIncomingTaskNotifications(changedNotifs);
@@ -9652,7 +10622,7 @@ async function initApp() {
 
       // Se o servidor acusar mudanca mas nao vier diff (ex.: config),
       // faz bootstrap completo como fallback.
-      if (sigChanged && !changedTasks.length && !changedOp.length && !changedDeleted.length) {
+      if (sigChanged && !changedTasks.length && !changedOp.length && !changedEscalas.length && !changedDeleted.length) {
         await bootstrapAndRenderIfChanged(15000);
       }
     } finally {
@@ -9673,6 +10643,10 @@ async function initApp() {
 
   // Produção (multiusuário): polling inteligente a cada 15s (mínimo possível sem sobrecarregar HostGator).
   setInterval(() => { void quickSyncTick(); }, 15000);
+  // Escalas: atualização mais rápida para "quase tempo real" enquanto a tela estiver aberta.
+  setInterval(() => {
+    if (Store.currentPage === 'escalas') void quickSyncTick();
+  }, 4000);
   setInterval(async () => {
     if (syncInFlight) return;
     await bootstrapAndRenderIfChanged(8000);

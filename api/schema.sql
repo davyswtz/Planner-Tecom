@@ -9,7 +9,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 
 -- ─── Tarefas gerais (Dashboard) ───────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS tasks (
-  id INT NOT NULL,
+  id BIGINT NOT NULL,
   titulo VARCHAR(255) NOT NULL,
   responsavel VARCHAR(120) NOT NULL,
   prazo DATE NULL,
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 -- ─── Tarefas operacionais (Rompimentos, Troca de poste, Atendimento) ──────
 CREATE TABLE IF NOT EXISTS op_tasks (
-  id INT NOT NULL,
+  id BIGINT NOT NULL,
   taskCode VARCHAR(32) NOT NULL,
   titulo VARCHAR(500) NOT NULL,
   setor VARCHAR(180) NOT NULL DEFAULT '',
@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS op_tasks (
   prioridade VARCHAR(24) NOT NULL DEFAULT 'Média',
   status VARCHAR(48) NOT NULL DEFAULT 'Criada',
   is_parent_task TINYINT(1) NOT NULL DEFAULT 0,
-  parent_task_id INT NULL,
+  parent_task_id BIGINT NULL,
   criadaEm VARCHAR(64) NOT NULL DEFAULT '',
   historico LONGTEXT,
   chat_thread_key VARCHAR(140) NOT NULL DEFAULT '',
@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS op_tasks (
 -- ─── Imagens embutidas na descrição (op_tasks) ─────────────────────────────
 CREATE TABLE IF NOT EXISTS op_task_image (
   id INT NOT NULL AUTO_INCREMENT,
-  op_task_id INT NOT NULL,
+  op_task_id BIGINT NOT NULL,
   mime_type VARCHAR(80) NOT NULL DEFAULT 'image/png',
   image_data LONGBLOB NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS app_notification (
   title VARCHAR(255) NOT NULL DEFAULT '',
   message VARCHAR(600) NOT NULL DEFAULT '',
   ref_type VARCHAR(32) NOT NULL DEFAULT '',  -- 'task' | 'op_task'
-  ref_id INT NULL,
+  ref_id BIGINT NULL,
   op_category VARCHAR(48) NOT NULL DEFAULT '',
   created_by VARCHAR(120) NOT NULL DEFAULT '',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -111,13 +111,39 @@ CREATE TABLE IF NOT EXISTS app_activity_event (
   severity VARCHAR(16) NOT NULL DEFAULT 'info', -- info|success|warning|danger
   message VARCHAR(600) NOT NULL DEFAULT '',
   ref_type VARCHAR(32) NOT NULL DEFAULT '', -- task|op_task
-  ref_id INT NULL,
+  ref_id BIGINT NULL,
   op_category VARCHAR(48) NOT NULL DEFAULT '',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_activity_user_created (username, created_at),
   KEY idx_activity_updated (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─── Escalas (mês/dia/horário/horas/nome) ──────────────────────────────────
+CREATE TABLE IF NOT EXISTS escalas (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  client_uid VARCHAR(48) NOT NULL,
+  data DATE NULL,
+  mes TINYINT UNSIGNED NOT NULL,          -- 1..12
+  dia_semana TINYINT UNSIGNED NOT NULL,   -- 1..7 (Segunda..Domingo)
+  horario TIME NOT NULL,
+  horario_inicio TIME NULL,
+  horario_fim TIME NULL,
+  horas DECIMAL(5,2) NOT NULL DEFAULT 1.00,
+  nome VARCHAR(120) NOT NULL,
+  created_by VARCHAR(120) NOT NULL DEFAULT '',
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_escalas_client_uid (client_uid),
+  KEY idx_escalas_nome (nome),
+  KEY idx_escalas_mes (mes),
+  KEY idx_escalas_data (data),
+  KEY idx_escalas_nome_data (nome, data),
+  KEY idx_escalas_updated_at (updated_at),
+  KEY idx_escalas_mes_dia_hora (mes, dia_semana, horario),
+  KEY idx_escalas_horarios (horario_inicio, horario_fim)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ─── Chat interno da equipe (polling no front; sem WebSocket) ─────────────

@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS op_task_image (
   id INT NOT NULL AUTO_INCREMENT,
-  op_task_id INT NOT NULL,
+  op_task_id BIGINT NOT NULL,
   mime_type VARCHAR(80) NOT NULL DEFAULT 'image/png',
   image_data LONGBLOB NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

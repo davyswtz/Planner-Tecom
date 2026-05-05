@@ -1,0 +1,1272 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Escalas — Planner Telecom</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root{
+      --color-bg-base: #0f0f13;
+      --color-bg-surface: #14141a;
+      --color-bg-card: #1a1a22;
+      --color-bg-input: #22222c;
+      --color-border: rgba(255, 255, 255, 0.07);
+      --color-border-hover: rgba(255, 255, 255, 0.14);
+      --color-text: #e8e8ec;
+      --color-muted: #6b6b7e;
+      --color-lime: #c8f135;
+      --color-lime-bg: rgba(200, 241, 53, 0.10);
+      --color-lime-border: rgba(200, 241, 53, 0.25);
+      --color-red: #ff5f5f;
+      --color-red-bg: rgba(255, 95, 95, 0.10);
+      --radius: 6px;
+      --radius-card: 8px;
+
+      /* Cores por funcionário */
+      --esc-davy: #ff5f5f;
+      --esc-davy-bg: rgba(255, 95, 95, 0.12);
+      --esc-matheus: #a78bfa;
+      --esc-matheus-bg: rgba(167, 139, 250, 0.12);
+      --esc-mauricio: #22c55e;
+      --esc-mauricio-bg: rgba(34, 197, 94, 0.12);
+      --esc-joaovitor: #ff6fb1;
+      --esc-joaovitor-bg: rgba(255, 111, 177, 0.12);
+      --esc-joaopedro: #f59e0b;
+      --esc-joaopedro-bg: rgba(245, 158, 11, 0.12);
+    }
+
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; }
+    body{
+      margin:0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: var(--color-bg-base);
+      color: var(--color-text);
+      overflow:hidden;
+    }
+    .mono{ font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+
+    .label{
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+    }
+    .label--lime{ color: var(--color-lime); letter-spacing: 0.12em; }
+    .body-13{ font-size: 13px; }
+    .muted{ color: var(--color-muted); }
+
+    .btn{
+      border-radius: 5px;
+      padding: 8px 14px;
+      font-size: 11px;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      cursor:pointer;
+      transition: 0.15s;
+      user-select:none;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      line-height: 1;
+    }
+    .btn-primary{
+      background: var(--color-lime);
+      color: #0f0f13;
+      font-weight: 700;
+      border: none;
+      padding: 8px 18px;
+    }
+    .btn-primary:hover{ background:#d4f54a; }
+    .btn-secondary{
+      background: transparent;
+      border: 1px solid var(--color-border);
+      color: var(--color-muted);
+    }
+    .btn-secondary:hover{
+      border-color: var(--color-border-hover);
+      color: var(--color-text);
+    }
+
+    .field{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      min-width: 0;
+    }
+    input, select{
+      background: var(--color-bg-input);
+      border: 1px solid var(--color-border);
+      border-radius: 5px;
+      color: var(--color-text);
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      font-size: 12px;
+      padding: 8px 10px;
+      outline:none;
+      width:100%;
+      transition: border 0.15s;
+    }
+    input[type="time"], input[type="date"], input[type="number"]{
+      font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+    }
+    input:focus, select:focus{ border-color: var(--color-lime-border); }
+    .is-error{
+      border-color: var(--color-red) !important;
+    }
+
+    .app{
+      height:100%;
+      display:flex;
+      flex-direction:column;
+    }
+
+    .header{
+      flex: 0 0 auto;
+      position: sticky;
+      top:0;
+      z-index: 10;
+      background: var(--color-bg-surface);
+      border-bottom: 1px solid var(--color-border);
+      padding: 16px 24px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:14px;
+    }
+    .header-left{ min-width: 220px; }
+    .header-title{
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--color-lime);
+      font-weight: 700;
+    }
+    .header-sub{
+      margin-top:4px;
+      font-size: 11px;
+      color: var(--color-muted);
+    }
+    .header-right{
+      font-size: 11px;
+      color: var(--color-muted);
+      white-space: nowrap;
+      display:flex;
+      align-items:center;
+      gap: 10px;
+    }
+
+    .content{
+      flex: 1 1 auto;
+      min-height: 0;
+      display:flex;
+    }
+    .left{
+      flex:1 1 auto;
+      min-width: 0;
+      display:flex;
+      flex-direction:column;
+      min-height: 0;
+    }
+    .right{
+      width: 340px;
+      flex: 0 0 auto;
+      background: var(--color-bg-surface);
+      border-left: 1px solid var(--color-border);
+      padding: 20px;
+      overflow:auto;
+    }
+
+    .form{
+      flex: 0 0 auto;
+      background: var(--color-bg-surface);
+      border-bottom: 1px solid var(--color-border);
+      padding: 18px 24px;
+    }
+    .grid-4{
+      display:grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      align-items:end;
+    }
+    .grid-5{
+      display:grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      align-items:end;
+    }
+    .grid-2{
+      display:grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      align-items:end;
+      margin-top: 12px;
+    }
+    .actions{
+      display:flex;
+      justify-content:flex-end;
+      gap: 10px;
+      margin-top: 14px;
+      flex-wrap: wrap;
+    }
+
+    .list{
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow:auto;
+      padding: 16px 24px;
+    }
+    .list-head, .row{
+      display:grid;
+      grid-template-columns: 110px 70px 70px 120px 140px 1fr 72px;
+      gap: 10px;
+      align-items:center;
+    }
+    .list-head{
+      padding: 6px 10px;
+      margin-bottom: 6px;
+      color: var(--color-muted);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .row{
+      padding: 8px 10px;
+      border-radius: 5px;
+      border: 1px solid transparent;
+      transition: 0.15s;
+    }
+    .row:hover{
+      background: var(--color-bg-card);
+      border-color: var(--color-border);
+    }
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap: 6px;
+      background: var(--color-lime-bg);
+      color: var(--color-lime);
+      border-radius: 3px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      max-width: 100%;
+      overflow:hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .pill--davy{ background: var(--esc-davy-bg); color: var(--esc-davy); }
+    .pill--matheus{ background: var(--esc-matheus-bg); color: var(--esc-matheus); }
+    .pill--mauricio{ background: var(--esc-mauricio-bg); color: var(--esc-mauricio); }
+    .pill--joao-vitor{ background: var(--esc-joaovitor-bg); color: var(--esc-joaovitor); }
+    .pill--joao-pedro{ background: var(--esc-joaopedro-bg); color: var(--esc-joaopedro); }
+    .del{
+      width: 28px;
+      height: 28px;
+      border-radius: 3px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--color-muted);
+      cursor:pointer;
+      transition: 0.15s;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      line-height: 1;
+      font-size: 14px;
+    }
+    .del:hover{
+      color: var(--color-red);
+      background: var(--color-red-bg);
+      border-color: rgba(255,95,95,0.22);
+    }
+    .edit{
+      width: 28px;
+      height: 28px;
+      border-radius: 3px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--color-muted);
+      cursor:pointer;
+      transition: 0.15s;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      line-height: 1;
+      font-size: 14px;
+    }
+    .edit:hover{
+      color: var(--color-text);
+      background: rgba(255,255,255,0.04);
+      border-color: var(--color-border);
+    }
+    .row-actions{
+      display:flex;
+      align-items:center;
+      justify-content:flex-end;
+      gap: 8px;
+    }
+
+    .empty{
+      margin-top: 28px;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      gap: 12px;
+      color: var(--color-muted);
+      text-align:center;
+      padding: 24px 10px;
+    }
+    .empty-ic{
+      width: 54px;
+      height: 54px;
+      border-radius: 999px;
+      border: 1px dashed rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.02);
+    }
+
+    .side-sec{ margin-bottom: 16px; }
+    .side-title{
+      font-size: 10px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--color-lime);
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    .side-grid-2{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .side-actions{
+      display:flex;
+      justify-content:flex-end;
+      margin-top: 10px;
+    }
+
+    .stat-card{
+      background: var(--color-bg-card);
+      border: 1px solid var(--color-border);
+      border-radius: 6px;
+      padding: 14px;
+    }
+    .stat-label{
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+    }
+    .stat-val{
+      margin-top: 8px;
+      display:flex;
+      align-items:baseline;
+      gap: 10px;
+    }
+    .stat-num{
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--color-lime);
+      line-height: 1;
+    }
+    .stat-unit{
+      font-size: 13px;
+      color: var(--color-muted);
+      font-weight: 600;
+    }
+    .stat-empty{
+      margin-top: 8px;
+      font-size: 11px;
+      color: var(--color-muted);
+    }
+
+    .rank{
+      display:grid;
+      gap: 8px;
+    }
+    .rank-card{
+      background: var(--color-bg-card);
+      border: 1px solid var(--color-border);
+      border-radius: 5px;
+      padding: 8px 12px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 12px;
+      min-width: 0;
+    }
+    .rank-left{
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      gap: 2px;
+    }
+    .rank-name{
+      font-size: 13px;
+      color: var(--color-text);
+      font-weight: 600;
+      overflow:hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .rank-sub{
+      font-size: 10px;
+      color: var(--color-muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .rank-hours{
+      font-weight: 800;
+      color: var(--color-lime);
+      white-space: nowrap;
+    }
+    .rank-hours--davy{ color: var(--esc-davy); }
+    .rank-hours--matheus{ color: var(--esc-matheus); }
+    .rank-hours--mauricio{ color: var(--esc-mauricio); }
+    .rank-hours--joao-vitor{ color: var(--esc-joaovitor); }
+    .rank-hours--joao-pedro{ color: var(--esc-joaopedro); }
+
+    /* Responsive */
+    @media (max-width: 768px){
+      body{ overflow:auto; }
+      .content{ flex-direction:column; }
+      .right{
+        width: auto;
+        border-left: none;
+        border-top: 1px solid var(--color-border);
+      }
+      .grid-4{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid-5{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid-2{ grid-template-columns: 1fr; }
+      .list-head, .row{
+        grid-template-columns: 110px 70px 70px 1fr 72px;
+      }
+      .col-month, .col-weekday{ display:none; }
+    }
+    @media (max-width: 480px){
+      .header{ padding: 12px; }
+      .form{ padding: 12px; }
+      .list{ padding: 12px; }
+      .right{ padding: 12px; }
+      .grid-4{ grid-template-columns: 1fr; }
+      .grid-5{ grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="header-left">
+        <div class="header-title">Escalas</div>
+        <div class="header-sub">Cadastro de turnos e acompanhamento de horas</div>
+      </div>
+      <div class="header-right">
+        <button class="btn btn-secondary" id="btnExport" type="button">Exportar</button>
+        <span id="headerCount">0 registros</span>
+      </div>
+    </header>
+
+    <div class="content">
+      <section class="left">
+        <div class="form" aria-label="Cadastro de escala">
+          <div class="grid-5">
+            <div class="field">
+              <div class="label">Data</div>
+              <input id="fData" type="date" />
+            </div>
+            <div class="field">
+              <div class="label">Mês</div>
+              <select id="fMes"></select>
+            </div>
+            <div class="field">
+              <div class="label">Dia da semana</div>
+              <select id="fDia"></select>
+            </div>
+            <div class="field">
+              <div class="label">Entrada</div>
+              <input id="fHoraIni" type="time" />
+            </div>
+            <div class="field">
+              <div class="label">Saída</div>
+              <input id="fHoraFim" type="time" />
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="field">
+              <div class="label">Nome do funcionário</div>
+              <select id="fNome" aria-label="Nome do funcionário">
+                <option value="">Selecione...</option>
+                <option value="Davy">Davy</option>
+                <option value="Matheus">Matheus</option>
+                <option value="Mauricio">Mauricio</option>
+                <option value="João Vitro">João Vitro</option>
+                <option value="João Pedro">João Pedro</option>
+              </select>
+            </div>
+            <div class="field">
+              <div class="label">Carga horária (h)</div>
+              <input id="fHoras" type="number" min="0" step="0.5" placeholder="Ex.: 8" />
+            </div>
+          </div>
+
+          <div class="actions">
+            <button class="btn btn-secondary" id="btnLimpar" type="button">Limpar</button>
+            <button class="btn btn-primary" id="btnAdd" type="button">
+              <span class="mono">+</span> Adicionar
+            </button>
+          </div>
+        </div>
+
+        <div class="list" aria-label="Lista de escalas">
+          <div class="list-head">
+            <div>Data</div>
+            <div>Entrada</div>
+            <div>Saída</div>
+            <div class="col-weekday">Dia</div>
+            <div class="col-month">Mês</div>
+            <div>Funcionário</div>
+            <div></div>
+          </div>
+          <div id="rows"></div>
+        </div>
+      </section>
+
+      <aside class="right" aria-label="Painel de filtros e totais">
+        <div class="side-sec">
+          <div class="side-title">Total por funcionário</div>
+          <div class="field" style="margin-bottom:10px">
+            <div class="label">Funcionário</div>
+            <select id="pFunc"></select>
+          </div>
+          <div class="field" style="margin-bottom:10px">
+            <div class="label">Mês</div>
+            <select id="pMes"></select>
+          </div>
+          <div class="side-grid-2">
+            <div class="field">
+              <div class="label">De</div>
+              <input id="pDe" type="date" />
+            </div>
+            <div class="field">
+              <div class="label">Até</div>
+              <input id="pAte" type="date" />
+            </div>
+          </div>
+          <div class="side-actions">
+            <button class="btn btn-secondary" id="btnLimparPeriodo" type="button">Limpar período</button>
+          </div>
+        </div>
+
+        <div class="side-sec">
+          <div class="stat-card">
+            <div class="stat-label">Total no filtro</div>
+            <div class="stat-val">
+              <div class="stat-num" id="statTotal">0</div>
+              <div class="stat-unit">h</div>
+            </div>
+            <div class="stat-empty" id="statMsg" hidden>Sem dados no filtro.</div>
+          </div>
+        </div>
+
+        <div class="side-sec">
+          <div class="side-title">Ranking de horas</div>
+          <div class="rank" id="rank"></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      'use strict';
+
+      const STORAGE_KEY = 'planner.escalas.offline.v1';
+
+      const MONTHS = [
+        'Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+        'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'
+      ];
+      const WEEKDAYS = [
+        { v: 1, l: 'Segunda' },
+        { v: 2, l: 'Terça' },
+        { v: 3, l: 'Quarta' },
+        { v: 4, l: 'Quinta' },
+        { v: 5, l: 'Sexta' },
+        { v: 6, l: 'Sábado' },
+        { v: 7, l: 'Domingo' },
+      ];
+
+      /** Estado */
+      let escalas = [];
+
+      /** DOM */
+      const el = {
+        headerCount: document.getElementById('headerCount'),
+        btnExport: document.getElementById('btnExport'),
+        // form
+        fData: document.getElementById('fData'),
+        fMes: document.getElementById('fMes'),
+        fDia: document.getElementById('fDia'),
+        fHoraIni: document.getElementById('fHoraIni'),
+        fHoraFim: document.getElementById('fHoraFim'),
+        fNome: document.getElementById('fNome'),
+        fHoras: document.getElementById('fHoras'),
+        btnLimpar: document.getElementById('btnLimpar'),
+        btnAdd: document.getElementById('btnAdd'),
+        // list
+        rows: document.getElementById('rows'),
+        // panel
+        pFunc: document.getElementById('pFunc'),
+        pMes: document.getElementById('pMes'),
+        pDe: document.getElementById('pDe'),
+        pAte: document.getElementById('pAte'),
+        btnLimparPeriodo: document.getElementById('btnLimparPeriodo'),
+        statTotal: document.getElementById('statTotal'),
+        statMsg: document.getElementById('statMsg'),
+        rank: document.getElementById('rank'),
+      };
+
+      const escapeHtml = (s) => String(s ?? '')
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+      const normName = (s) => String(s || '').trim();
+      const normKey = (s) => normName(s).toLowerCase();
+      const fmtDateBr = (ymd) => {
+        const s = String(ymd || '').slice(0,10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '—';
+        return `${s.slice(8,10)}/${s.slice(5,7)}`;
+      };
+      const colorClassForName = (nome) => {
+        const k = normKey(nome);
+        if (k === 'davy') return 'davy';
+        if (k === 'matheus') return 'matheus';
+        if (k === 'mauricio') return 'mauricio';
+        if (k === 'joão vitro' || k === 'joao vitro' || k === 'joão vitor' || k === 'joao vitor') return 'joao-vitor';
+        if (k === 'joão pedro' || k === 'joao pedro') return 'joao-pedro';
+        return '';
+      };
+      const fmtMonth = (m) => MONTHS[(Number(m)||1)-1] || '—';
+      const fmtWeekday = (d) => (WEEKDAYS.find(x => Number(x.v) === Number(d))?.l) || '—';
+      const fmtHours = (h) => {
+        const n = Number(h) || 0;
+        return (n % 1 === 0) ? String(Math.round(n)) : n.toFixed(1);
+      };
+      const jsDayToDiaSemana = (jsDay) => (jsDay === 0 ? 7 : jsDay);
+      const shiftHoursFromTimes = (ini, fim) => {
+        const a = String(ini || '').trim();
+        const b = String(fim || '').trim();
+        if (!/^\d{2}:\d{2}$/.test(a) || !/^\d{2}:\d{2}$/.test(b)) return null;
+        const [h1, m1] = a.split(':').map(Number);
+        const [h2, m2] = b.split(':').map(Number);
+        if (![h1, m1, h2, m2].every(Number.isFinite)) return null;
+        let x = h1 * 60 + m1;
+        let y = h2 * 60 + m2;
+        if (y < x) y += 24 * 60;
+        const diff = (y - x) / 60;
+        return diff > 0 ? diff : null;
+      };
+      const hoursForItem = (e) => {
+        const ini = e?.horaInicio || e?.hora || '';
+        const fim = e?.horaFim || e?.hora || '';
+        const calc = shiftHoursFromTimes(ini, fim);
+        if (Number.isFinite(calc) && calc > 0) return calc;
+        // Fim de semana: 06:00 -> 06:00 equivale a 24h (virada completa)
+        const dia = Number(e?.dia) || 0;
+        if ((dia === 6 || dia === 7) && String(ini).slice(0,5) === String(fim).slice(0,5)) return 24;
+        const n = Number(e?.horas);
+        return (Number.isFinite(n) && n > 0) ? n : 8;
+      };
+
+      const persist = () => {
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(escalas)); } catch {}
+      };
+      const load = () => {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          const arr = raw ? JSON.parse(raw) : [];
+          escalas = Array.isArray(arr) ? arr : [];
+        } catch {
+          escalas = [];
+        }
+      };
+
+      // Compat: se houver API, tenta sincronizar sem quebrar offline.
+      const api = {
+        enabled: () => (location.protocol === 'http:' || location.protocol === 'https:'),
+        base: () => {
+          const p = location.pathname || '/';
+          const seg = p.split('/').filter(Boolean);
+          if (seg.length && /\.[a-z0-9]{2,12}$/i.test(seg[seg.length - 1])) seg.pop();
+          const folder = seg.length ? ('/' + seg.join('/')) : '';
+          return folder + '/api/escalas.php';
+        },
+        loginBase: () => {
+          const p = location.pathname || '/';
+          const seg = p.split('/').filter(Boolean);
+          if (seg.length && /\.[a-z0-9]{2,12}$/i.test(seg[seg.length - 1])) seg.pop();
+          const folder = seg.length ? ('/' + seg.join('/')) : '';
+          return folder + '/api/login.php';
+        },
+        async getAll(){
+          if (!this.enabled()) return null;
+          try{
+            const r = await fetch(this.base(), { credentials:'same-origin', cache:'no-store' });
+            const j = await r.json();
+            if (j && j.ok && Array.isArray(j.escalas)) return j.escalas;
+            return j || null;
+          }catch{}
+          return null;
+        },
+        async save(item){
+          if (!this.enabled()) return null;
+          try{
+            const body = JSON.stringify({
+              clientUid: item.clientUid,
+              data: item.data,
+              mes: item.mes,
+              diaSemana: item.dia,
+              horario: item.horaInicio || item.hora,
+              horarioInicio: item.horaInicio || item.hora,
+              horarioFim: item.horaFim || item.hora,
+              horas: item.horas,
+              nome: item.nome,
+            });
+            const r = await fetch(this.base(), { method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body });
+            return await r.json();
+          }catch{}
+          return null;
+        },
+        async del(id){
+          if (!this.enabled()) return null;
+          try{
+            const r = await fetch(this.base(), { method:'DELETE', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id }) });
+            return await r.json();
+          }catch{}
+          return null;
+        },
+        async login(username, password){
+          if (!this.enabled()) return null;
+          try{
+            const body = JSON.stringify({ username, password });
+            const r = await fetch(this.loginBase(), { method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body });
+            return await r.json();
+          }catch{}
+          return null;
+        },
+      };
+
+      const initOptions = () => {
+        el.fMes.innerHTML = `<option value="">Selecione...</option>` + MONTHS.map((m,i)=>`<option value="${i+1}">${escapeHtml(m)}</option>`).join('');
+        el.fDia.innerHTML = `<option value="">Selecione...</option>` + WEEKDAYS.map(d=>`<option value="${d.v}">${escapeHtml(d.l)}</option>`).join('');
+
+        el.pMes.innerHTML = `<option value="">Todos</option>` + MONTHS.map((m,i)=>`<option value="${i+1}">${escapeHtml(m)}</option>`).join('');
+        el.pFunc.innerHTML = `<option value="">Todos</option>`;
+      };
+
+      const applyDefaultMonthFilterOnce = () => {
+        if (el.pMes.dataset.defaultMonthApplied === '1') return;
+        el.pMes.dataset.defaultMonthApplied = '1';
+        if (String(el.pMes.value || '').trim()) return;
+        el.pMes.value = String(new Date().getMonth() + 1);
+      };
+
+      /** Funções obrigatórias */
+      function limpar(){
+        el.fData.value = '';
+        el.fMes.value = '';
+        el.fDia.value = '';
+        el.fHoraIni.value = '';
+        el.fHoraFim.value = '';
+        el.fNome.value = '';
+        el.fHoras.value = '';
+        clearError(el.fNome);
+        clearError(el.fHoraIni);
+        clearError(el.fHoraFim);
+        clearError(el.fHoras);
+        editingId = 0;
+        el.btnAdd.innerHTML = '<span class="mono">+</span> Adicionar';
+        try{ el.fNome.focus(); }catch{}
+      }
+
+      let editingId = 0;
+
+      function adicionar(){
+        const nome = normName(el.fNome.value);
+        const horaIni = String(el.fHoraIni.value || '').trim();
+        const horaFim = String(el.fHoraFim.value || '').trim();
+        const data = String(el.fData.value || '').trim();
+        const mes = Number(el.fMes.value) || 0;
+        const dia = Number(el.fDia.value) || 0;
+
+        let horas = Number(String(el.fHoras.value || '').replace(',', '.'));
+        if (!Number.isFinite(horas) || horas <= 0) horas = 0;
+
+        let ok = true;
+        if (!nome) { setError(el.fNome); ok = false; }
+        if (!horaIni) { setError(el.fHoraIni); ok = false; }
+        if (!horaFim) { setError(el.fHoraFim); ok = false; }
+        if (!ok) return;
+
+        // Se data foi escolhida, auto-deriva mês/dia (e ajusta selects).
+        let finalData = data;
+        let finalMes = mes;
+        let finalDia = dia;
+        if (finalData) {
+          const d = new Date(finalData + 'T00:00:00');
+          if (Number.isFinite(d.getTime())) {
+            finalMes = d.getMonth() + 1;
+            finalDia = jsDayToDiaSemana(d.getDay());
+            el.fMes.value = String(finalMes);
+            el.fDia.value = String(finalDia);
+          }
+        }
+
+        // Se não tem data, cria uma data "fictícia" do ano corrente só pra exibir/filtro (mantém offline ok).
+        if (!finalData) {
+          const now = new Date();
+          const y = now.getFullYear();
+          const mm = String(finalMes || (now.getMonth() + 1)).padStart(2,'0');
+          const dd = String(now.getDate()).padStart(2,'0');
+          finalData = `${y}-${mm}-${dd}`;
+        }
+
+        // Auto-cálculo de horas quando vazio
+        if (!horas) {
+          const calc = shiftHoursFromTimes(horaIni, horaFim);
+          if (Number.isFinite(calc) && calc > 0) horas = calc;
+          else if ((finalDia === 6 || finalDia === 7) && String(horaIni).slice(0,5) === String(horaFim).slice(0,5)) horas = 24;
+          else horas = 8;
+        }
+
+        if (editingId > 0) {
+          const idx = escalas.findIndex(x => Number(x.id) === Number(editingId));
+          if (idx !== -1) {
+            escalas[idx] = {
+              ...escalas[idx],
+              data: finalData,
+              mes: finalMes || 0,
+              dia: finalDia || 0,
+              hora: horaIni, // compat
+              horaInicio: horaIni,
+              horaFim,
+              nome,
+              horas
+            };
+            persist();
+            void api.save(escalas[idx]);
+          }
+          limpar();
+          renderAll();
+          return;
+        }
+
+        const item = {
+          id: Date.now() + Math.floor(Math.random()*1000),
+          clientUid: `esc_${Date.now()}_${Math.floor(Math.random()*1e9)}`,
+          data: finalData,
+          mes: finalMes || 0,
+          dia: finalDia || 0,
+          hora: horaIni, // compat
+          horaInicio: horaIni,
+          horaFim,
+          nome,
+          horas,
+        };
+        escalas.push(item);
+        persist();
+
+        // Best-effort sync
+        void api.save(item);
+
+        limpar();
+        renderAll();
+      }
+
+      function remover(id){
+        const n = Number(id);
+        escalas = escalas.filter(x => Number(x.id) !== n);
+        persist();
+        void api.del(n);
+        renderAll();
+      }
+
+      function renderRows(){
+        if (!escalas.length) {
+          el.rows.innerHTML = `
+            <div class="empty">
+              <div class="empty-ic" aria-hidden="true"></div>
+              <div class="body-13">Nenhuma escala cadastrada ainda.</div>
+            </div>
+          `;
+          return;
+        }
+
+        const rows = escalas.slice().sort((a,b)=>
+          String(a.data||'').localeCompare(String(b.data||'')) ||
+          String(a.horaInicio||a.hora||'').localeCompare(String(b.horaInicio||b.hora||'')) ||
+          normKey(a.nome).localeCompare(normKey(b.nome), 'pt-BR')
+        );
+
+        el.rows.innerHTML = rows.map(r => `
+          <div class="row" data-id="${Number(r.id) || 0}">
+            <div class="mono">${escapeHtml(fmtDateBr(String(r.data||'').slice(0,10)))}</div>
+            <div class="mono">${escapeHtml(String(r.horaInicio || r.hora || '').slice(0,5))}</div>
+            <div class="mono">${escapeHtml(String(r.horaFim || r.hora || '').slice(0,5))}</div>
+            <div class="col-weekday">${escapeHtml(fmtWeekday(r.dia))}</div>
+            <div class="col-month">${escapeHtml(fmtMonth(r.mes))}</div>
+            <div><span class="pill ${colorClassForName(r.nome) ? `pill--${colorClassForName(r.nome)}` : ''}" title="${escapeHtml(r.nome)}">${escapeHtml(r.nome)}</span></div>
+            <div class="row-actions">
+              <button class="edit" type="button" title="Editar" aria-label="Editar">✎</button>
+              <button class="del" type="button" title="Remover" aria-label="Remover">✕</button>
+            </div>
+          </div>
+        `).join('');
+      }
+
+      const FIXED_NAMES = ['Davy', 'Matheus', 'Mauricio', 'João Vitro', 'João Pedro'];
+      function updateFuncOptions(){
+        const prev = String(el.pFunc.value || '');
+        el.pFunc.innerHTML = `<option value="">Todos</option>` + FIXED_NAMES.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+        if (prev && FIXED_NAMES.includes(prev)) el.pFunc.value = prev;
+      }
+
+      function renderStats(){
+        const selectedName = String(el.pFunc.value || '').trim();
+        const selectedMes = Number(el.pMes.value) || 0;
+        const de = String(el.pDe.value || '').trim();
+        const ate = String(el.pAte.value || '').trim();
+
+        const shiftHoursFromTimes = (ini, fim) => {
+          const a = String(ini || '').trim();
+          const b = String(fim || '').trim();
+          if (!/^\d{2}:\d{2}$/.test(a) || !/^\d{2}:\d{2}$/.test(b)) return null;
+          const [h1, m1] = a.split(':').map(Number);
+          const [h2, m2] = b.split(':').map(Number);
+          if (![h1, m1, h2, m2].every(Number.isFinite)) return null;
+          let x = h1 * 60 + m1;
+          let y = h2 * 60 + m2;
+          if (y < x) y += 24 * 60;
+          const diff = (y - x) / 60;
+          return diff > 0 ? diff : null;
+        };
+        const hoursForItem = (e) => {
+          const ini = e?.horaInicio || e?.hora || '';
+          const fim = e?.horaFim || e?.hora || '';
+          const calc = shiftHoursFromTimes(ini, fim);
+          if (Number.isFinite(calc) && calc > 0) return calc;
+          const n = Number(e?.horas);
+          return (Number.isFinite(n) && n > 0) ? n : 8;
+        };
+
+        const inPeriod = (d) => {
+          const ymd = String(d || '').slice(0,10);
+          if (!ymd) return false;
+          if (de && ymd < de) return false;
+          if (ate && ymd > ate) return false;
+          return true;
+        };
+
+        const filtered = escalas.filter((e) => {
+          if (selectedName && normKey(e.nome) !== normKey(selectedName)) return false;
+          if (selectedMes && Number(e.mes) !== selectedMes) return false;
+          if ((de || ate) && !inPeriod(e.data)) return false;
+          return true;
+        });
+
+        const total = filtered.reduce((s,e)=> s + hoursForItem(e), 0);
+        el.statTotal.textContent = fmtHours(total);
+        el.statMsg.hidden = total > 0;
+
+        // Ranking por funcionário (com os mesmos filtros de mês/período, mas não prende no funcionário selecionado)
+        const baseForRanking = escalas.filter((e) => {
+          if (selectedMes && Number(e.mes) !== selectedMes) return false;
+          if ((de || ate) && !inPeriod(e.data)) return false;
+          return true;
+        });
+        const map = new Map(); // key -> { nome, horas, turnos }
+        baseForRanking.forEach((e) => {
+          const k = normKey(e.nome);
+          if (!k) return;
+          if (!map.has(k)) map.set(k, { nome: normName(e.nome), horas: 0, turnos: 0 });
+          const obj = map.get(k);
+          obj.horas += hoursForItem(e);
+          obj.turnos += 1;
+        });
+        const rank = [...map.values()].sort((a,b)=> (b.horas - a.horas) || a.nome.localeCompare(b.nome,'pt-BR'));
+        if (!rank.length) {
+          el.rank.innerHTML = `<div class="muted body-13">Sem dados no filtro.</div>`;
+          return;
+        }
+        el.rank.innerHTML = rank.map(r => {
+          const c = colorClassForName(r.nome);
+          return `
+            <div class="rank-card">
+              <div class="rank-left">
+                <div class="rank-name">${escapeHtml(r.nome)}</div>
+                <div class="rank-sub">${escapeHtml(String(r.turnos))} turnos</div>
+              </div>
+              <div class="rank-hours mono ${c ? `rank-hours--${c}` : ''}">${escapeHtml(fmtHours(r.horas))}h</div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      function renderAll(){
+        renderRows();
+        updateFuncOptions();
+        renderStats();
+        const n = escalas.length;
+        el.headerCount.textContent = `${n} registro${n === 1 ? '' : 's'}`;
+      }
+
+      function exportCsv(){
+        const selectedName = String(el.pFunc.value || '').trim();
+        const selectedMes = Number(el.pMes.value) || 0;
+        const de = String(el.pDe.value || '').trim();
+        const ate = String(el.pAte.value || '').trim();
+
+        const inPeriod = (d) => {
+          const ymd = String(d || '').slice(0,10);
+          if (!ymd) return false;
+          if (de && ymd < de) return false;
+          if (ate && ymd > ate) return false;
+          return true;
+        };
+
+        const filtered = escalas
+          .filter((e) => {
+            if (selectedName && normKey(e.nome) !== normKey(selectedName)) return false;
+            if (selectedMes && Number(e.mes) !== selectedMes) return false;
+            if ((de || ate) && !inPeriod(e.data)) return false;
+            return true;
+          })
+          .slice()
+          .sort((a,b)=>
+            String(a.data||'').localeCompare(String(b.data||'')) ||
+            String(a.horaInicio||a.hora||'').localeCompare(String(b.horaInicio||b.hora||'')) ||
+            normKey(a.nome).localeCompare(normKey(b.nome), 'pt-BR')
+          );
+
+        const csvEsc = (v) => {
+          const s = String(v ?? '');
+          const safe = s.replace(/"/g, '""');
+          return `"${safe}"`;
+        };
+        const hoursForExport = (e) => {
+          const n = hoursForItem(e);
+          return (n % 1 === 0) ? String(Math.round(n)) : n.toFixed(2);
+        };
+
+        const header = ['Data','Entrada','Saída','Dia','Mês','Funcionário','Horas'];
+        const rows = filtered.map((e) => ([
+          fmtDateBr(String(e?.data || '').slice(0,10)),
+          String(e?.horaInicio || e?.hora || '').slice(0,5),
+          String(e?.horaFim || e?.hora || '').slice(0,5),
+          fmtWeekday(e?.dia),
+          fmtMonth(e?.mes),
+          normName(e?.nome),
+          hoursForExport(e),
+        ]));
+
+        const sep = ';';
+        const bom = '\uFEFF';
+        const body = bom + header.map(csvEsc).join(sep) + '\r\n' + rows.map(r => r.map(csvEsc).join(sep)).join('\r\n');
+        const name = `escalas_${new Date().toISOString().slice(0,10)}.csv`;
+        const blob = new Blob([body], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 800);
+      }
+
+      /** Validação (borda vermelha) */
+      function setError(input){
+        if (!input) return;
+        input.classList.add('is-error');
+      }
+      function clearError(input){
+        if (!input) return;
+        input.classList.remove('is-error');
+      }
+
+      /** Bind */
+      function bind(){
+        el.btnLimpar.addEventListener('click', limpar);
+        el.btnAdd.addEventListener('click', adicionar);
+        el.btnExport?.addEventListener?.('click', exportCsv);
+
+        el.rows.addEventListener('click', (e) => {
+          const row = e.target.closest('.row');
+          if (!row) return;
+          const id = Number(row.dataset.id || 0);
+          if (!id) return;
+
+          const editBtn = e.target.closest('.edit');
+          if (editBtn) {
+            const item = escalas.find(x => Number(x.id) === id);
+            if (!item) return;
+            editingId = id;
+            el.btnAdd.innerHTML = '<span class="mono">✓</span> Atualizar';
+            el.fData.value = String(item.data || '').slice(0,10);
+            el.fMes.value = String(item.mes || '');
+            el.fDia.value = String(item.dia || '');
+            el.fHoraIni.value = String(item.horaInicio || item.hora || '').slice(0,5);
+            el.fHoraFim.value = String(item.horaFim || item.hora || '').slice(0,5);
+            el.fNome.value = String(item.nome || '');
+            el.fHoras.value = String(item.horas || '');
+            return;
+          }
+
+          const delBtn = e.target.closest('.del');
+          if (!delBtn) return;
+          remover(id);
+        });
+
+        [el.pFunc, el.pMes, el.pDe, el.pAte].forEach((x) => {
+          x.addEventListener('change', () => renderStats());
+          x.addEventListener('input', () => renderStats());
+        });
+        el.btnLimparPeriodo.addEventListener('click', () => {
+          el.pDe.value = '';
+          el.pAte.value = '';
+          renderStats();
+        });
+
+        const onInputClear = (input) => {
+          input.addEventListener('input', () => {
+            clearError(input);
+            if (input === el.fHoraIni || input === el.fHoraFim) input.dataset.auto = '0';
+          });
+        };
+        onInputClear(el.fNome);
+        onInputClear(el.fHoraIni);
+        onInputClear(el.fHoraFim);
+        onInputClear(el.fHoras);
+
+        const aplicarHorarioPadraoDiaSemana = () => {
+          const dia = Number(el.fDia.value) || 0;
+          const isDiaUtil = dia >= 1 && dia <= 5; // seg-sex
+          const isFimSemana = dia === 6 || dia === 7; // sab-dom
+          if (!isDiaUtil && !isFimSemana) return;
+
+          const horaIniAtual = String(el.fHoraIni.value || '').trim();
+          const horaFimAtual = String(el.fHoraFim.value || '').trim();
+          const wasAuto =
+            String(el.fHoraIni.dataset.auto || '') === '1' &&
+            String(el.fHoraFim.dataset.auto || '') === '1';
+          // Em edição, não sobrescreve se já houver horário preenchido
+          if (editingId && (horaIniAtual || horaFimAtual)) return;
+          if ((horaIniAtual || horaFimAtual) && !wasAuto) return;
+
+          if (isDiaUtil) {
+            el.fHoraIni.value = '19:00';
+            el.fHoraFim.value = '06:00';
+          } else {
+            el.fHoraIni.value = '06:00';
+            el.fHoraFim.value = '06:00';
+          }
+          el.fHoraIni.dataset.auto = '1';
+          el.fHoraFim.dataset.auto = '1';
+          clearError(el.fHoraIni);
+          clearError(el.fHoraFim);
+        };
+
+        // Auto-preenche mês/dia ao mudar data + aplica horário padrão
+        el.fData.addEventListener('change', () => {
+          const s = String(el.fData.value || '').trim();
+          if (!s) return;
+          const d = new Date(s + 'T00:00:00');
+          if (!Number.isFinite(d.getTime())) return;
+          el.fMes.value = String(d.getMonth() + 1);
+          el.fDia.value = String(jsDayToDiaSemana(d.getDay()));
+          aplicarHorarioPadraoDiaSemana();
+        });
+
+        el.fDia.addEventListener('change', () => {
+          aplicarHorarioPadraoDiaSemana();
+        });
+      }
+
+      async function boot(){
+        initOptions();
+        applyDefaultMonthFilterOnce();
+        load();
+        renderAll();
+        bind();
+
+        const mapRemote = (remote) => remote.map((r) => ({
+          id: Number(r.id) || (Date.now() + Math.floor(Math.random()*1000)),
+          clientUid: String(r.clientUid || ''),
+          data: String(r.data || '').slice(0,10) || '',
+          mes: Number(r.mes) || 0,
+          dia: Number(r.diaSemana) || 0,
+          hora: String(r.horario || '').slice(0,5),
+          horaInicio: String(r.horarioInicio || r.horario || '').slice(0,5),
+          horaFim: String(r.horarioFim || r.horario || '').slice(0,5),
+          nome: normName(r.nome),
+          horas: Number(r.horas) > 0 ? Number(r.horas) : 8,
+          updatedAt: String(r.updatedAt || r.updated_at || ''),
+        }));
+
+        let lastRemoteSig = '';
+        const remoteSig = (arr) => {
+          const a = Array.isArray(arr) ? arr : [];
+          return a
+            .map(r => `${Number(r?.id) || 0}|${String(r?.updatedAt || r?.updated_at || '')}`)
+            .join(',');
+        };
+
+        const ensureLoginIfNeeded = async (res) => {
+          if (!(res && typeof res === 'object')) return false;
+          if (String(res.error || '').toLowerCase() !== 'unauthorized') return false;
+          const u = window.prompt('Sessão expirada. Digite seu usuário:');
+          if (!u) return false;
+          const p = window.prompt('Digite sua senha:');
+          if (!p) return false;
+          const r = await api.login(String(u).trim(), String(p));
+          return !!(r && r.ok);
+        };
+
+        const applyRemote = async () => {
+          const remote = await api.getAll();
+          // Se estiver deslogado, tenta autenticar e repetir 1x.
+          if (!Array.isArray(remote)) {
+            const did = await ensureLoginIfNeeded(remote);
+            if (did) return applyRemote();
+            return;
+          }
+          if (!remote.length) return;
+          const sig = remoteSig(remote);
+          if (sig && sig === lastRemoteSig) return;
+          lastRemoteSig = sig;
+          // Merge simples: prefere o servidor.
+          escalas = mapRemote(remote);
+          persist();
+          renderAll();
+        };
+
+        // Carga inicial (quem entrar na página já vê o dado atual)
+        await applyRemote();
+
+        // Quase tempo real: atualiza enquanto a página estiver aberta.
+        if (api.enabled()) {
+          setInterval(() => { void applyRemote(); }, 4000);
+        }
+      }
+
+      boot();
+    })();
+  </script>
+</body>
+</html>
+

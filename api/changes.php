@@ -17,7 +17,7 @@ try {
     $pdo = db();
     $since = isset($_GET['since']) ? (int) $_GET['since'] : 0;
 
-    $allowedTables = ['tasks', 'op_tasks', 'app_config', 'app_notification', 'app_activity_event', 'deleted_entity_log'];
+    $allowedTables = ['tasks', 'op_tasks', 'escalas', 'app_config', 'app_notification', 'app_activity_event', 'deleted_entity_log'];
     $getMaxTs = function (string $table) use ($pdo, $allowedTables): int {
         if (!in_array($table, $allowedTables, true)) {
             return 0;
@@ -42,16 +42,19 @@ try {
     // Tabelas com updated_at no schema.sql
     $tasksTs = $getMaxTs('tasks');
     $opTasksTs = $getMaxTs('op_tasks');
+    $hasEscalas = $tableExists('escalas');
+    $escalasTs = $hasEscalas ? $getMaxTs('escalas') : 0;
     $cfgTs = $getMaxTs('app_config');
     $notifsTs = $getMaxTs('app_notification');
     $actTs = $getMaxTs('app_activity_event');
     $hasDeletedLog = $tableExists('deleted_entity_log');
     $deletedTs = $hasDeletedLog ? $getMaxTs('deleted_entity_log') : 0;
-    $maxTs = max($tasksTs, $opTasksTs, $cfgTs, $notifsTs);
+    $maxTs = max($tasksTs, $opTasksTs, $escalasTs, $cfgTs, $notifsTs);
     $maxTs = max($maxTs, $actTs, $deletedTs);
 
     $changedTasks = [];
     $changedOpTasks = [];
+    $changedEscalas = [];
     $changedNotifs = [];
     $changedActivity = [];
     $changedDeleted = [];
@@ -87,6 +90,18 @@ try {
         $stmtN->execute([':since' => $since]);
         $changedNotifs = $stmtN->fetchAll() ?: [];
 
+        if ($hasEscalas) {
+            $stmtE = $pdo->prepare('SELECT id, client_uid AS clientUid, data, mes, dia_semana AS diaSemana,
+              TIME_FORMAT(horario, "%H:%i") AS horario,
+              TIME_FORMAT(COALESCE(horario_inicio, horario), "%H:%i") AS horarioInicio,
+              TIME_FORMAT(COALESCE(horario_fim, horario), "%H:%i") AS horarioFim,
+              horas, nome,
+              created_by AS createdBy, created_at AS createdAt, updated_at AS updatedAt
+              FROM escalas WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC');
+            $stmtE->execute([':since' => $since]);
+            $changedEscalas = $stmtE->fetchAll() ?: [];
+        }
+
         // Feed global (todos os usuários)
         $stmtA = $pdo->prepare('SELECT id, username, event_type AS eventType, severity, message, ref_type AS refType, ref_id AS refId,
           op_category AS opCategory, created_at AS createdAt, updated_at
@@ -107,6 +122,7 @@ try {
         'ok' => true,
         'tasks' => $tasksTs,
         'opTasks' => $opTasksTs,
+        'escalas' => $escalasTs,
         'config' => $cfgTs,
         'notifications' => $notifsTs,
         'activity' => $actTs,
@@ -116,6 +132,7 @@ try {
         'since' => $since,
         'changedTasks' => $changedTasks,
         'changedOpTasks' => $changedOpTasks,
+        'changedEscalas' => $changedEscalas,
         'changedNotifications' => $changedNotifs,
         'changedActivity' => $changedActivity,
         'changedDeletedEntities' => $changedDeleted,
