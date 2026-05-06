@@ -3376,6 +3376,21 @@ const UI = {
             const sigHtml = assinatura ? `<div class="kanban-card-signature">✍ ${Utils.escapeHtml(assinatura)}</div>` : '';
             const badgeParts = [this.regionBadge(t.regiao), this.priorityBadge(t.prioridade || 'Média')].filter(Boolean);
             const badgesRow = badgeParts.length ? `<div class="kanban-card-badges">${badgeParts.join('')}</div>` : '';
+            const qdpSubHtml = (() => {
+              const cat = String(t.categoria || '').trim();
+              if (cat !== 'qualidade-potencia' && cat !== 'manutencao-corretiva') return '';
+              const manutOrCliente = String(t.nomeCliente || '').trim();
+              const osTxt = String(t.ordemServico || '').trim();
+              const ctoTxt = String(t.setor || '').trim();
+              const parts = [];
+              if (cat === 'manutencao-corretiva' && manutOrCliente) parts.push(`Manut.: ${manutOrCliente}`);
+              else if (manutOrCliente) parts.push(manutOrCliente);
+              if (osTxt) parts.push(`OS: ${osTxt}`);
+              if (ctoTxt) parts.push(`CTO: ${ctoTxt}`);
+              const txt = parts.filter(Boolean).join(' · ');
+              if (!txt) return '';
+              return `<div class="kanban-card-sub" style="color:var(--white4);font-size:12px;margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${Utils.escapeHtml(txt)}</div>`;
+            })();
             const childHtml = childTasks.length
               ? `<div class="subtask-list">${childTasks.map(c => `
                    <div class="subtask-item">
@@ -3395,6 +3410,7 @@ const UI = {
                   ${Utils.taskCopyProtocolButtonHtml(Utils.opTaskDisplayRef(t))}
                   <div class="kanban-card-title">${Utils.escapeHtml(t.titulo)}</div>
                 </div>
+                ${qdpSubHtml}
                 <div class="kanban-card-date">${Utils.escapeHtml(t.taskCode || '')}</div>
                 <div class="kanban-card-meta">
                   <div class="kanban-card-assignee">
@@ -8926,6 +8942,7 @@ const Controllers = {
           : task.categoria === 'certificacao-cemig' ? 'Editar certificação Cemig'
             : task.categoria === 'otimizacao-rede' ? 'Editar otimização de rede'
               : task.categoria === 'qualidade-potencia' ? 'Editar qualidade de potência'
+                : task.categoria === 'manutencao-corretiva' ? 'Editar manutenção corretiva'
                 : 'Editar tarefa';
       document.getElementById('op-titulo').value =
         task.categoria === 'troca-poste' || task.categoria === 'certificacao-cemig' || task.categoria === 'atendimento-cliente'
@@ -8985,7 +9002,7 @@ const Controllers = {
           cemigDescEdit.innerHTML = this._normalizeOtimDescricaoImgSrcForEdit(String(task.descricao || ''));
           this._wrapBareOtimDescricaoImages(cemigDescEdit);
         }
-      } else if (task.categoria === 'qualidade-potencia') {
+      } else if (task.categoria === 'qualidade-potencia' || task.categoria === 'manutencao-corretiva') {
         const qdpCli = document.getElementById('op-qdp-cliente');
         const qdpOs = document.getElementById('op-qdp-ordem-servico');
         const qdpCto = document.getElementById('op-qdp-cto');
