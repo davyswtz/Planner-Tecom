@@ -68,11 +68,5 @@ PREPARE _m FROM @sql;
 EXECUTE _m;
 DEALLOCATE PREPARE _m;
 
-SET @idx := (SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'team_chat_message' AND INDEX_NAME = 'idx_team_chat_message_id_created');
-SET @sql := IF(@idx = 0, 'ALTER TABLE team_chat_message ADD INDEX idx_team_chat_message_id_created (id, created_at)', 'SELECT 1');
-PREPARE _m FROM @sql;
-EXECUTE _m;
-DEALLOCATE PREPARE _m;
-
 INSERT IGNORE INTO schema_migrations (migration) VALUES
   ('007_performance_indexes.sql');

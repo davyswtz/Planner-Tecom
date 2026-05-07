@@ -4,7 +4,7 @@ declare(strict_types=1);
 /**
  * Sessão compartilhada pelos endpoints da API.
  */
-if (session_status() === PHP_SESSION_NONE) {
+if (PHP_SAPI !== 'cli' && session_status() === PHP_SESSION_NONE) {
     // Hardening básico de sessão (hospedagem compartilhada).
     @ini_set('session.use_strict_mode', '1');
     @ini_set('session.use_only_cookies', '1');
@@ -123,8 +123,63 @@ function jsonResponse(array $payload, int $status = 200): void
 
 function requireAuth(): void
 {
+    if (PHP_SAPI === 'cli') {
+        return;
+    }
+
+    // Expiração por inatividade (defesa em profundidade).
+    $now = time();
+    $idleSeconds = 30 * 60; // 30 min
+    $last = (int) ($_SESSION['last_activity'] ?? 0);
+    if ($last > 0 && ($now - $last) > $idleSeconds) {
+        $_SESSION = [];
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_destroy();
+        }
+        jsonResponse(['ok' => false, 'error' => 'session_expired'], 401);
+    }
+    $_SESSION['last_activity'] = $now;
+
     if (empty($_SESSION['planner_user'])) {
         jsonResponse(['ok' => false, 'error' => 'unauthorized'], 401);
+    }
+}
+
+function csrfToken(): string
+{
+    if (PHP_SAPI === 'cli') {
+        return '';
+    }
+    if (empty($_SESSION['csrf_token']) || !is_string($_SESSION['csrf_token']) || strlen((string) $_SESSION['csrf_token']) < 32) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return (string) $_SESSION['csrf_token'];
+}
+
+function requireCsrfToken(): void
+{
+    if (PHP_SAPI === 'cli') {
+        return;
+    }
+    $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+    if (!in_array($method, ['POST', 'DELETE', 'PUT', 'PATCH'], true)) {
+        return;
+    }
+
+    // Exige token apenas se existe sessão autenticada (mutações são auth-only no sistema).
+    if (empty($_SESSION['planner_user'])) {
+        return;
+    }
+
+    $expected = (string) ($_SESSION['csrf_token'] ?? '');
+    if ($expected === '') {
+        // Gera token na primeira mutação após login (o client deve reenviar com X-CSRF-Token).
+        csrfToken();
+        jsonResponse(['ok' => false, 'error' => 'csrf_required'], 403);
+    }
+    $got = (string) ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
+    if ($got === '' || !hash_equals($expected, $got)) {
+        jsonResponse(['ok' => false, 'error' => 'csrf_invalid'], 403);
     }
 }
 
@@ -143,9 +198,11 @@ function requireSameOriginForMutation(): void
     $origin = (string) ($_SERVER['HTTP_ORIGIN'] ?? '');
     $referer = (string) ($_SERVER['HTTP_REFERER'] ?? '');
     if ($origin !== '' && stripos($origin, $expected) === 0) {
+        requireCsrfToken();
         return;
     }
     if ($origin === '' && $referer !== '' && stripos($referer, $expected) === 0) {
+        requireCsrfToken();
         return;
     }
     // FIX: CSRF básica via Origin/Referer (sessão).

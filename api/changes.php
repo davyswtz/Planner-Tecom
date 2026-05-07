@@ -17,14 +17,22 @@ try {
     $pdo = db();
     $since = isset($_GET['since']) ? (int) $_GET['since'] : 0;
 
-    $allowedTables = ['tasks', 'op_tasks', 'escalas', 'app_config', 'app_notification', 'app_activity_event', 'deleted_entity_log'];
-    $getMaxTs = function (string $table) use ($pdo, $allowedTables): int {
-        if (!in_array($table, $allowedTables, true)) {
+    $getMaxTs = function (string $table) use ($pdo): int {
+        // Hardening: evita SQL dinâmico com identificadores (mesmo com whitelist).
+        // Retorna epoch seconds (UTC) para comparar rápido no front.
+        $sqlMap = [
+            'tasks' => "SELECT UNIX_TIMESTAMP(COALESCE(MAX(updated_at), '1970-01-01 00:00:00')) AS ts FROM tasks",
+            'op_tasks' => "SELECT UNIX_TIMESTAMP(COALESCE(MAX(updated_at), '1970-01-01 00:00:00')) AS ts FROM op_tasks",
+            'escalas' => "SELECT UNIX_TIMESTAMP(COALESCE(MAX(updated_at), '1970-01-01 00:00:00')) AS ts FROM escalas",
+            'app_config' => "SELECT UNIX_TIMESTAMP(COALESCE(MAX(updated_at), '1970-01-01 00:00:00')) AS ts FROM app_config",
+            'app_notification' => "SELECT UNIX_TIMESTAMP(COALESCE(MAX(updated_at), '1970-01-01 00:00:00')) AS ts FROM app_notification",
+            'app_activity_event' => "SELECT UNIX_TIMESTAMP(COALESCE(MAX(updated_at), '1970-01-01 00:00:00')) AS ts FROM app_activity_event",
+            'deleted_entity_log' => "SELECT UNIX_TIMESTAMP(COALESCE(MAX(updated_at), '1970-01-01 00:00:00')) AS ts FROM deleted_entity_log",
+        ];
+        if (!isset($sqlMap[$table])) {
             return 0;
         }
-        // Retorna epoch seconds (UTC) para comparar rápido no front.
-        $stmt = $pdo->query("SELECT UNIX_TIMESTAMP(COALESCE(MAX(updated_at), '1970-01-01 00:00:00')) AS ts FROM `{$table}`");
-        $row = $stmt->fetch();
+        $row = $pdo->query($sqlMap[$table])->fetch();
         return (int) ($row['ts'] ?? 0);
     };
     $tableExists = function (string $table) use ($pdo): bool {

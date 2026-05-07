@@ -5,9 +5,8 @@ Estes arquivos foram pensados para banco já em uso. Eles não apagam dados.
 Ordem recomendada para produção:
 
 1. `000_schema_migrations.sql`
-2. `006_team_chat_message.sql`
-3. `007_performance_indexes.sql`
-4. `008_deleted_entity_log.sql`
+2. `007_performance_indexes.sql`
+3. `008_deleted_entity_log.sql`
 
 Observações:
 

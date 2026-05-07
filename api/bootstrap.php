@@ -97,6 +97,7 @@ try {
 
     $payload = [
         'ok' => true,
+        'csrfToken' => csrfToken(),
         'tasks' => $tasks,
         'opTasks' => $opTasks,
         'escalas' => $escalas,

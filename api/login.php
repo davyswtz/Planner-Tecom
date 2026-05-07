@@ -103,12 +103,14 @@ try {
         // Marca sessão autenticada para os demais endpoints PHP.
         session_regenerate_id(true);
         $_SESSION['planner_user'] = $username;
+        // Garante token CSRF inicial logo no login (o client deve reenviar em mutações).
+        $csrf = csrfToken();
         clearLoginFailures($username);
     } else {
         recordLoginFailure($username);
     }
 
-    jsonResponse(['ok' => $valid]);
+    jsonResponse($valid ? ['ok' => true, 'csrfToken' => $csrf ?? ''] : ['ok' => false]);
 } catch (Throwable $e) {
     // Não vazar detalhes de erro para o front.
     $errorId = bin2hex(random_bytes(6));
