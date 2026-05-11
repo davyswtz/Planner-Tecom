@@ -20,6 +20,57 @@ if (PHP_SAPI !== 'cli' && session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+function isHttpsRequest(): bool
+{
+    if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+        return true;
+    }
+    if (!empty($_SERVER['SERVER_PORT']) && (string) $_SERVER['SERVER_PORT'] === '443') {
+        return true;
+    }
+    $xfp = strtolower((string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''));
+    if ($xfp === 'https') {
+        return true;
+    }
+    $xfs = strtolower((string) ($_SERVER['HTTP_X_FORWARDED_SSL'] ?? ''));
+    if ($xfs === 'on' || $xfs === '1') {
+        return true;
+    }
+    $cfv = strtolower((string) ($_SERVER['HTTP_CF_VISITOR'] ?? ''));
+    if ($cfv !== '' && str_contains($cfv, '"scheme":"https"')) {
+        return true;
+    }
+    return false;
+}
+
+function normalizeHost(string $host): string
+{
+    $h = strtolower(trim($host));
+    // remove porta se existir
+    $h = preg_replace('/:\d+$/', '', $h) ?: $h;
+    return $h;
+}
+
+function sameSiteOriginFromRequest(): string
+{
+    $host = normalizeHost((string) ($_SERVER['HTTP_HOST'] ?? ''));
+    if ($host === '') {
+        return '';
+    }
+
+    // Preferir Origin real do browser (evita bugs de HTTPS atrás de proxy/CDN).
+    $origin = (string) ($_SERVER['HTTP_ORIGIN'] ?? '');
+    if ($origin !== '') {
+        $oHost = normalizeHost((string) (parse_url($origin, PHP_URL_HOST) ?? ''));
+        if ($oHost !== '' && hash_equals($host, $oHost)) {
+            return $origin;
+        }
+    }
+
+    $scheme = isHttpsRequest() ? 'https' : 'http';
+    return $scheme . '://' . $host;
+}
+
 /**
  * Conexão MySQL — HostGator/cPanel ou variáveis de ambiente.
  * Preferência: api/credentials.php (copie de credentials.example.php).
@@ -95,15 +146,16 @@ function jsonResponse(array $payload, int $status = 200): void
     header('Pragma: no-cache');
     header('Expires: 0');
     // FIX: CORS conservador (sessão). Permitimos apenas a mesma origem do host atual.
-    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-    $host = (string) ($_SERVER['HTTP_HOST'] ?? '');
-    $sameOrigin = ($host !== '') ? ($scheme . '://' . $host) : '';
+    $sameOrigin = sameSiteOriginFromRequest();
     if ($sameOrigin !== '') {
         header('Access-Control-Allow-Origin: ' . $sameOrigin);
-        header('Vary: Origin');
+        // não sobrescrever outros Vary
+        header('Vary: Origin', false);
+        header('Access-Control-Allow-Credentials: true');
     }
     header('Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type');
+    // Preflight: incluir headers usados pelo client (ex.: X-CSRF-Token).
+    header('Access-Control-Allow-Headers: Content-Type, X-CSRF-Token');
     $body = json_encode($payload, JSON_UNESCAPED_UNICODE);
     if ($body === false) {
         $body = '{"ok":false,"error":"json_encode_failed"}';
@@ -189,22 +241,29 @@ function requireSameOriginForMutation(): void
     if (!in_array($method, ['POST', 'DELETE', 'PUT', 'PATCH'], true)) {
         return;
     }
-    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-    $host = (string) ($_SERVER['HTTP_HOST'] ?? '');
+    $host = normalizeHost((string) ($_SERVER['HTTP_HOST'] ?? ''));
     if ($host === '') {
         return;
     }
-    $expected = $scheme . '://' . $host;
     $origin = (string) ($_SERVER['HTTP_ORIGIN'] ?? '');
     $referer = (string) ($_SERVER['HTTP_REFERER'] ?? '');
-    if ($origin !== '' && stripos($origin, $expected) === 0) {
-        requireCsrfToken();
-        return;
+
+    // Aceita mesma origem comparando HOST (scheme pode ser mascarado por proxy/CDN).
+    if ($origin !== '') {
+        $oHost = normalizeHost((string) (parse_url($origin, PHP_URL_HOST) ?? ''));
+        if ($oHost !== '' && hash_equals($host, $oHost)) {
+            requireCsrfToken();
+            return;
+        }
     }
-    if ($origin === '' && $referer !== '' && stripos($referer, $expected) === 0) {
-        requireCsrfToken();
-        return;
+    if ($origin === '' && $referer !== '') {
+        $rHost = normalizeHost((string) (parse_url($referer, PHP_URL_HOST) ?? ''));
+        if ($rHost !== '' && hash_equals($host, $rHost)) {
+            requireCsrfToken();
+            return;
+        }
     }
+
     // FIX: CSRF básica via Origin/Referer (sessão).
     jsonResponse(['ok' => false, 'error' => 'forbidden'], 403);
 }

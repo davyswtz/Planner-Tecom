@@ -1,12 +1,3 @@
-/* ═══════════════════════════════════════════════════════════════
-   BURRINHO PROJETOS — app.js (refatorado)
-   Arquitetura: Models → Services → Controllers → UI
-═══════════════════════════════════════════════════════════════ */
-
-/* ─────────────────────────────────────────────────────────────
-   MODELS — Estruturas de dados e tipos
-   (Preparados para futura integração com banco de dados)
-───────────────────────────────────────────────────────────── */
 
 /**
  * Modelo de tarefa geral (Dashboard)
@@ -155,10 +146,6 @@ function applyDeployCacheReset() {
 
 applyDeployCacheReset();
 
-/* ─────────────────────────────────────────────────────────────
-   STATE STORE — Fonte única da verdade
-   Futura integração: substituir por chamadas à API/banco
-───────────────────────────────────────────────────────────── */
 const Store = (() => {
   const APP_CONFIG = window.APP_CONFIG || {};
   const STORAGE_KEYS = {
@@ -170,7 +157,7 @@ const Store = (() => {
     escalas: 'planner.escalas.v1',
   };
 
-  /** Campos ATD / thread: o servidor pode devolver vazio ou prazo 0000-00-00; não sobrescrever valor bom do cliente. */
+ 
   const OP_TASK_REMOTE_EMPTY_MERGE_FIELDS = [
     'chatThreadKey',
     'chatThreadWebhookUrl',
@@ -305,19 +292,9 @@ const Store = (() => {
         if (!text) return { ok: false, error: 'empty_response', status: response.status };
         const head = text.slice(0, 24).toLowerCase();
         if (head.startsWith('<!') || head.startsWith('<?') || head.startsWith('<htm') || head.startsWith('<html')) {
-          // FIX: ambiente local via Live Server/estático (sem PHP) costuma devolver HTML + 404/405.
-          // Nesses casos, desativa a API automaticamente para evitar spam de erros e manter o app funcional (modo localStorage).
-          if (!this._disabledOnce && (response.status === 404 || response.status === 405 || response.status === 501)) {
-            this._disabledOnce = true;
-            this.baseUrl = '';
-            try {
-              ToastService.show('API PHP não está disponível nesse servidor (Live Server). Rodando em modo local (sem sincronizar).', 'warning');
-            } catch {
-              /* ignore */
-            }
-            return { ok: false, error: 'api_disabled', status: response.status };
-          }
-          return { ok: false, error: 'html_response', status: response.status };
+          // Segurança: este app depende do backend PHP para autenticação e persistência.
+          // Se o host estiver servindo HTML (ex.: Live Server/estático), não “cair” para modo local automaticamente.
+          return { ok: false, error: 'api_unavailable', status: response.status };
         }
         let parsed = null;
         try {
@@ -344,6 +321,7 @@ const Store = (() => {
         'html_response',
         'empty_response',
         'invalid_json',
+        'api_unavailable',
         'http_error',
       ]);
       let last = null;
@@ -7244,13 +7222,6 @@ const Controllers = {
     _sessionKey: 'planner.session.v2',
     _displayNameKey: 'planner.session.displayName.v1',
     _sessionUserKey: SESSION_USER_KEY,
-    _getAllowedUsers() {
-      const list = window.APP_CONFIG && window.APP_CONFIG.authUsers;
-      const base = Array.isArray(list) ? list : [];
-      const fromConfig = base.filter(u => u && typeof u.user === 'string' && typeof u.pass === 'string');
-      // Usuário de teste embutido (fallback local).
-      return [...fromConfig, { user: 'teste', pass: '1123' }];
-    },
     _submitting: false,
     _isAuthenticated() {
       return localStorage.getItem(this._sessionKey) === '1';
@@ -7298,37 +7269,33 @@ const Controllers = {
       const normalizedUser = String(user).trim().toLowerCase();
       const normalizedPass = String(pass).trim();
 
-      // Preferência: autenticar no servidor (quando a API remota estiver habilitada).
-      if (Store.isRemoteApiEnabled()) {
-        try {
-          const res = await Store.loginRemote(normalizedUser, normalizedPass);
-          if (res && res.ok) {
-            this._finishLogin(user, normalizedUser);
-            return true;
-          }
-        } catch {
-          ToastService.show('Falha ao autenticar no servidor', 'danger');
+      // Segurança: autenticação somente no servidor (PHP + sessão).
+      if (!Store.isRemoteApiEnabled()) {
+        ToastService.show('API PHP indisponível. Para logar, rode o projeto com PHP (Apache/XAMPP/Laragon) e MySQL.', 'danger');
+        return false;
+      }
+
+      try {
+        const res = await Store.loginRemote(normalizedUser, normalizedPass);
+        if (res && res.ok) {
+          this._finishLogin(user, normalizedUser);
+          return true;
+        }
+        const err = res && typeof res === 'object' ? String(res.error || '') : '';
+        if (err === 'forbidden' || err.startsWith('csrf')) {
+          ToastService.show('Login bloqueado por segurança (CSRF/origem). Verifique se está acessando o staging via HTTPS e se o domínio está correto.', 'danger');
           return false;
         }
-        ToastService.show('Usuário ou senha inválidos', 'danger');
-        return false;
-      }
-
-      // Fallback apenas para ambientes sem API remota (configure em `config.js` via authUsers).
-      const validLocal = this._getAllowedUsers().some(
-        item => item.user.toLowerCase() === normalizedUser && item.pass === normalizedPass
-      );
-      if (!validLocal) {
-        if (!this._getAllowedUsers().length) {
-          ToastService.show('Autenticação indisponível: configure `authUsers` em `config.js` ou use deploy com API.', 'danger');
-        } else {
-          ToastService.show('Usuário ou senha inválidos', 'danger');
+        if (err === 'internal_error' || err === 'server_error') {
+          ToastService.show('Falha no servidor ao autenticar. Verifique credenciais do banco e logs do PHP.', 'danger');
+          return false;
         }
+      } catch {
+        ToastService.show('Falha ao autenticar no servidor', 'danger');
         return false;
       }
-
-      this._finishLogin(user, normalizedUser);
-      return true;
+      ToastService.show('Usuário ou senha inválidos', 'danger');
+      return false;
     },
     logout() {
       ChatMentionNotifs._closePanel();
@@ -7348,6 +7315,18 @@ const Controllers = {
       }
     },
     init() {
+      // Segurança: se não existe API, não “simula” login local.
+      if (!Store.isRemoteApiEnabled()) {
+        this._lock();
+        this._syncSidebarUser();
+        try {
+          ToastService.show('API PHP não está disponível neste ambiente. O painel requer backend para autenticar.', 'warning');
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+
       if (!this._isAuthenticated()) {
         this._lock();
       } else {
