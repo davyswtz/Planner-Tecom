@@ -2548,15 +2548,15 @@ const ToastService = {
 const ModalService = {
   open(id)  { document.getElementById(id)?.classList.add('open'); },
   close(id) {
-    if (id === 'opTaskModal' && typeof OpTaskService !== 'undefined' && OpTaskService._resetAtdChildrenListExpand) {
-      OpTaskService._resetAtdChildrenListExpand();
+    if (id === 'opTaskModal' && typeof Controllers !== 'undefined' && Controllers.opTask?._clearAtdChildrenListUi) {
+      Controllers.opTask._clearAtdChildrenListUi();
     }
     document.getElementById(id)?.classList.remove('open');
   },
   closeAll() {
     const op = document.getElementById('opTaskModal');
-    if (op?.classList.contains('open') && typeof OpTaskService !== 'undefined' && OpTaskService._resetAtdChildrenListExpand) {
-      OpTaskService._resetAtdChildrenListExpand();
+    if (op?.classList.contains('open') && typeof Controllers !== 'undefined' && Controllers.opTask?._clearAtdChildrenListUi) {
+      Controllers.opTask._clearAtdChildrenListUi();
     }
     document.querySelectorAll('.modal-overlay.open').forEach(m => m.classList.remove('open'));
   },
@@ -8350,21 +8350,29 @@ const Controllers = {
         btn.setAttribute('aria-label', 'Expandir lista de ordens de serviço vinculadas');
       }
     },
+    /** Esconde e limpa a lista de OS vinculadas (ex.: ao fechar o modal) para não “vazar” HTML entre aberturas. */
+    _clearAtdChildrenListUi() {
+      const childrenWrap = document.getElementById('opAtdChildrenWrap');
+      const childrenList = document.getElementById('opAtdChildrenList');
+      this._resetAtdChildrenListExpand();
+      if (childrenWrap) childrenWrap.style.display = 'none';
+      if (childrenList) childrenList.innerHTML = '';
+    },
     _refreshAtdChildrenList() {
       const childrenWrap = document.getElementById('opAtdChildrenWrap');
       const childrenList = document.getElementById('opAtdChildrenList');
       if (!childrenWrap || !childrenList) return;
 
-      const category = this._newTaskPreset?.category || Store.currentOpCategory;
+      const category = Store.editingOpTaskId
+        ? (Store.findOpTask(Store.editingOpTaskId)?.categoria || Store.currentOpCategory)
+        : (this._newTaskPreset?.category || Store.currentOpCategory);
       const parentHidden = document.getElementById('op-parent-task-id');
       const parentIdRaw = parentHidden?.value || '';
       const parentId = parentIdRaw ? Number(parentIdRaw) : null;
 
       const isAtdChild = this._isAtendimentoCategory(category) && !!parentId;
       if (!isAtdChild) {
-        this._resetAtdChildrenListExpand();
-        childrenWrap.style.display = 'none';
-        childrenList.innerHTML = '';
+        this._clearAtdChildrenListUi();
         return;
       }
 
@@ -8593,10 +8601,10 @@ const Controllers = {
         const parent = Store.findOpTask(Number(preset.parentTaskId));
         if (parent?.regiao) document.getElementById('op-regiao').value = parent.regiao;
       }
-      this._refreshAtdChildrenList();
-      this._syncParentHidden(null);
-      this._syncCategorySpecificFields(category);
       this._newTaskPreset = { ...preset };
+      this._syncParentHidden(null);
+      this._refreshAtdChildrenList();
+      this._syncCategorySpecificFields(category);
       this._syncAtendimentoKindFields();
       const modalCopyBtnClear = document.getElementById('opTaskModalCopyIdBtn');
       if (modalCopyBtnClear) {
@@ -9010,6 +9018,7 @@ const Controllers = {
       this._syncCategorySpecificFields(task.categoria);
       this._syncAtendimentoKindFields();
       this._syncParentHidden(task);
+      this._refreshAtdChildrenList();
       ModalService.open('opTaskModal');
       if (task.categoria === 'otimizacao-rede' && otimGC?.value?.trim() && !otimGA?.value?.trim()) {
         void this._resolveCoordsToAddress(otimGC.value, 'otim');
