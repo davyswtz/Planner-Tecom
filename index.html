@@ -16,7 +16,7 @@
     (function () {
       var v = window.APP_CONFIG && window.APP_CONFIG.appBuild ? String(window.APP_CONFIG.appBuild) : '';
       var qs = v ? ('?v=' + encodeURIComponent(v)) : '';
-      ['./src/css/design-system.css', './src/css/main.css', './src/css/login-teleplan.css', './src/css/dashboard-planner.css'].forEach(function (href) {
+      ['./src/css/design-system.css', './src/css/main.css', './src/css/login-teleplan.css', './src/css/dashboard-planner.css', './src/css/os-dashboard.css'].forEach(function (href) {
         var l = document.createElement('link');
         l.rel = 'stylesheet';
         l.href = href + qs;
@@ -293,6 +293,15 @@
           <path d="M8 14h5"/>
         </svg>
         <span class="nav-label">Atendimento ao cliente</span>
+      </button>
+
+      <button type="button" class="nav-item" data-page="ordem-servicos" aria-label="Ordem de Serviços">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+          <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
+          <rect x="9" y="3" width="6" height="4" rx="1"/>
+          <path d="M9 12h6M9 16h6"/>
+        </svg>
+        <span class="nav-label">Ordem de Serviços</span>
       </button>
 
       <button type="button" class="nav-item" data-page="config">
@@ -711,6 +720,127 @@
 
           <div class="kanban-board atd-kanban-board" id="atendimentoBoard" role="region" aria-label="Quadro kanban de atendimento ao cliente">
             <!-- conteúdo gerado via JS (UI.renderAtendimentoPage) -->
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ PAGE: ORDEM DE SERVIÇOS (dashboard) ═══ -->
+      <section class="page" id="page-ordem-servicos" aria-label="Ordem de Serviços">
+        <div class="osd-shell" id="osdRoot">
+          <header class="osd-header">
+            <div>
+              <h1 class="osd-title">Ordem de Serviços</h1>
+              <p class="osd-sub">Produtividade por técnico — OS vinculadas aos cards pai</p>
+            </div>
+            <div class="osd-header-actions">
+              <span class="osd-updated" id="osdUpdatedAt">—</span>
+              <button type="button" class="ghost-btn" id="osdBtnExport">Exportar CSV</button>
+              <button type="button" class="primary-btn" id="osdBtnAtualizar">Atualizar</button>
+            </div>
+          </header>
+
+          <div class="osd-filters panel">
+            <div class="osd-filters-grid">
+              <div class="osd-field">
+                <label for="osdFiltroTecnico">Técnico</label>
+                <select id="osdFiltroTecnico"><option value="">Todos os técnicos</option></select>
+              </div>
+              <div class="osd-field">
+                <label for="osdFiltroCategoria">Categoria</label>
+                <select id="osdFiltroCategoria"><option value="">Todas</option></select>
+              </div>
+              <div class="osd-field">
+                <label for="osdFiltroRegiao">Região</label>
+                <select id="osdFiltroRegiao"><option value="">Todas</option></select>
+              </div>
+              <div class="osd-field">
+                <label for="osdFiltroStatus">Status</label>
+                <select id="osdFiltroStatus">
+                  <option value="">Todos</option>
+                  <option value="concluida">Concluídas</option>
+                  <option value="andamento">Em andamento</option>
+                  <option value="pendente">Pendentes</option>
+                </select>
+              </div>
+              <div class="osd-field">
+                <label for="osdFiltroPeriodo">Período</label>
+                <select id="osdFiltroPeriodo">
+                  <option value="hoje">Hoje</option>
+                  <option value="semana">Esta semana</option>
+                  <option value="mes" selected>Este mês</option>
+                  <option value="ano">Este ano</option>
+                  <option value="todos">Todo o período</option>
+                  <option value="custom">Personalizado</option>
+                </select>
+              </div>
+              <div class="osd-field">
+                <label for="osdFiltroDateMode">Data por</label>
+                <select id="osdFiltroDateMode">
+                  <option value="criacao">Criação da OS</option>
+                  <option value="conclusao">Conclusão</option>
+                </select>
+              </div>
+              <div class="osd-field osd-field--grow">
+                <label for="osdFiltroBusca">Buscar</label>
+                <input type="search" id="osdFiltroBusca" placeholder="OS, título, protocolo, código…" autocomplete="off"/>
+              </div>
+            </div>
+            <div class="osd-filters-custom" id="osdCustomDates" hidden>
+              <div class="osd-field">
+                <label for="osdFiltroDe">De</label>
+                <input type="date" id="osdFiltroDe"/>
+              </div>
+              <div class="osd-field">
+                <label for="osdFiltroAte">Até</label>
+                <input type="date" id="osdFiltroAte"/>
+              </div>
+            </div>
+            <div class="osd-filters-foot">
+              <button type="button" class="ghost-btn" id="osdBtnLimpar">Limpar filtros</button>
+            </div>
+          </div>
+
+          <div class="osd-kpi-grid" id="osdKpiGrid" aria-label="Indicadores"></div>
+
+          <div class="osd-main-grid">
+            <aside class="osd-side panel">
+              <h2 class="osd-panel-title">Ranking por técnico</h2>
+              <p class="osd-panel-hint">Clique para filtrar</p>
+              <div class="osd-rank-list" id="osdTechRank"></div>
+              <h2 class="osd-panel-title osd-panel-title--spaced">Por categoria</h2>
+              <div class="osd-cat-list" id="osdCatBars"></div>
+            </aside>
+
+            <div class="osd-main-col">
+              <section class="panel osd-chart-panel">
+                <h2 class="osd-panel-title">OS por dia <span class="osd-panel-hint">(últimos 14 dias do filtro)</span></h2>
+                <div id="osdDayChart" class="osd-chart-wrap"></div>
+              </section>
+
+              <section class="panel osd-table-panel">
+                <div class="osd-table-head">
+                  <h2 class="osd-panel-title">Detalhamento</h2>
+                  <span class="osd-table-count" id="osdTableCount">—</span>
+                </div>
+                <div class="osd-table-scroll">
+                  <table class="osd-table">
+                    <thead>
+                      <tr>
+                        <th>Técnico</th>
+                        <th>OS / Título</th>
+                        <th>Categoria</th>
+                        <th>Região</th>
+                        <th>Status</th>
+                        <th>Criada</th>
+                        <th>Concluída</th>
+                        <th>Código</th>
+                      </tr>
+                    </thead>
+                    <tbody id="osdTableBody"></tbody>
+                  </table>
+                </div>
+              </section>
+            </div>
           </div>
         </div>
       </section>
@@ -1135,9 +1265,13 @@
       </div>
       <div class="form-row" id="opMainRow">
         <div class="form-group" id="opResponsavelGroup">
-          <label for="op-responsavel">Técnico responsável</label>
-          <input type="text" id="op-responsavel" placeholder="Selecione ou digite o técnico" autocomplete="off" list="op-tecnicos-list"/>
+          <label for="op-responsavel-add">Técnico(s) responsável(is)</label>
+          <input type="hidden" id="op-responsavel" value=""/>
           <input type="hidden" id="op-responsavel-chatid" value=""/>
+          <div class="op-tech-multi" id="op-tech-multi">
+              <div class="op-tech-multi__chips" id="op-tech-multi-chips" aria-live="polite"></div>
+            <input type="text" id="op-responsavel-add" class="op-tech-multi__add" placeholder="Adicionar técnico…" autocomplete="off" list="op-tecnicos-list"/>
+          </div>
           <datalist id="op-tecnicos-list"></datalist>
         </div>
         <div class="form-group" id="opPrazoGroup">
@@ -1154,7 +1288,15 @@
 
       <!-- Otimização de Rede — campos dedicados -->
       <div id="opOtimRedeWrap" class="op-otim-rede-wrap" style="display:none">
-        <div class="form-row">
+        <div class="form-row op-otim-rede-meta-row" id="opOtimMetaRow">
+          <div class="form-group" id="opOtimPrioridadeSlot"></div>
+          <div class="form-group" id="opOtimPrazoSlot"></div>
+        </div>
+        <div class="form-row" id="opOtimRegiaoTecRow">
+          <div class="form-group" id="opOtimRegiaoSlot"></div>
+          <div class="form-group" id="opOtimTecSlot"></div>
+        </div>
+        <div class="form-row" id="opOtimProtoRow">
           <div class="form-group">
             <label for="op-otim-protocolo">Protocolo</label>
             <input type="text" id="op-otim-protocolo" placeholder="Ex.: 2026-000123" autocomplete="off"/>
@@ -1163,10 +1305,6 @@
             <label for="op-otim-ordem-servico">Ordem de serviço</label>
             <input type="text" id="op-otim-ordem-servico" placeholder="Ex.: OS-000123" autocomplete="off"/>
           </div>
-        </div>
-        <div class="form-row" id="opOtimRegiaoTecRow">
-          <div class="form-group" id="opOtimRegiaoSlot"></div>
-          <div class="form-group" id="opOtimTecSlot"></div>
         </div>
         <div class="rompimento-location-block op-geo-optionais">
           <div class="form-group">
@@ -1361,9 +1499,14 @@
       var s = document.createElement('script');
       s.src = './src/js/main.js' + qs;
       s.onload = function () {
-        var d = document.createElement('script');
-        d.src = './src/js/dashboard-planner.js' + qs;
-        document.body.appendChild(d);
+        var osd = document.createElement('script');
+        osd.src = './src/js/os-dashboard.js' + qs;
+        osd.onload = function () {
+          var d = document.createElement('script');
+          d.src = './src/js/dashboard-planner.js' + qs;
+          document.body.appendChild(d);
+        };
+        document.body.appendChild(osd);
       };
       document.body.appendChild(s);
     })();

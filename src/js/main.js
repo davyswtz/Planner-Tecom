@@ -49,6 +49,131 @@ function normalizeTechName(name) {
     .replace(/[\u0300-\u036f]/g, '');
 }
 
+/** Separa nomes em `responsavel` (ex.: "João · Maria"). */
+function parseResponsaveis(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return [];
+  return s.split(/\s*[·|,;]\s*/).map((x) => x.trim()).filter(Boolean);
+}
+
+/** Junta nomes únicos para `responsavel`. */
+function formatResponsaveis(names) {
+  const seen = new Set();
+  const out = [];
+  for (const n of (Array.isArray(names) ? names : [names])) {
+    const t = String(n || '').trim();
+    if (!t) continue;
+    const k = normalizeTechName(t);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(t);
+  }
+  return out.join(' · ');
+}
+
+/** IDs do Google Chat em `responsavelChatId` (pipe-separated). */
+function parseResponsavelChatIds(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return [];
+  return s.split('|').map((x) => x.trim()).filter(Boolean);
+}
+
+function formatResponsavelChatIds(ids) {
+  return (Array.isArray(ids) ? ids : [ids])
+    .map((x) => String(x || '').trim())
+    .filter(Boolean)
+    .join('|');
+}
+
+/** Monta `responsavelChatId` alinhado à ordem dos nomes (diretório por região). */
+function buildResponsavelChatIdsForNames(names, regionKey, existingRaw = '') {
+  const dir = getTechDirectory(regionKey);
+  const existing = parseResponsavelChatIds(existingRaw);
+  return formatResponsavelChatIds(
+    (Array.isArray(names) ? names : []).map((name, i) => {
+      const kept = existing[i] || '';
+      if (kept) return kept;
+      const match = dir.find((t) => t.key === normalizeTechName(name));
+      return match?.chatUserId || '';
+    }),
+  );
+}
+
+function isLinkedOsCategory(category = '') {
+  const c = String(category || '').trim();
+  return c === 'atendimento-cliente'
+    || c === 'rompimentos'
+    || c === 'troca-poste'
+    || c === 'otimizacao-rede'
+    || c === 'certificacao-cemig'
+    || c === 'qualidade-potencia'
+    || c === 'manutencao-corretiva';
+}
+
+/** Categorias com OS filha e mensagens no tópico do card pai no Chat. */
+function isOsLinkedChildCategory(category = '') {
+  const c = String(category || '').trim();
+  return c === 'rompimentos'
+    || c === 'troca-poste'
+    || c === 'otimizacao-rede'
+    || c === 'certificacao-cemig'
+    || c === 'qualidade-potencia'
+    || c === 'manutencao-corretiva';
+}
+
+function linkedOsParentEditLabel(category = '') {
+  const map = {
+    'atendimento-cliente': 'Editar lista de atendimento',
+    rompimentos: 'Editar rompimento',
+    'troca-poste': 'Editar troca de poste',
+    'otimizacao-rede': 'Editar otimização de rede',
+    'certificacao-cemig': 'Editar certificação Cemig',
+    'qualidade-potencia': 'Editar qualidade de potência',
+    'manutencao-corretiva': 'Editar manutenção corretiva',
+  };
+  return map[String(category || '').trim()] || 'Editar tarefa pai';
+}
+
+function isLinkedOsChildTask(task) {
+  return !!task?.parentTaskId && isLinkedOsCategory(task?.categoria);
+}
+
+function getLinkedOsRootTask(task) {
+  if (!isLinkedOsChildTask(task)) return task;
+  return Store.findOpTask(Number(task.parentTaskId)) || task;
+}
+
+function getLinkedOsSiblingOrdinal(task) {
+  const parentId = Number(task?.parentTaskId);
+  if (!parentId) return 1;
+  const cat = String(task?.categoria || '').trim();
+  const siblings = Store.getOpTasks()
+    .filter((t) => t && t.categoria === cat && Number(t.parentTaskId) === parentId)
+    .sort((a, b) => Number(a.id) - Number(b.id));
+  const idx = siblings.findIndex((t) => Number(t.id) === Number(task.id));
+  return idx >= 0 ? idx + 1 : 1;
+}
+
+/** OS/atividades filhas vinculadas ao card pai (rompimento ou atendimento). */
+function getLinkedOsChildren(parentTask) {
+  const cat = String(parentTask?.categoria || '').trim();
+  const parentId = Number(parentTask?.id);
+  if (!parentId || !isLinkedOsCategory(cat)) return [];
+  return Store.getOpTasks()
+    .filter((t) => t && t.categoria === cat && Number(t.parentTaskId) === parentId)
+    .sort((a, b) => Number(a.id) - Number(b.id));
+}
+
+function isLinkedOsParentTask(task) {
+  return isLinkedOsCategory(task?.categoria) && !task?.parentTaskId;
+}
+
+/** Ignora placeholder de equipe inativa no autocomplete (não deve virar menção no Chat). */
+function isPlaceholderTechName(name) {
+  const n = normalizeTechName(name);
+  return n.includes('inativo') && (n.includes('equipe') || n.includes('tecnica') || n.includes('tecnico'));
+}
+
 function getTechDirectory(regionKey = '') {
   const cfg = window.APP_CONFIG || {};
   const byRegion = cfg.techsByRegion && typeof cfg.techsByRegion === 'object' ? cfg.techsByRegion : {};
@@ -1385,17 +1510,26 @@ const WebhookService = {
   },
 
   _resolveTechnicianDisplay(task, options = {}) {
-    const name = String(task?.responsavel || '').trim() || 'Não informado';
-    if (options && options.mention === false) return name;
+    const allNames = parseResponsaveis(task?.responsavel);
+    const names = allNames.filter((n) => !isPlaceholderTechName(n));
+    const effectiveNames = names.length ? names : allNames;
+    if (!effectiveNames.length) {
+      return 'Não informado';
+    }
+    if (options && options.mention === false) {
+      return formatResponsaveis(effectiveNames);
+    }
 
-    const direct = String(task?.responsavelChatId || '').trim();
-    const mention = this._formatChatMention(direct);
-    if (mention) return mention;
-
-    const key = normalizeTechName(name);
-    const match = getTechDirectory(this._normalizeRegionKey(task?.regiao)).find(t => t.key === key);
-    const mention2 = match ? this._formatChatMention(match.chatUserId) : '';
-    return mention2 || name;
+    const chatIds = parseResponsavelChatIds(task?.responsavelChatId);
+    const dir = getTechDirectory(this._normalizeRegionKey(task?.regiao));
+    const parts = effectiveNames.map((name) => {
+      const idx = allNames.findIndex((n) => normalizeTechName(n) === normalizeTechName(name));
+      let id = idx >= 0 ? (chatIds[idx] || '') : '';
+      const match = dir.find((t) => t.key === normalizeTechName(name));
+      if (match?.chatUserId) id = match.chatUserId;
+      return id ? this._formatChatMention(id) : name;
+    });
+    return parts.join(' ');
   },
 
   _normalizeRompimentoTipo(value = '') {
@@ -1491,6 +1625,9 @@ const WebhookService = {
    * @param {'andamento'|'concluida'|'finalizada'} event
    */
   _buildCemigMessage(event, task) {
+    if (task?.parentTaskId) {
+      return this._buildOsLinkedChildMessage(event, task);
+    }
     const B = (lines) => this._rompimentoBoldLines(lines);
     const s = (x) => this._chatSafe(String(x ?? '').trim());
     const tecnico = this._resolveTechnicianDisplay(task, { mention: event === 'andamento' });
@@ -1555,6 +1692,10 @@ const WebhookService = {
    * @param {'andamento'|'concluida'|'finalizada'} event
    */
   _buildOtimRedeMessage(event, task) {
+    if (task?.parentTaskId) {
+      return this._buildOsLinkedChildMessage(event, task);
+    }
+
     const B = (lines) => this._rompimentoBoldLines(lines);
     const tecnico = this._resolveTechnicianDisplay(task, { mention: event === 'andamento' });
     const enviadoPor = String(task?.assinadaPor || '').trim() || '—';
@@ -1651,6 +1792,39 @@ const WebhookService = {
     };
   },
 
+  /** OS vinculada (rompimento / troca de poste) — mensagens no tópico do card pai. */
+  _buildOsLinkedChildMessage(event, task) {
+    if (event === 'andamento') {
+      const tecnico = this._resolveTechnicianDisplay(task, { mention: true });
+      const osLabel = String(task.ordemServico || task.titulo || '').trim();
+      const ordinal = getLinkedOsSiblingOrdinal(task);
+      const headline = osLabel
+        ? `*${ordinal}° OS ${this._chatSafe(osLabel)} em andamento*`
+        : `*${ordinal}° OS em andamento*`;
+      return {
+        text: [
+          headline,
+          `👨‍🔧 Técnico responsável: ${tecnico}`,
+        ].join('\n'),
+      };
+    }
+    if (event === 'concluida') {
+      const ordinal = getLinkedOsSiblingOrdinal(task);
+      const osLabel = String(task.ordemServico || task.titulo || '').trim();
+      const history = Array.isArray(task?.historico) ? task.historico : [];
+      const lastAuthor = String(history[history.length - 1]?.autor || '').trim();
+      const enviadoPor = lastAuthor || String(task.assinadaPor || '').trim();
+      return {
+        text: [
+          `✅ ${ordinal}° OS concluída`,
+          `📌 ${this._chatSafe(osLabel || '—')}`,
+          `👤 Enviado por: ${this._chatSafe(enviadoPor)}`,
+        ].join('\n'),
+      };
+    }
+    return { text: '' };
+  },
+
   _trocaPosteTitleAsLocation(tituloRaw) {
     const t = String(tituloRaw || '').trim();
     if (!t) return { mode: 'empty', line: 'Não informado' };
@@ -1679,6 +1853,11 @@ const WebhookService = {
     const coordsSaved = String(task.coordenadas || '').trim();
     const enderecoSaved = String(task.localizacaoTexto || '').trim();
     const taskId = task.taskCode || `POS-${String(task.id || '').padStart(4, '0')}`;
+
+    // OS filha: mensagem no tópico do card pai (mesmo fluxo do rompimento).
+    if (task?.parentTaskId) {
+      return WebhookService._buildOsLinkedChildMessage(event, task);
+    }
 
     // Troca de poste (andamento): mensagem curta e objetiva (pedido do time).
     if (event === 'andamento') {
@@ -1873,6 +2052,9 @@ const WebhookService = {
    * @param {'andamento'|'concluida'|'finalizada'} event
    */
   _buildQualidadePotenciaMessage(event, task) {
+    if (task?.parentTaskId) {
+      return this._buildOsLinkedChildMessage(event, task);
+    }
     const B = (lines) => this._rompimentoBoldLines(lines);
     const s = (x) => this._chatSafe(String(x ?? '').trim());
     const tecnico = this._resolveTechnicianDisplay(task, { mention: event === 'andamento' });
@@ -1952,6 +2134,9 @@ const WebhookService = {
    * @param {'andamento'|'concluida'|'finalizada'} event
    */
   _buildManutencaoCorretivaMessage(event, task) {
+    if (task?.parentTaskId) {
+      return this._buildOsLinkedChildMessage(event, task);
+    }
     const B = (lines) => this._rompimentoBoldLines(lines);
     const s = (x) => this._chatSafe(String(x ?? '').trim());
     const tecnico = this._resolveTechnicianDisplay(task, { mention: event === 'andamento' });
@@ -2055,6 +2240,82 @@ const WebhookService = {
     return parts.join(' ');
   },
 
+  /** Duração legível para relatório (ex.: "30 minutos", "1 hora 15 minutos"). */
+  _formatDurationMinutesPlain(task) {
+    const history = Array.isArray(task?.historico) ? task.historico : [];
+    if (!history.length) return 'Não informado';
+
+    const startEntry = history.find((h) => h.status === 'Em andamento');
+    if (!startEntry?.timestamp) return 'Não informado';
+
+    const endEntry =
+      [...history].reverse().find((h) => (h.status === 'Concluída' || h.status === 'Finalizada') && h.timestamp) ||
+      history[history.length - 1];
+    if (!endEntry?.timestamp) return 'Não informado';
+
+    const diffMs = Math.max(0, new Date(endEntry.timestamp).getTime() - new Date(startEntry.timestamp).getTime());
+    const totalMinutes = Math.floor(diffMs / 60000);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    const parts = [];
+    if (hours) parts.push(hours === 1 ? '1 hora' : `${hours} horas`);
+    if (minutes || !hours) parts.push(minutes === 1 ? '1 minuto' : `${minutes} minutos`);
+    return parts.join(' ') || '0 minutos';
+  },
+
+  /** Relatório de OS/atividades ao finalizar card pai (rompimento / troca de poste / atendimento). */
+  _buildLinkedOsActivityReport(parentTask) {
+    const cat = String(parentTask?.categoria || '').trim();
+    const children = getLinkedOsChildren(parentTask);
+    /** @type {{ task: object, ordinal: number }[]} */
+    const rows = [];
+
+    if (children.length) {
+      children.forEach((child, idx) => rows.push({ task: child, ordinal: idx + 1 }));
+    } else if (isOsLinkedChildCategory(cat)) {
+      // Rompimento / troca de poste sem OS filha: conta o técnico (ou técnicos) do card pai.
+      const parentTechs = parseResponsaveis(parentTask?.responsavel).filter((n) => !isPlaceholderTechName(n));
+      if (!parentTechs.length) return null;
+      rows.push({ task: parentTask, ordinal: 1 });
+    } else {
+      return null;
+    }
+
+    const lines = [];
+    const title = String(parentTask.titulo || '').trim();
+    if (title) {
+      lines.push(`*${this._chatSafe(title)}*`, '');
+    }
+    lines.push('Relatório de Atividades realizadas', '');
+
+    const techCounts = {};
+
+    rows.forEach(({ task, ordinal }) => {
+      const label = String(task.titulo || task.ordemServico || 'Atividade').trim().toUpperCase();
+      const techNames = parseResponsaveis(task.responsavel).filter((n) => !isPlaceholderTechName(n));
+      const techLabel = techNames.length
+        ? formatResponsaveis(techNames)
+        : this._resolveTechnicianDisplay(task, { mention: false });
+      techNames.forEach((name) => {
+        const key = String(name).trim();
+        if (key) techCounts[key] = (techCounts[key] || 0) + 1;
+      });
+      const tempo = this._formatDurationMinutesPlain(task);
+
+      lines.push(`*${ordinal}° ${this._chatSafe(label)}*`, '');
+      lines.push(`*👨‍🔧 ${this._chatSafe(techLabel)}  ⏱️ Tempo: ${this._chatSafe(tempo)}*`, '');
+    });
+
+    lines.push('*Quantidade total de atividades:*', '');
+    Object.keys(techCounts)
+      .sort((a, b) => a.localeCompare(b, 'pt-BR'))
+      .forEach((name) => {
+        lines.push(`${this._chatSafe(name)} = ${techCounts[name]}`);
+      });
+
+    return { text: lines.join('\n') };
+  },
+
   _normalizeRegionKey(regionRaw) {
     const r = String(regionRaw || '').trim().toLowerCase();
     if (!r) return '';
@@ -2065,9 +2326,7 @@ const WebhookService = {
   },
 
   _resolveWebhookUrlForTask(task, config) {
-    const isAtd = task?.categoria === 'atendimento-cliente';
-    const isChild = isAtd && task?.parentTaskId;
-    const rootTask = isChild ? Store.findOpTask(Number(task.parentTaskId)) : task;
+    const rootTask = getLinkedOsRootTask(task);
 
     // Se já existe URL do tópico salva na tarefa raiz (pai), sempre reutiliza.
     const fixedThreadWebhook = String(rootTask?.chatThreadWebhookUrl || '').trim();
@@ -2076,8 +2335,10 @@ const WebhookService = {
     const byRegion = (config && config.urlsByRegion && typeof config.urlsByRegion === 'object')
       ? config.urlsByRegion
       : {};
-    // Atendimento (pai/filha) usa a região da tarefa pai para não dividir tópico em canais distintos.
-    let regionSource = isAtd ? (rootTask?.regiao || task?.regiao) : task?.regiao;
+    // Atendimento / rompimento (pai e OS filha): região do card pai para manter o mesmo tópico no Chat.
+    let regionSource = isLinkedOsCategory(task?.categoria)
+      ? (rootTask?.regiao || task?.regiao)
+      : task?.regiao;
 
     const key = this._normalizeRegionKey(regionSource);
     // Atenuação: não permitir fallback silencioso para BACKUP quando a região não foi escolhida.
@@ -2115,8 +2376,7 @@ const WebhookService = {
 
     const message = this._buildMessage(event, task, category);
 
-    const isAtdChild = task?.categoria === 'atendimento-cliente' && task?.parentTaskId;
-    const threadRootTask = isAtdChild ? Store.findOpTask(Number(task.parentTaskId)) : task;
+    const threadRootTask = getLinkedOsRootTask(task);
     if (!threadRootTask) return;
 
     // Google Chat threading (tópicos): cria no "andamento" e responde no mesmo thread nas demais.
@@ -2126,15 +2386,31 @@ const WebhookService = {
       const url = this._buildThreadedWebhookUrl(webhookUrl, threadKey);
       const payload = { ...message, thread: { threadKey } };
       await this._post(url, payload);
-      return;
+    } else {
+      await this._post(webhookUrl, message);
     }
 
-    await this._post(webhookUrl, message);
+    if (
+      event === 'finalizada' &&
+      isLinkedOsParentTask(threadRootTask) &&
+      (isOsLinkedChildCategory(threadRootTask?.categoria) || getLinkedOsChildren(threadRootTask).length)
+    ) {
+      const report = this._buildLinkedOsActivityReport(threadRootTask);
+      if (report) {
+        const reportPayload = threadKey ? { ...report, thread: { threadKey } } : report;
+        const reportUrl = threadKey
+          ? this._buildThreadedWebhookUrl(webhookUrl, threadKey)
+          : webhookUrl;
+        await this._post(reportUrl, reportPayload);
+      }
+    }
   },
 
-  _resolveThreadKey(_event, task) {
+  _resolveThreadKey(event, task) {
     const existing = String(task?.chatThreadKey ?? '').trim();
     if (existing) return existing;
+    // Só abre tópico novo em "Em andamento"; demais eventos respondem no tópico existente.
+    if (event !== 'andamento') return '';
 
     // Sempre gera chave única por "instância da tarefa raiz", evitando cair em tópico antigo.
     const stableId = this._taskStableId(task);
@@ -2290,24 +2566,19 @@ const WebhookService = {
     }
 
     if (opCat === 'atendimento-cliente' && event === 'andamento' && task?.parentTaskId) {
-      const parent = Store.findOpTask(Number(task.parentTaskId));
+      const parent = getLinkedOsRootTask(task);
       const childCode = String(task.taskCode || `ATD-${String(task.id || '').padStart(4, '0')}`).trim();
-      const tecnico = String(task.responsavel || 'Não informado').trim();
+      const tecnico = this._resolveTechnicianDisplay(task, { mention: true });
       const desc = String(task.descricao || '').trim();
       const atividade = String(task.titulo || '').trim();
       const cliente = String(parent?.nomeCliente || parent?.titulo || '').trim();
-
-      const siblings = Store.getOpTasks()
-        .filter(t => t && t.categoria === 'atendimento-cliente' && Number(t.parentTaskId) === Number(task.parentTaskId))
-        .sort((a, b) => Number(a.id) - Number(b.id));
-      const idx = siblings.findIndex(t => Number(t.id) === Number(task.id));
-      const ordinal = (idx >= 0 ? idx + 1 : 1);
+      const ordinal = getLinkedOsSiblingOrdinal(task);
 
       return {
         text: [
           `${ordinal}°  Atividade: ${this._chatSafe(atividade)}`,
           `📝 Cliente: ${this._chatSafe(cliente)}`,
-          `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
+          `👨‍🔧 Técnico Responsável: ${tecnico}`,
           `🆔: ${this._chatSafe(childCode)}`,
           '',
           this._chatSafe(desc),
@@ -2317,13 +2588,7 @@ const WebhookService = {
 
     // Atendimento ao Cliente (OS / tarefa filho) concluída: mensagem curta (pedido do time).
     if (opCat === 'atendimento-cliente' && event === 'concluida' && task?.parentTaskId) {
-      const parentId = Number(task.parentTaskId);
-      const siblings = Store.getOpTasks()
-        .filter(t => t && t.categoria === 'atendimento-cliente' && Number(t.parentTaskId) === parentId)
-        .sort((a, b) => Number(a.id) - Number(b.id));
-      const idx = siblings.findIndex(t => Number(t.id) === Number(task.id));
-      const ordinal = (idx >= 0 ? idx + 1 : 1);
-
+      const ordinal = getLinkedOsSiblingOrdinal(task);
       const atividade = String(task.titulo || '').trim();
       const history = Array.isArray(task?.historico) ? task.historico : [];
       const lastAuthor = String(history[history.length - 1]?.autor || '').trim();
@@ -2338,7 +2603,13 @@ const WebhookService = {
       };
     }
 
-    if (opCat === 'rompimentos' && event === 'andamento') {
+    // Rompimento / troca de poste — OS vinculada (andamento e concluída no tópico do pai).
+    if (isOsLinkedChildCategory(opCat) && task?.parentTaskId && (event === 'andamento' || event === 'concluida')) {
+      const childMsg = this._buildOsLinkedChildMessage(event, task);
+      if (childMsg?.text) return childMsg;
+    }
+
+    if (opCat === 'rompimentos' && event === 'andamento' && !task?.parentTaskId) {
       const cto = this._formatRompimentoElementos(task.setor);
       const tecnico = this._resolveTechnicianDisplay(task);
       const coordsRaw = String(task.coordenadas || '').trim();
@@ -2442,7 +2713,7 @@ const WebhookService = {
       };
     }
 
-    if (opCat === 'rompimentos' && (event === 'concluida' || event === 'finalizada')) {
+    if (opCat === 'rompimentos' && (event === 'concluida' || event === 'finalizada') && !task?.parentTaskId) {
       const setor = this._formatRompimentoElementos(task.setor);
       const regiao = task.regiao || 'Não informada';
       const tecnico = this._resolveTechnicianDisplay(task, { mention: false });
@@ -2828,8 +3099,8 @@ const OpTaskService = {
       ? Store.getOpTasks().filter(t => t.categoria === category)
       : Store.getOpTasks();
     tasks.forEach(t => {
-      // No "Atendimento ao Cliente", subtarefas não devem inflar contadores de tarefas.
-      if (t.categoria === 'atendimento-cliente' && t.parentTaskId) return;
+      // OS vinculadas (filhas) não inflam contadores do card pai.
+      if (isLinkedOsCategory(t.categoria) && t.parentTaskId) return;
       if (t.categoria === 'certificacao-cemig') {
         const s = TaskService._normStatus(t.status);
         if (s === 'backlog') counts.Criada++;
@@ -3271,6 +3542,8 @@ const UI = {
     const board = document.getElementById('kanbanBoard');
     board?.classList.remove('atd-mode');
     const isAtendimento = false;
+    const isLinkedOsBoard = isLinkedOsCategory(category);
+    const linkedOsEditTitle = linkedOsParentEditLabel(category);
 
     const isCemig = category === 'certificacao-cemig';
     board?.classList.toggle('kanban-board--otim-scroll', category === 'otimizacao-rede');
@@ -3343,11 +3616,11 @@ const UI = {
 
       const cards = colTasks.length
         ? colTasks
-          .filter(t => !(isAtendimento && t.parentTaskId))
+          .filter(t => !((isAtendimento || isLinkedOsBoard) && t.parentTaskId))
           .map(t => {
             const isLate = t.prazo && t.prazo < tod && !doneForLate.includes(t.status);
-            const childTasks = isAtendimento
-              ? tasks.filter(c => Number(c.parentTaskId) === Number(t.id))
+            const childTasks = (isAtendimento || isLinkedOsBoard)
+              ? tasks.filter(c => Number(c.parentTaskId) === Number(t.id) && c.categoria === category)
               : [];
             const parentTag = isAtendimento
               ? `<span class="badge s-info" style="margin-bottom:6px">LISTA</span>`
@@ -3376,19 +3649,25 @@ const UI = {
               if (!txt) return '';
               return `<div class="kanban-card-sub" style="color:var(--white4);font-size:12px;margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${Utils.escapeHtml(txt)}</div>`;
             })();
-            const childHtml = childTasks.length
+            const childHtml = isAtendimento && childTasks.length
               ? `<div class="subtask-list">${childTasks.map(c => `
                    <div class="subtask-item">
                      ${Utils.taskCopyProtocolButtonHtml(Utils.opTaskDisplayRef(c), 'task-copy-id-btn--sm')}
                      ${Utils.opTaskStatusPickerButtonHtml(c.id, 'op-status-picker-btn--sm')}
-                     <span>${Utils.escapeHtml(c.taskCode || '')} · ${Utils.escapeHtml(c.titulo)}</span>
+                     <span>${Utils.escapeHtml(c.taskCode || '')} · ${Utils.escapeHtml(c.ordemServico || c.titulo || 'OS')}</span>
                      <button type="button" data-open-subtask="${Utils.escapeHtml(c.id)}">${Utils.escapeHtml(c.status)}</button>
                    </div>
                  `).join('')}</div>`
               : '';
+            const linkedOsFootHtml = isLinkedOsBoard
+              ? `<div class="atd-kanban-card-foot">
+                  <button type="button" class="atd-book-ico" data-linked-os-add="${Utils.escapeHtml(t.id)}" data-linked-os-category="${Utils.escapeHtml(category)}" title="Adicionar ordem de serviço" aria-label="Adicionar ordem de serviço">+</button>
+                  <button type="button" class="atd-book-ico" data-linked-os-edit-parent="${Utils.escapeHtml(t.id)}" title="${Utils.escapeHtml(linkedOsEditTitle)}" aria-label="${Utils.escapeHtml(linkedOsEditTitle)}">✎</button>
+                </div>`
+              : '';
 
             return `
-              <article class="kanban-card ${this._lastMovedOpTask && this._lastMovedOpTask.id === t.id && this._lastMovedOpTask.status === t.status ? 'just-moved' : ''}" data-op-id="${Utils.escapeHtml(t.id)}" data-op-status="${Utils.escapeHtml(t.status)}" draggable="true" aria-label="${Utils.escapeHtml(t.titulo)}">
+              <article class="kanban-card${isLinkedOsBoard ? ' romp-kanban-parent-card' : ''} ${this._lastMovedOpTask && this._lastMovedOpTask.id === t.id && this._lastMovedOpTask.status === t.status ? 'just-moved' : ''}" data-op-id="${Utils.escapeHtml(t.id)}" data-op-status="${Utils.escapeHtml(t.status)}" draggable="true" aria-label="${Utils.escapeHtml(t.titulo)}">
                 ${parentTag}
                 ${badgesRow}
                 <div class="kanban-card-title-row">
@@ -3407,6 +3686,7 @@ const UI = {
                 ${sigHtml}
                 <div class="kanban-card-actions">${actionBtns}${statusPickerBtn}</div>
                 ${childHtml}
+                ${linkedOsFootHtml}
               </article>
             `;
           }).join('')
@@ -3467,6 +3747,36 @@ const UI = {
         return;
       }
 
+      const addLinkedOs = target.closest?.('[data-linked-os-add], [data-romp-add-os]');
+      if (addLinkedOs && board.contains(addLinkedOs)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const pid = Number(addLinkedOs.dataset.linkedOsAdd || addLinkedOs.dataset.rompAddOs || 0);
+        const cat = String(addLinkedOs.dataset.linkedOsCategory || Store.currentOpCategory || 'rompimentos').trim();
+        if (!pid) return;
+        Controllers.opTask.openNewModal({
+          category: cat,
+          parentTaskId: pid,
+          isParentTask: false,
+          status: cat === 'certificacao-cemig' ? 'Pendente' : 'Criada',
+        });
+        return;
+      }
+
+      const editLinkedOsParent = target.closest?.('[data-linked-os-edit-parent], [data-romp-edit-parent]');
+      if (editLinkedOsParent && board.contains(editLinkedOsParent)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const pid = Number(
+          editLinkedOsParent.dataset.linkedOsEditParent ||
+          editLinkedOsParent.dataset.rompEditParent ||
+          0,
+        );
+        if (!pid) return;
+        Controllers.opTask.openEditModal(pid);
+        return;
+      }
+
       const subtaskBtn = target.closest?.('[data-open-subtask]');
       if (subtaskBtn && board.contains(subtaskBtn)) {
         e.preventDefault();
@@ -3476,6 +3786,7 @@ const UI = {
 
       const card = target.closest?.('.kanban-card');
       if (!card || !board.contains(card)) return;
+      if (target.closest?.('.atd-kanban-card-foot')) return;
       const id = +card.dataset.opId;
       Controllers.opTask.openEditModal(id);
     };
@@ -3687,6 +3998,7 @@ const UI = {
       'troca-etiqueta': { title: 'Troca de etiqueta', crumb: 'Atividade de manutenção' },
       'qualidade-potencia': { title: 'Qualidade de potência', crumb: 'Atividade de manutenção' },
       'manutencao-corretiva': { title: 'Manutenção corretiva', crumb: 'Atividade de manutenção' },
+      'ordem-servicos': { title: 'Ordem de Serviços', crumb: 'Dashboard operacional' },
       config: { title: 'Configurações', crumb: 'Sistema' },
     };
     const meta = titles[page] || { title: page, crumb: '' };
@@ -3731,6 +4043,10 @@ const UI = {
     if (page === 'correcao-atenuacao') this.renderAtenuacaoDashboardPage();
     if (page === 'troca-etiqueta') this.renderTrocaEtiquetaPage();
     if (page === 'atendimento') this.renderAtendimentoPage();
+    if (page === 'ordem-servicos') {
+      window.OsDashboard?.init?.();
+      window.OsDashboard?.render?.();
+    }
     if (page === 'config') {
       Controllers.configSecret?.syncUi?.();
       // (Chat interno removido)
@@ -3766,6 +4082,7 @@ const UI = {
       'troca-etiqueta',
       'qualidade-potencia',
       'manutencao-corretiva',
+      'ordem-servicos',
       'chat',
       'config',
     ]);
@@ -4647,7 +4964,8 @@ const UI = {
 
   /** Atualiza Kanban (Tarefas) ou painel de Atendimento conforme a página ativa. */
   refreshOperationalUi() {
-    if (Store.currentPage === 'atendimento') this.renderAtendimentoPage();
+    if (Store.currentPage === 'ordem-servicos') window.OsDashboard?.render?.();
+    else if (Store.currentPage === 'atendimento') this.renderAtendimentoPage();
     else if (Store.currentPage === 'correcao-atenuacao') {
       // Re-render completo com o modal aberto recria o DOM e derruba foco/seleção nos inputs.
       if (document.getElementById('atn2ActModal')?.classList?.contains('open')) return;
@@ -7607,13 +7925,77 @@ const Controllers = {
       listEl.innerHTML = techs.map(t => `<option value="${t.name}"></option>`).join('');
     },
     _syncSelectedTecnicoChatId() {
-      const input = document.getElementById('op-responsavel');
-      const hidden = document.getElementById('op-responsavel-chatid');
-      if (!input || !hidden) return;
-      const key = normalizeTechName(input.value);
+      const hidden = document.getElementById('op-responsavel');
+      const hiddenChat = document.getElementById('op-responsavel-chatid');
+      if (!hidden || !hiddenChat) return;
       const regiaoRaw = document.getElementById('op-regiao')?.value || '';
-      const match = getTechDirectory(WebhookService._normalizeRegionKey(regiaoRaw)).find(t => t.key === key);
-      hidden.value = match ? match.chatUserId : '';
+      const regionKey = WebhookService._normalizeRegionKey(regiaoRaw);
+      const names = parseResponsaveis(hidden.value);
+      hiddenChat.value = buildResponsavelChatIdsForNames(names, regionKey, hiddenChat.value);
+    },
+    _getOpTecnicosState() {
+      const names = parseResponsaveis(document.getElementById('op-responsavel')?.value || '');
+      const chatIds = parseResponsavelChatIds(document.getElementById('op-responsavel-chatid')?.value || '');
+      return names.map((name, i) => ({ name, chatUserId: chatIds[i] || '' }));
+    },
+    _syncOpTecnicosHiddenFields(names, chatIds) {
+      const hidden = document.getElementById('op-responsavel');
+      const hiddenChat = document.getElementById('op-responsavel-chatid');
+      if (hidden) hidden.value = formatResponsaveis(names);
+      if (hiddenChat) hiddenChat.value = formatResponsavelChatIds(chatIds);
+    },
+    _setOpTecnicosFromStrings(responsavelRaw, chatIdsRaw) {
+      const names = parseResponsaveis(responsavelRaw);
+      const regionKey = WebhookService._normalizeRegionKey(document.getElementById('op-regiao')?.value || '');
+      const chatIds = parseResponsavelChatIds(
+        buildResponsavelChatIdsForNames(names, regionKey, chatIdsRaw),
+      );
+      this._syncOpTecnicosHiddenFields(names, chatIds);
+      this._renderOpTecnicosChips();
+    },
+    _renderOpTecnicosChips() {
+      const container = document.getElementById('op-tech-multi-chips');
+      if (!container) return;
+      const state = this._getOpTecnicosState();
+      container.innerHTML = state.map(({ name }) => {
+        const color = Utils.getAvatarColor(name);
+        const initials = Utils.getInitials(name);
+        const safe = Utils.escapeHtml(name);
+        const safeAttr = Utils.escapeHtmlAttr(name);
+        return `<span class="op-tech-chip" data-tech-name="${safeAttr}">
+          <span class="av-sm op-tech-chip__av" style="background:${color};color:#0a0c0a" aria-hidden="true">${initials}</span>
+          <span class="op-tech-chip__label">${safe}</span>
+          <button type="button" class="op-tech-chip__remove" aria-label="Remover ${safe}">×</button>
+        </span>`;
+      }).join('');
+    },
+    _addOpTecnico(nameRaw) {
+      const name = String(nameRaw || '').trim();
+      if (!name) return false;
+      const state = this._getOpTecnicosState();
+      const key = normalizeTechName(name);
+      if (state.some((t) => normalizeTechName(t.name) === key)) return false;
+      const regiaoRaw = document.getElementById('op-regiao')?.value || '';
+      const regionKey = WebhookService._normalizeRegionKey(regiaoRaw);
+      const match = getTechDirectory(regionKey).find((t) => t.key === key);
+      const names = [...state.map((s) => s.name), name];
+      const chatIds = [...state.map((s) => s.chatUserId), match?.chatUserId || ''];
+      this._syncOpTecnicosHiddenFields(names, chatIds);
+      this._renderOpTecnicosChips();
+      return true;
+    },
+    _removeOpTecnico(nameRaw) {
+      const key = normalizeTechName(nameRaw);
+      const state = this._getOpTecnicosState().filter((t) => normalizeTechName(t.name) !== key);
+      this._syncOpTecnicosHiddenFields(state.map((s) => s.name), state.map((s) => s.chatUserId));
+      this._renderOpTecnicosChips();
+    },
+    _commitOpTecnicoAddInput() {
+      const addInput = document.getElementById('op-responsavel-add');
+      if (!addInput) return;
+      const raw = addInput.value.trim();
+      if (!raw) return;
+      if (this._addOpTecnico(raw)) addInput.value = '';
     },
     _newTaskPreset: null,
     _globalStatusPickerOpId: 0,
@@ -7622,6 +8004,10 @@ const Controllers = {
     _qdpCtoLookupTimer: null,
     _isAtendimentoCategory(category = Store.currentOpCategory) {
       return category === 'atendimento-cliente';
+    },
+    /** Atendimento, rompimento e troca de poste: tarefa pai + OS vinculadas (filhas). */
+    _supportsLinkedOs(category = Store.currentOpCategory) {
+      return isLinkedOsCategory(category);
     },
     _isOtimizacaoRedeCategory(category = Store.currentOpCategory) {
       return category === 'otimizacao-rede';
@@ -7936,36 +8322,42 @@ const Controllers = {
       const isQdp = category === 'qualidade-potencia' || category === 'manutencao-corretiva';
       const isRompimento = this._isRompimentoCategory(category);
       const isTrocaPoste = this._isTrocaPosteCategory(category);
+      const linkedParentId = String(document.getElementById('op-parent-task-id')?.value || '').trim();
+      const isLinkedOsLinkedChild = this._supportsLinkedOs(category) && !!linkedParentId;
+      const isRompLinkedChild = isRompimento && isLinkedOsLinkedChild;
       const modalTitle = document.getElementById('opTaskModalTitle');
       const modalWrap = document.getElementById('opTaskModal');
 
       this._restoreOpModalLayout();
-      this._syncRompimentoRegiaoPlacement(isRompimento);
+      this._syncRompimentoRegiaoPlacement(isRompimento && !isRompLinkedChild);
       if (modalWrap) {
-        modalWrap.classList.toggle('rompimento-mode', isRompimento);
-        modalWrap.classList.toggle('troca-poste-mode', isTrocaPoste);
-        modalWrap.classList.toggle('otim-rede-mode', isOtimRede);
+        modalWrap.classList.toggle('rompimento-mode', isRompimento && !isRompLinkedChild);
+        modalWrap.classList.toggle('troca-poste-mode', isTrocaPoste && !isLinkedOsLinkedChild);
+        modalWrap.classList.toggle('otim-rede-mode', isOtimRede && !isLinkedOsLinkedChild);
         modalWrap.classList.toggle('cemig-mode', isCemig);
         modalWrap.classList.toggle('qdp-mode', isQdp);
       }
 
-      this._toggleGroup('opTituloGroup', !isRompimento && !isTrocaPoste && !isCemig && !isQdp);
+      this._toggleGroup('opTituloGroup', !isRompimento && !isTrocaPoste && !isCemig && !isQdp && !isLinkedOsLinkedChild);
       this._toggleGroup('opPrazoGroup', !isOtimRede && !isRompimento);
-      this._toggleGroup('opPriorityRegionRow', !isRompimento && !isOtimRede && !isCemig && !isQdp);
+      this._toggleGroup('opPriorityRegionRow', !isRompimento && !isOtimRede && !isCemig && !isQdp && !isLinkedOsLinkedChild);
 
       this._toggleGroup('opParentConfig', isAtendimento);
-      this._toggleGroup('opRompimentoCoordsRow', isRompimento || isTrocaPoste || isQdp);
-      this._toggleGroup('opRompimentoExtraRow', isRompimento);
-      this._toggleGroup('opRompimentoSetorGroup', isRompimento);
-      this._toggleGroup('opRompimentoTipoGroup', isRompimento);
-      this._toggleGroup('opQdpWrap', isQdp);
+      this._toggleGroup('opRompimentoCoordsRow', (isRompimento || isTrocaPoste || isQdp) && !isLinkedOsLinkedChild);
+      this._toggleGroup('opRompimentoExtraRow', isRompimento && !isRompLinkedChild);
+      this._toggleGroup('opRompimentoSetorGroup', isRompimento && !isRompLinkedChild);
+      this._toggleGroup('opRompimentoTipoGroup', isRompimento && !isRompLinkedChild);
+      this._toggleGroup('opQdpWrap', isQdp && !isLinkedOsLinkedChild);
 
       this._syncCoordsBlockUi(isRompimento, isTrocaPoste);
+
+      const qdpOsGroup = document.getElementById('op-qdp-ordem-servico')?.closest('.form-group');
+      if (qdpOsGroup) qdpOsGroup.style.display = (isQdp && !isLinkedOsLinkedChild) ? 'none' : '';
 
       // FIX: em Rompimentos/Troca de poste o título é automático; remover campo da experiência do usuário.
       const tituloInput = document.getElementById('op-titulo');
       if (tituloInput) {
-        if (isRompimento || isTrocaPoste) {
+        if ((isRompimento && !isRompLinkedChild) || (isTrocaPoste && !isLinkedOsLinkedChild)) {
           tituloInput.value = '';
           tituloInput.disabled = true;
           tituloInput.setAttribute('aria-hidden', 'true');
@@ -7991,9 +8383,9 @@ const Controllers = {
       }
 
       const tituloLab = document.querySelector('label[for="op-titulo"]');
-      const tecRespLab = document.querySelector('label[for="op-responsavel"]');
+      const tecRespLab = document.querySelector('label[for="op-responsavel-add"]');
       const prazoLab = document.querySelector('label[for="op-prazo"]');
-      if (isQdp) {
+      if (isQdp && !isLinkedOsLinkedChild) {
         this._toggleGroup('opMainRow', false);
         this._toggleGroup('opOtimRedeWrap', false);
         this._toggleGroup('opCemigWrap', false);
@@ -8018,37 +8410,46 @@ const Controllers = {
         if (prazoLab) prazoLab.textContent = 'Data de vencimento';
         if (qdpCliLab) qdpCliLab.textContent = category === 'manutencao-corretiva' ? 'Manutenção' : 'Nome/usuário do cliente';
         if (qdpWrap) qdpWrap.style.display = '';
-      } else if (isOtimRede) {
+      } else if (isOtimRede && !isLinkedOsLinkedChild) {
         this._toggleGroup('opMainRow', false);
         this._toggleGroup('opOtimRedeWrap', true);
         this._toggleGroup('opCemigWrap', false);
         if (tituloLab) tituloLab.textContent = 'Nome';
         if (tecRespLab) tecRespLab.textContent = 'Técnico';
+        if (prazoLab) prazoLab.textContent = 'Data de vencimento';
+        const prioSlot = document.getElementById('opOtimPrioridadeSlot');
+        const prazoSlot = document.getElementById('opOtimPrazoSlot');
         const regSlot = document.getElementById('opOtimRegiaoSlot');
         const tecSlot = document.getElementById('opOtimTecSlot');
+        const prioG = document.getElementById('opPrioridadeGroup');
+        const prazoG = document.getElementById('opPrazoGroup');
         const regiao = document.getElementById('opRegiaoGroup');
         const respG = document.getElementById('opResponsavelGroup');
+        if (prioSlot && prioG) prioSlot.appendChild(prioG);
+        if (prazoSlot && prazoG) prazoSlot.appendChild(prazoG);
         if (regSlot && regiao) regSlot.appendChild(regiao);
         if (tecSlot && respG) tecSlot.appendChild(respG);
 
-        // Organização do formulário OTIM: Nome + Região/Técnico no topo, depois Protocolo/OS, depois Descrição (com imagens).
         const otimWrap = document.getElementById('opOtimRedeWrap');
+        const metaRow = document.getElementById('opOtimMetaRow');
         const tituloGroup = document.getElementById('opTituloGroup');
-        const protoRow = otimWrap?.querySelector?.('.form-row');
         const regTecRow = document.getElementById('opOtimRegiaoTecRow');
-        if (otimWrap && tituloGroup) {
-          // move "Nome" para dentro do bloco dedicado da Otimização de Rede
-          if (tituloGroup.parentElement !== otimWrap) {
-            otimWrap.insertBefore(tituloGroup, otimWrap.firstChild);
+        const protoRow = document.getElementById('opOtimProtoRow');
+        if (otimWrap && tituloGroup && metaRow) {
+          const anchor = metaRow.nextElementSibling;
+          if (tituloGroup.parentElement !== otimWrap || tituloGroup !== anchor) {
+            otimWrap.insertBefore(tituloGroup, anchor || regTecRow || protoRow);
           }
         }
-        if (otimWrap && regTecRow && protoRow) {
-          // garante que Região/Técnico apareçam logo após o Nome
-          if (regTecRow.parentElement === otimWrap && regTecRow !== protoRow.nextSibling) {
+        if (otimWrap && regTecRow && protoRow && tituloGroup) {
+          if (regTecRow.nextElementSibling !== protoRow) {
             otimWrap.insertBefore(regTecRow, protoRow);
           }
+          if (tituloGroup.nextElementSibling !== regTecRow) {
+            otimWrap.insertBefore(tituloGroup, regTecRow);
+          }
         }
-      } else if (isCemig) {
+      } else if (isCemig && !isLinkedOsLinkedChild) {
         this._toggleGroup('opMainRow', false);
         this._toggleGroup('opOtimRedeWrap', false);
         this._toggleGroup('opCemigWrap', true);
@@ -8075,13 +8476,35 @@ const Controllers = {
       if (modalTitle && !Store.editingOpTaskId) {
         if (isRompimento) modalTitle.textContent = 'Nova tarefa de rompimento';
         else if (isTrocaPoste) modalTitle.textContent = 'Nova troca de poste';
-        else if (category === 'certificacao-cemig') modalTitle.textContent = 'Nova certificação Cemig';
-        else if (isOtimRede) modalTitle.textContent = 'Nova otimização de rede';
-        else if (isQdp) modalTitle.textContent = 'Nova qualidade de potência';
+        else if (category === 'certificacao-cemig') {
+          const hid = document.getElementById('op-parent-task-id');
+          const isCemigPai = !String(hid?.value || '').trim();
+          modalTitle.textContent = isCemigPai ? 'Nova certificação Cemig' : 'Nova OS vinculada à certificação Cemig';
+        } else if (isOtimRede) {
+          const hid = document.getElementById('op-parent-task-id');
+          const isOtimPai = !String(hid?.value || '').trim();
+          modalTitle.textContent = isOtimPai ? 'Nova otimização de rede' : 'Nova OS vinculada à otimização';
+        } else if (category === 'manutencao-corretiva') {
+          const hid = document.getElementById('op-parent-task-id');
+          const isMcrPai = !String(hid?.value || '').trim();
+          modalTitle.textContent = isMcrPai ? 'Nova manutenção corretiva' : 'Nova OS vinculada à manutenção';
+        } else if (category === 'qualidade-potencia') {
+          const hid = document.getElementById('op-parent-task-id');
+          const isQdpPai = !String(hid?.value || '').trim();
+          modalTitle.textContent = isQdpPai ? 'Nova qualidade de potência' : 'Nova OS vinculada à qualidade de potência';
+        } else if (isQdp) modalTitle.textContent = 'Nova qualidade de potência';
         else if (category === 'atendimento-cliente') {
           const hid = document.getElementById('op-parent-task-id');
           const isListaPai = !String(hid?.value || '').trim();
           modalTitle.textContent = isListaPai ? 'Nova lista de atendimento' : 'Nova ordem de serviço';
+        } else if (category === 'rompimentos') {
+          const hid = document.getElementById('op-parent-task-id');
+          const isRompPai = !String(hid?.value || '').trim();
+          modalTitle.textContent = isRompPai ? 'Nova tarefa de rompimento' : 'Nova OS vinculada ao rompimento';
+        } else if (category === 'troca-poste') {
+          const hid = document.getElementById('op-parent-task-id');
+          const isTrocaPai = !String(hid?.value || '').trim();
+          modalTitle.textContent = isTrocaPai ? 'Nova troca de poste' : 'Nova OS vinculada à troca de poste';
         } else modalTitle.textContent = 'Nova tarefa';
       }
 
@@ -8094,53 +8517,6 @@ const Controllers = {
       const modalCat = Store.editingOpTaskId
         ? (Store.findOpTask(Store.editingOpTaskId)?.categoria || Store.currentOpCategory)
         : (this._newTaskPreset?.category || Store.currentOpCategory);
-      if (modalCat === 'otimizacao-rede') {
-        const atdWrap = document.getElementById('opAtdParentOnlyWrap');
-        const atdChildWrap = document.getElementById('opAtdChildOnlyWrap');
-        const mainRow = document.getElementById('opMainRow');
-        const priorityRow = document.getElementById('opPriorityRegionRow');
-        const prazoInput = document.getElementById('op-prazo');
-        const prazoGroup = prazoInput?.closest('.form-group');
-        const responsavelInput = document.getElementById('op-responsavel');
-        const regiaoSelect = document.getElementById('op-regiao');
-        if (atdWrap) atdWrap.style.display = 'none';
-        if (atdChildWrap) atdChildWrap.style.display = 'none';
-        if (mainRow) mainRow.style.display = 'none';
-        if (priorityRow) priorityRow.style.display = 'none';
-        if (prazoGroup) prazoGroup.style.display = 'none';
-        if (responsavelInput) responsavelInput.disabled = false;
-        if (regiaoSelect) regiaoSelect.disabled = false;
-        this._syncTecnicosDatalist();
-        this._syncSelectedTecnicoChatId();
-        return;
-      }
-
-      if (modalCat === 'certificacao-cemig') {
-        const atdWrap = document.getElementById('opAtdParentOnlyWrap');
-        const atdChildWrap = document.getElementById('opAtdChildOnlyWrap');
-        const mainRow = document.getElementById('opMainRow');
-        const priorityRow = document.getElementById('opPriorityRegionRow');
-        const responsavelInput = document.getElementById('op-responsavel');
-        const regiaoSelect = document.getElementById('op-regiao');
-        const prazoInput = document.getElementById('op-prazo');
-        const prazoGroup = prazoInput?.closest('.form-group');
-        const regiaoGroup = regiaoSelect?.closest('.form-group');
-        const responsavelGroup = responsavelInput?.closest('.form-group');
-        if (atdWrap) atdWrap.style.display = 'none';
-        if (atdChildWrap) atdChildWrap.style.display = 'none';
-        if (mainRow) mainRow.style.display = 'none';
-        if (priorityRow) priorityRow.style.display = 'none';
-        [responsavelGroup, prazoGroup, regiaoGroup].forEach((g) => {
-          if (g) g.style.display = '';
-        });
-        if (responsavelInput) responsavelInput.disabled = false;
-        if (regiaoSelect) regiaoSelect.disabled = false;
-        if (prazoInput) prazoInput.disabled = false;
-        this._syncTecnicosDatalist();
-        this._syncSelectedTecnicoChatId();
-        return;
-      }
-
       const hiddenParent = document.getElementById('op-parent-task-id');
       const isParent = !String(hiddenParent?.value || '').trim();
       const responsavelInput = document.getElementById('op-responsavel');
@@ -8153,6 +8529,9 @@ const Controllers = {
       // (na página Atendimento a aba Tarefas pode estar com outra categoria selecionada).
       const isRompimento = modalCat === 'rompimentos';
       const isTrocaPoste = modalCat === 'troca-poste';
+      const isOtimRede = modalCat === 'otimizacao-rede';
+      const isCemig = modalCat === 'certificacao-cemig';
+      const isQdp = modalCat === 'qualidade-potencia' || modalCat === 'manutencao-corretiva';
       const isAtdCliente = modalCat === 'atendimento-cliente';
       const atdWrap = document.getElementById('opAtdParentOnlyWrap');
       const atdChildWrap = document.getElementById('opAtdChildOnlyWrap');
@@ -8162,6 +8541,9 @@ const Controllers = {
       const childRegiaoSlot = document.getElementById('opAtdChildRegiaoSlot');
       const priorityRow = document.getElementById('opPriorityRegionRow');
       const mainRow = document.getElementById('opMainRow');
+      const otimParentOnly = isOtimRede && isParent;
+      const cemigParentOnly = isCemig && isParent;
+      const qdpParentOnly = isQdp && isParent;
 
       [responsavelGroup, prazoGroup, regiaoGroup].forEach(group => {
         if (!group) return;
@@ -8173,17 +8555,40 @@ const Controllers = {
           group.style.display = '';
           return;
         }
+        if (isOtimRede) {
+          group.style.display = otimParentOnly ? '' : 'none';
+          return;
+        }
+        if (isCemig) {
+          group.style.display = cemigParentOnly ? '' : 'none';
+          return;
+        }
+        if (isQdp) {
+          group.style.display = qdpParentOnly ? '' : 'none';
+          return;
+        }
         group.style.display = isParent ? '' : 'none';
       });
 
       const atdParentOnly = isAtdCliente && isParent && !isRompimento && !isTrocaPoste;
       const atdChildOnly = isAtdCliente && !isParent && !isRompimento && !isTrocaPoste;
+      const rompChildOnly = isRompimento && !isParent;
+      const trocaChildOnly = isTrocaPoste && !isParent;
+      const otimChildOnly = isOtimRede && !isParent;
+      const cemigChildOnly = isCemig && !isParent;
+      const qdpChildOnly = isQdp && !isParent;
+      const osLinkedChildOnly = rompChildOnly || trocaChildOnly || otimChildOnly || cemigChildOnly || qdpChildOnly;
+
+      const cemigWrap = document.getElementById('opCemigWrap');
+      const qdpWrap = document.getElementById('opQdpWrap');
+      if (cemigWrap) cemigWrap.style.display = cemigParentOnly ? '' : 'none';
+      if (qdpWrap) qdpWrap.style.display = qdpParentOnly ? '' : 'none';
 
       // Atendimento ao Cliente (pai): deixa apenas os campos essenciais do formulário.
       if (atdWrap) atdWrap.style.display = atdParentOnly ? '' : 'none';
-      if (atdChildWrap) atdChildWrap.style.display = atdChildOnly ? '' : 'none';
-      if (mainRow) mainRow.style.display = atdParentOnly ? 'none' : '';
-      if (priorityRow) priorityRow.style.display = atdParentOnly ? 'none' : '';
+      if (atdChildWrap) atdChildWrap.style.display = (atdChildOnly || osLinkedChildOnly) ? '' : 'none';
+      if (mainRow) mainRow.style.display = (atdParentOnly || osLinkedChildOnly || otimParentOnly || cemigParentOnly || qdpParentOnly) ? 'none' : '';
+      if (priorityRow) priorityRow.style.display = (atdParentOnly || otimParentOnly || cemigParentOnly || qdpParentOnly) ? 'none' : '';
 
       if (atdParentOnly) {
         const prioridadeGroup = document.getElementById('opPrioridadeGroup');
@@ -8200,9 +8605,9 @@ const Controllers = {
         }
       }
 
-      if (atdChildOnly) {
+      if (atdChildOnly || osLinkedChildOnly) {
         // Para filha: mostra técnico + região no bloco próprio e esconde prazo/prioridade
-        const tecGroup = responsavelInput?.closest('.form-group');
+        const tecGroup = document.getElementById('opResponsavelGroup');
         if (childTecnicoSlot && tecGroup && tecGroup.parentElement !== childTecnicoSlot) {
           childTecnicoSlot.appendChild(tecGroup);
         }
@@ -8215,29 +8620,29 @@ const Controllers = {
         if (priorityRow) priorityRow.style.display = 'none';
       } else {
         // Fora do modo filha, reexibe prazo se estiver aplicável (categorySpecificFields pode esconder depois)
-        if (prazoGroup && !isRompimento) prazoGroup.style.display = '';
+        if (prazoGroup && !isRompimento && !otimParentOnly && !cemigParentOnly && !qdpParentOnly) prazoGroup.style.display = '';
       }
 
-      if (responsavelInput) {
-        // Atendimento: técnico é opcional (pai e filha).
-        if (atdParentOnly || atdChildOnly) responsavelInput.disabled = false;
+      const addTecInput = document.getElementById('op-responsavel-add');
+      const techMulti = document.getElementById('op-tech-multi');
+      if (addTecInput) {
+        let tecDisabled = false;
+        if (atdParentOnly || atdChildOnly || osLinkedChildOnly) tecDisabled = false;
         else if (isRompimento || isTrocaPoste) {
           const hasRegion = Boolean(String(regiaoSelect?.value || '').trim());
-          responsavelInput.disabled = !hasRegion;
-          if (!hasRegion) {
-            responsavelInput.value = '';
-            const hiddenChat = document.getElementById('op-responsavel-chatid');
-            if (hiddenChat) hiddenChat.value = '';
-          }
+          tecDisabled = !hasRegion;
+          if (!hasRegion) this._setOpTecnicosFromStrings('', '');
         } else {
-          responsavelInput.disabled = !isParent;
+          tecDisabled = !isParent;
         }
+        addTecInput.disabled = tecDisabled;
+        if (techMulti) techMulti.classList.toggle('op-tech-multi--disabled', tecDisabled);
       }
       if (prazoInput) {
         prazoInput.disabled = atdParentOnly ? true : (isRompimento ? true : !isParent);
       }
       if (regiaoSelect) {
-        if (atdChildOnly) regiaoSelect.disabled = false;
+        if (atdChildOnly || osLinkedChildOnly) regiaoSelect.disabled = false;
         else if (isTrocaPoste || isRompimento) regiaoSelect.disabled = false;
         else regiaoSelect.disabled = !isParent;
       }
@@ -8245,7 +8650,7 @@ const Controllers = {
       const tituloGrp = document.getElementById('opTituloGroup');
       const tituloLabS = document.querySelector('label[for="op-titulo"]');
       if (tituloGrp) {
-        if (atdParentOnly || atdChildOnly) tituloGrp.style.display = 'none';
+        if (atdParentOnly || atdChildOnly || osLinkedChildOnly) tituloGrp.style.display = 'none';
         else {
           tituloGrp.style.display = '';
           if (tituloLabS && isAtdCliente) tituloLabS.textContent = 'Nome da tarefa';
@@ -8368,16 +8773,21 @@ const Controllers = {
         : (this._newTaskPreset?.category || Store.currentOpCategory);
       const parentHidden = document.getElementById('op-parent-task-id');
       const parentIdRaw = parentHidden?.value || '';
-      const parentId = parentIdRaw ? Number(parentIdRaw) : null;
+      const parentIdFromHidden = parentIdRaw ? Number(parentIdRaw) : null;
+      const editingTask = Store.editingOpTaskId ? Store.findOpTask(Store.editingOpTaskId) : null;
+      const parentId = parentIdFromHidden
+        || (editingTask && this._supportsLinkedOs(category) && !editingTask.parentTaskId
+          ? Number(editingTask.id)
+          : null);
 
-      const isAtdChild = this._isAtendimentoCategory(category) && !!parentId;
-      if (!isAtdChild) {
+      const showLinkedOsList = this._supportsLinkedOs(category) && !!parentId;
+      if (!showLinkedOsList) {
         this._clearAtdChildrenListUi();
         return;
       }
 
       const all = Store.getOpTasks()
-        .filter(t => t.categoria === 'atendimento-cliente' && Number(t.parentTaskId) === parentId);
+        .filter(t => t.categoria === category && Number(t.parentTaskId) === parentId);
       if (!all.length) {
         childrenList.innerHTML = '<li><span class="atd-modal-children-meta">Nenhuma ordem de serviço vinculada ainda.</span></li>';
       } else {
@@ -8398,12 +8808,15 @@ const Controllers = {
                 <span class="atd-modal-children-title">${title}</span>
                 <span class="atd-modal-children-meta">${who} · ${prazo}</span>
               </div>
-              <button type="button" class="atd-book-ico" data-atd-edit-child="${t.id}" title="Editar ordem de serviço" aria-label="Editar ordem de serviço">✎</button>
-              ${Utils.taskCopyProtocolButtonHtml(Utils.opTaskDisplayRef(t), 'task-copy-id-btn--sm')}
-              <span class="atd-modal-children-status-row">
-                ${Utils.opTaskStatusPickerButtonHtml(t.id, 'op-status-picker-btn--sm')}
+              <div class="atd-modal-children-actions">
+                <div class="atd-modal-children-tools">
+                  <button type="button" class="atd-book-ico" data-atd-edit-child="${t.id}" title="Editar ordem de serviço" aria-label="Editar ordem de serviço">✎</button>
+                  ${Utils.taskCopyProtocolButtonHtml(Utils.opTaskDisplayRef(t), 'task-copy-id-btn--sm')}
+                  <button type="button" class="atd-book-ico atd-book-ico--danger" data-atd-delete-child="${t.id}" title="Excluir ordem de serviço" aria-label="Excluir ordem de serviço">🗑</button>
+                  ${Utils.opTaskStatusPickerButtonHtml(t.id, 'op-status-picker-btn--sm')}
+                </div>
                 <span class="atd-modal-children-status">${status}</span>
-              </span>
+              </div>
             </li>
           `;
         }).join('');
@@ -8419,6 +8832,34 @@ const Controllers = {
             const id = Number(editBtn.dataset.atdEditChild || 0);
             if (!id) return;
             Controllers.opTask.openEditModal(id);
+            return;
+          }
+
+          const deleteBtn = e.target.closest?.('[data-atd-delete-child]');
+          if (deleteBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const id = Number(deleteBtn.dataset.atdDeleteChild || 0);
+            if (!id) return;
+            const child = Store.findOpTask(id);
+            const label = String(child?.titulo || child?.ordemServico || 'esta ordem de serviço').trim();
+            if (!window.confirm(`Excluir "${label}"? Esta ação não pode ser desfeita.`)) return;
+            const removed = Store.removeOpTask(id, { cascade: false });
+            if (!removed) {
+              ToastService.show('Não foi possível excluir a ordem de serviço', 'danger');
+              return;
+            }
+            ToastService.show('Ordem de serviço excluída', 'success');
+            if (Store.editingOpTaskId === id) {
+              ModalService.close('opTaskModal');
+            } else {
+              this._refreshAtdChildrenList();
+            }
+            UI.refreshOperationalUi();
+            return;
+          }
+
+          if (e.target.closest?.('[data-op-status-picker]') || e.target.closest?.('[data-copy-protocol]')) {
             return;
           }
 
@@ -8467,7 +8908,7 @@ const Controllers = {
       const prefix = prefixMap[category] || 'ROM';
       const count = Store.getOpTasks()
         .filter(t => t.categoria === category)
-        .filter(t => !(category === 'atendimento-cliente' && t.parentTaskId))
+        .filter(t => !(isLinkedOsCategory(category) && t.parentTaskId))
         .length + 1;
       const regionPrefix = this._regionTaskPrefix(regionRaw);
       const base = `${prefix}-${String(count).padStart(4, '0')}`;
@@ -8530,9 +8971,9 @@ const Controllers = {
     _clearForm(preset = {}) {
       const category = preset.category || Store.currentOpCategory;
       document.getElementById('op-titulo').value      = '';
-      document.getElementById('op-responsavel').value = '';
-      const chatIdHidden = document.getElementById('op-responsavel-chatid');
-      if (chatIdHidden) chatIdHidden.value = '';
+      this._setOpTecnicosFromStrings('', '');
+      const addTecClear = document.getElementById('op-responsavel-add');
+      if (addTecClear) addTecClear.value = '';
       const proto = document.getElementById('op-atd-protocolo');
       const dataEnt = document.getElementById('op-atd-data-entrada');
       const dataInst = document.getElementById('op-atd-data-instalacao');
@@ -8614,9 +9055,17 @@ const Controllers = {
     },
 
     _validate() {
+      this._commitOpTecnicoAddInput();
       let titulo      = document.getElementById('op-titulo').value.trim();
-      let responsavel = document.getElementById('op-responsavel').value.trim();
-      const responsavelChatId = document.getElementById('op-responsavel-chatid')?.value?.trim() || '';
+      const tecState = this._getOpTecnicosState();
+      let responsavel = formatResponsaveis(tecState.map((t) => t.name));
+      const regiaoForChat = document.getElementById('op-regiao')?.value || '';
+      let responsavelChatId = buildResponsavelChatIdsForNames(
+        parseResponsaveis(responsavel),
+        WebhookService._normalizeRegionKey(regiaoForChat),
+        formatResponsavelChatIds(tecState.map((t) => t.chatUserId)),
+      );
+      this._syncOpTecnicosHiddenFields(parseResponsaveis(responsavel), parseResponsavelChatIds(responsavelChatId));
       let prazo       = document.getElementById('op-prazo').value;
       const existing = Store.editingOpTaskId ? Store.findOpTask(Store.editingOpTaskId) : null;
       const category = existing?.categoria
@@ -8641,8 +9090,8 @@ const Controllers = {
       const taskCode = existing?.taskCode || this._nextTaskCode(category, codeRegion);
       let coordsRaw = document.getElementById('op-coords')?.value.trim() || '';
       let autoAddress = document.getElementById('op-address-readonly')?.value.trim() || '';
-      const otimGeoCoords = document.getElementById('op-otim-coords')?.value.trim() || '';
-      const otimGeoAddress = document.getElementById('op-otim-address')?.value.trim() || '';
+      let otimGeoCoords = document.getElementById('op-otim-coords')?.value.trim() || '';
+      let otimGeoAddress = document.getElementById('op-otim-address')?.value.trim() || '';
       const cemigGeoCoords = document.getElementById('op-cemig-coords')?.value.trim() || '';
       const cemigGeoAddress = document.getElementById('op-cemig-address')?.value.trim() || '';
       let clientesAfetadosRaw = document.getElementById('op-clientes-afetados')?.value.trim() || '';
@@ -8658,90 +9107,127 @@ const Controllers = {
       const cemigProto = document.getElementById('op-cemig-protocolo')?.value?.trim() || '';
       const isAtdParentOnly = this._isAtendimentoClienteCategory(category) && isParentTask && !isRompimento;
       const isAtdChildOnly = this._isAtendimentoClienteCategory(category) && !isParentTask && !isRompimento;
+      const isRompChildOnly = isRompimento && !isParentTask;
+      const isRompParentOnly = isRompimento && isParentTask;
+      const isTrocaChildOnly = isTrocaPoste && !isParentTask;
+      const isTrocaParentOnly = isTrocaPoste && isParentTask;
+      const isOtimChildOnly = isOtimRede && !isParentTask;
+      const isOtimParentOnly = isOtimRede && isParentTask;
+      const isCemigChildOnly = isCemig && !isParentTask;
+      const isCemigParentOnly = isCemig && isParentTask;
+      const isQdpChildOnly = isQdp && !isParentTask;
+      const isQdpParentOnly = isQdp && isParentTask;
+      const isOsLinkedChildOnly = isRompChildOnly || isTrocaChildOnly || isOtimChildOnly || isCemigChildOnly || isQdpChildOnly;
 
-      if (isAtdChildOnly) {
+      if (isAtdChildOnly || isOsLinkedChildOnly) {
         titulo = document.getElementById('op-atd-child-titulo')?.value?.trim() || '';
       }
 
-      if (!isRompimento && !isTrocaPoste && !isCemig && !isOtimRede && !isQdp && !isAtdParentOnly && !isAtdChildOnly && !titulo) titulo = 'Sem título';
-      if (!isAtdParentOnly && !isAtdChildOnly && isParentTask && !responsavel && !isOtimRede && !isCemig) responsavel = getSignedUserName();
-      if (!isAtdParentOnly && !isAtdChildOnly && !isRompimento && !isOtimRede && !isCemig && isParentTask && !prazo) prazo = Utils.todayIso();
+      if (isOsLinkedChildOnly && selectedParent) {
+        if (!regiao) regiao = selectedParent.regiao || '';
+        if (!coordsRaw) coordsRaw = String(selectedParent.coordenadas || '').trim();
+        if (!autoAddress) autoAddress = String(selectedParent.localizacaoTexto || '').trim();
+        if (!setorCto) setorCto = String(selectedParent.setor || '').trim();
+        if (isOtimChildOnly) {
+          if (!otimGeoCoords) otimGeoCoords = String(selectedParent.coordenadas || '').trim();
+          if (!otimGeoAddress) otimGeoAddress = String(selectedParent.localizacaoTexto || '').trim();
+        }
+        if (isQdpChildOnly || isCemigChildOnly) {
+          if (!coordsRaw) coordsRaw = String(selectedParent.coordenadas || '').trim();
+          if (!autoAddress) autoAddress = String(selectedParent.localizacaoTexto || '').trim();
+        }
+      }
+
+      if (!isRompimento && !isTrocaPoste && !isCemig && !isOtimRede && !isQdp && !isAtdParentOnly && !isAtdChildOnly && !isOsLinkedChildOnly && !titulo) titulo = 'Sem título';
+      if (!isAtdParentOnly && !isAtdChildOnly && !isOsLinkedChildOnly && isParentTask && !responsavel && !isOtimRede && !isCemig) responsavel = getSignedUserName();
+      if (!isAtdParentOnly && !isAtdChildOnly && !isOsLinkedChildOnly && !isRompimento && !isOtimRede && !isCemig && isParentTask && !prazo) prazo = Utils.todayIso();
       const prioridadeEl = document.getElementById('op-prioridade');
-      if (!isRompimento && !isOtimRede && !isCemig && !isAtdParentOnly && !isAtdChildOnly && prioridadeEl && !prioridadeEl.value) {
+      if (!isRompimento && !isOtimRede && !isCemig && !isAtdParentOnly && !isAtdChildOnly && !isOsLinkedChildOnly && prioridadeEl && !prioridadeEl.value) {
         prioridadeEl.value = 'Média';
       }
-      if (isParentTask && !regiao && !isOtimRede && !isCemig && !this._isAtendimentoClienteCategory(category)) regiao = 'N/D';
-      if (isRompimento && !setorCto) setorCto = 'N/D';
-      if ((isRompimento || isTrocaPoste) && !coordsRaw) coordsRaw = '0, 0';
-      if ((isRompimento || isTrocaPoste) && !autoAddress) autoAddress = 'Local não informado (teste)';
-      if (isRompimento && (!clientesAfetadosRaw || !/^\d+$/.test(clientesAfetadosRaw) || Number(clientesAfetadosRaw) <= 0)) {
+      if (isParentTask && !regiao && !isOtimRede && !isCemig && !this._isAtendimentoClienteCategory(category) && !isOsLinkedChildOnly) regiao = 'N/D';
+      if (isRompParentOnly && !setorCto) setorCto = 'N/D';
+      if ((isRompParentOnly || isTrocaParentOnly) && !coordsRaw) coordsRaw = '0, 0';
+      if ((isRompParentOnly || isTrocaParentOnly) && !autoAddress) autoAddress = 'Local não informado (teste)';
+      if (isRompParentOnly && (!clientesAfetadosRaw || !/^\d+$/.test(clientesAfetadosRaw) || Number(clientesAfetadosRaw) <= 0)) {
         clientesAfetadosRaw = '1';
       }
-      if (this._isAtendimentoCategory(category) && !isParentTask && !selectedParent) {
-        ToastService.show('Subtarefa inválida: crie pela tarefa pai', 'danger');
+      if (this._supportsLinkedOs(category) && !isParentTask && !selectedParent) {
+        ToastService.show('OS inválida: crie pelo card pai (botão + no kanban)', 'danger');
         return null;
       }
 
       const presetStatus = this._newTaskPreset?.status || null;
       const defaultStatus = category === 'certificacao-cemig'
-        ? (presetStatus || 'Pendente')
-        : this._isAtendimentoCategory(category)
-          ? (isParentTask ? (presetStatus || 'Backlog') : 'A iniciar')
+        ? (isParentTask ? (presetStatus || 'Pendente') : (presetStatus || 'Pendente'))
+        : this._supportsLinkedOs(category)
+          ? (isParentTask ? (presetStatus || (category === 'atendimento-cliente' ? 'Backlog' : 'Criada')) : 'A iniciar')
           : 'Criada';
       const currentStatus = existing?.status || defaultStatus;
-      const normalizedStatus = (!isParentTask && this._isAtendimentoCategory(category) && (currentStatus === 'Backlog' || currentStatus === 'Criada'))
+      const normalizedStatus = (!isParentTask && this._supportsLinkedOs(category) && (currentStatus === 'Backlog' || currentStatus === 'Criada'))
         ? 'A iniciar'
         : currentStatus;
       let finalTitulo = '';
-      if (isRompimento) {
+      if (isRompParentOnly) {
         finalTitulo = `Rompimento - ${autoAddress}`;
-      } else if (isTrocaPoste) {
+      } else if (isTrocaParentOnly) {
         finalTitulo = `Troca de poste - ${autoAddress}`;
-      } else if (isCemig) {
+      } else if (isCemigParentOnly) {
         finalTitulo = cemigProto ? `Cemig — ${cemigProto}` : (existing?.titulo || 'Certificação Cemig');
-      } else if (isOtimRede) {
+      } else if (isOtimParentOnly) {
         finalTitulo =
           titulo.trim() ||
           (otimProto && otimOs ? `${otimProto} · ${otimOs}` : (otimProto || otimOs || existing?.titulo || 'Otimização de rede'));
-      } else if (isQdp) {
-        finalTitulo = titulo.trim() || qdpClienteRaw || qdpOrdemServicoRaw || existing?.titulo || 'Qualidade de potência';
+      } else if (isQdpParentOnly) {
+        finalTitulo = titulo.trim() || qdpClienteRaw || qdpCtoRaw || existing?.titulo
+          || (category === 'manutencao-corretiva' ? 'Manutenção corretiva' : 'Qualidade de potência');
       } else if (isAtdParentOnly) {
         finalTitulo = nomeClienteRaw || titulo.trim() || existing?.titulo || '';
-      } else if (isAtdChildOnly) {
-        finalTitulo = titulo.trim() || existing?.titulo || '';
+      } else if (isAtdChildOnly || isOsLinkedChildOnly) {
+        finalTitulo = titulo.trim() || ordemServicoRaw || existing?.titulo || 'OS vinculada';
       } else {
         finalTitulo = titulo;
       }
       const finalPrazo = isRompimento
         ? (existing?.prazo || Utils.todayIso())
-        : isOtimRede
+        : isOtimParentOnly
           ? (prazo || Utils.todayIso())
-          : isCemig
+          : isCemigParentOnly
             ? (prazo || existing?.prazo || Utils.todayIso())
             : (isAtdParentOnly
               ? (prazo || existing?.prazo || '')
               : (isParentTask ? prazo : (selectedParent?.prazo || existing?.prazo || '')));
       const prioPick = prioridadeEl ? prioridadeEl.value : '';
-      const finalPrioridade = isRompimento ? 'Alta' : (isOtimRede || isCemig ? 'Média' : prioPick);
+      const finalPrioridade = isRompimento ? 'Alta' : (isOtimParentOnly || isCemigParentOnly ? 'Média' : prioPick);
       const finalDescricaoMeta = isRompimento
         ? `Tipo: ${tipoRompimento} | Coordenadas: ${coordsRaw} | Local: ${autoAddress}`
         : (isTrocaPoste ? '' : '');
       const setorField = isRompimento
         ? setorCto
-        : (isQdp ? qdpCtoRaw : (isParentTask ? regiao : (selectedParent?.setor || selectedParent?.regiao || existing?.setor || '')));
+        : (isQdpParentOnly
+          ? qdpCtoRaw
+          : (isQdpChildOnly
+            ? (selectedParent?.setor || existing?.setor || '')
+            : (isParentTask ? regiao : (selectedParent?.setor || selectedParent?.regiao || existing?.setor || ''))));
       const regiaoField = isRompimento
         ? regiao
         : (isParentTask ? regiao : (selectedParent?.regiao || selectedParent?.setor || existing?.regiao || ''));
       const finalResponsavelChatId = isParentTask
         ? responsavelChatId
-        : (selectedParent?.responsavelChatId || existing?.responsavelChatId || '');
-      const finalProtocolo = isOtimRede
+        : (isAtdChildOnly || isOsLinkedChildOnly
+          ? responsavelChatId
+          : (existing?.responsavelChatId || selectedParent?.responsavelChatId || ''));
+      const finalProtocolo = isOtimParentOnly
         ? otimProto
-        : isCemig
-          ? cemigProto
-          : (this._isAtendimentoClienteCategory(category) && isParentTask)
-            ? protocoloRaw
-            : (selectedParent?.protocolo || existing?.protocolo || '');
+        : isOtimChildOnly
+          ? (selectedParent?.protocolo || existing?.protocolo || '')
+          : isCemigParentOnly
+            ? cemigProto
+            : isCemigChildOnly
+              ? (selectedParent?.protocolo || existing?.protocolo || '')
+              : ((this._isAtendimentoClienteCategory(category) && isParentTask)
+                ? protocoloRaw
+                : (selectedParent?.protocolo || existing?.protocolo || ''));
       const finalDataEntrada = (this._isAtendimentoClienteCategory(category) && isParentTask)
         ? dataEntradaRaw
         : (selectedParent?.dataEntrada || existing?.dataEntrada || '');
@@ -8751,38 +9237,45 @@ const Controllers = {
       const finalDataInstalacao = (this._isAtendimentoClienteCategory(category) && isParentTask)
         ? dataInstalacaoRaw
         : (selectedParent?.dataInstalacao || existing?.dataInstalacao || '');
-      const finalOrdemServico = isOtimRede
+      const finalOrdemServico = isOtimParentOnly
         ? otimOs
-        : (isQdp
-          ? qdpOrdemServicoRaw
-          : (this._isAtendimentoClienteCategory(category) && !isParentTask)
-          ? ordemServicoRaw
-          : (selectedParent?.ordemServico || existing?.ordemServico || ''));
+        : isQdpParentOnly
+          ? ''
+          : (isQdpChildOnly || ((this._isAtendimentoClienteCategory(category) || isOsLinkedChildOnly) && !isParentTask))
+            ? ordemServicoRaw
+            : (selectedParent?.ordemServico || existing?.ordemServico || '');
       const finalResponsavel = isAtdParentOnly
         ? (responsavel || existing?.responsavel || '')
-        : (isOtimRede || isCemig
+        : (isOtimParentOnly || isCemigParentOnly
           ? (responsavel || existing?.responsavel || '')
           : (isParentTask
             ? responsavel
-            : (isAtdChildOnly
-              ? (responsavel || existing?.responsavel || selectedParent?.responsavel || '')
+            : (isAtdChildOnly || isOsLinkedChildOnly
+              ? (responsavel || existing?.responsavel || '')
               : (responsavel || selectedParent?.responsavel || existing?.responsavel || getSignedUserName()))));
+      let syncedResponsavelChatId = finalResponsavelChatId;
+      if (isAtdChildOnly || isOsLinkedChildOnly) {
+        const childNames = parseResponsaveis(finalResponsavel).filter((n) => !isPlaceholderTechName(n));
+        const namesForIds = childNames.length ? childNames : parseResponsaveis(finalResponsavel);
+        const regionKey = WebhookService._normalizeRegionKey(regiaoField || regiao || selectedParent?.regiao || '');
+        syncedResponsavelChatId = buildResponsavelChatIdsForNames(namesForIds, regionKey, finalResponsavelChatId);
+      }
       const otimDescEl = document.getElementById('op-otim-descricao');
-      const otimDescHtml = isOtimRede && otimDescEl ? String(otimDescEl.innerHTML || '').trim() : '';
+      const otimDescHtml = isOtimParentOnly && otimDescEl ? String(otimDescEl.innerHTML || '').trim() : '';
       const cemigDescEl = document.getElementById('op-cemig-descricao');
-      const cemigDescHtml = isCemig && cemigDescEl ? String(cemigDescEl.innerHTML || '').trim() : '';
-      const finalDescricaoAtd = isOtimRede
+      const cemigDescHtml = isCemigParentOnly && cemigDescEl ? String(cemigDescEl.innerHTML || '').trim() : '';
+      const finalDescricaoAtd = isOtimParentOnly
         ? otimDescHtml
-        : isCemig
+        : isCemigParentOnly
           ? cemigDescHtml
-          : (this._isAtendimentoClienteCategory(category) && !isParentTask)
+          : ((this._isAtendimentoClienteCategory(category) || isOsLinkedChildOnly) && !isParentTask)
             ? descAtdRaw
             : finalDescricaoMeta;
       const payload = {
         taskCode,
         titulo: finalTitulo,
         responsavel: finalResponsavel,
-        responsavelChatId: finalResponsavelChatId,
+        responsavelChatId: syncedResponsavelChatId,
         setor: setorField,
         regiao: regiaoField,
         protocolo: finalProtocolo,
@@ -8790,20 +9283,25 @@ const Controllers = {
         subProcesso: finalSubProcesso,
         dataInstalacao: finalDataInstalacao,
         ordemServico: finalOrdemServico,
-        tipoRompimento: isRompimento ? tipoRompimento : '',
-        clientesAfetados: isRompimento ? clientesAfetadosRaw : '',
-        coordenadas: (isRompimento || isTrocaPoste || isQdp) ? coordsRaw : (isOtimRede ? otimGeoCoords : (isCemig ? cemigGeoCoords : '')),
-        localizacaoTexto: (isRompimento || isTrocaPoste || isQdp) ? autoAddress : (isOtimRede ? otimGeoAddress : (isCemig ? cemigGeoAddress : '')),
+        tipoRompimento: isRompimento ? (isRompChildOnly && selectedParent?.tipoRompimento ? selectedParent.tipoRompimento : tipoRompimento) : '',
+        clientesAfetados: isRompParentOnly ? clientesAfetadosRaw : (isRompChildOnly ? (selectedParent?.clientesAfetados || '') : ''),
+        coordenadas: (isRompParentOnly || isTrocaParentOnly || isQdpParentOnly || isRompChildOnly || isTrocaChildOnly || isQdpChildOnly)
+          ? coordsRaw
+          : (isOtimChildOnly ? otimGeoCoords : (isOtimParentOnly ? otimGeoCoords : (isCemigParentOnly || isCemigChildOnly ? cemigGeoCoords : ''))),
+        localizacaoTexto: (isRompParentOnly || isTrocaParentOnly || isQdpParentOnly || isRompChildOnly || isTrocaChildOnly || isQdpChildOnly)
+          ? autoAddress
+          : (isOtimChildOnly ? otimGeoAddress : (isOtimParentOnly ? otimGeoAddress : (isCemigParentOnly || isCemigChildOnly ? cemigGeoAddress : ''))),
         categoria:  category,
         prazo: finalPrazo,
         prioridade: finalPrioridade,
         descricao:  finalDescricaoAtd,
         status:     normalizedStatus,
-        isParentTask: this._isAtendimentoCategory(category) ? isParentTask : false,
-        parentTaskId: this._isAtendimentoCategory(category) ? (isParentTask ? null : parentTaskId) : null,
+        isParentTask: this._supportsLinkedOs(category) ? isParentTask : false,
+        parentTaskId: this._supportsLinkedOs(category) ? (isParentTask ? null : parentTaskId) : null,
       };
       if (isAtdParentOnly) payload.nomeCliente = nomeClienteRaw;
-      if (isQdp) payload.nomeCliente = qdpClienteRaw;
+      if (isQdpParentOnly) payload.nomeCliente = qdpClienteRaw;
+      if (isQdpChildOnly && selectedParent?.nomeCliente) payload.nomeCliente = selectedParent.nomeCliente;
       return payload;
     },
 
@@ -8811,10 +9309,28 @@ const Controllers = {
       Store.editingOpTaskId = null;
       if (preset.category) Store.currentOpCategory = preset.category;
       const isAtd = this._isAtendimentoCategory(preset.category);
+      const isRomp = preset.category === 'rompimentos';
+      const isTroca = preset.category === 'troca-poste';
+      const isOtim = preset.category === 'otimizacao-rede';
+      const isCemig = preset.category === 'certificacao-cemig';
+      const isQdp = preset.category === 'qualidade-potencia';
+      const isMcr = preset.category === 'manutencao-corretiva';
       document.getElementById('opTaskModalTitle').textContent =
-        isAtd && preset.parentTaskId ? 'Nova ordem de serviço'
-          : isAtd && !preset.parentTaskId ? 'Nova lista de atendimento'
-            : 'Nova tarefa';
+        isRomp && preset.parentTaskId ? 'Nova OS vinculada ao rompimento'
+          : isRomp ? 'Nova tarefa de rompimento'
+            : isTroca && preset.parentTaskId ? 'Nova OS vinculada à troca de poste'
+              : isTroca ? 'Nova troca de poste'
+                : isOtim && preset.parentTaskId ? 'Nova OS vinculada à otimização'
+                  : isOtim ? 'Nova otimização de rede'
+                    : isCemig && preset.parentTaskId ? 'Nova OS vinculada à certificação Cemig'
+                      : isCemig ? 'Nova certificação Cemig'
+                        : isMcr && preset.parentTaskId ? 'Nova OS vinculada à manutenção'
+                          : isMcr ? 'Nova manutenção corretiva'
+                            : isQdp && preset.parentTaskId ? 'Nova OS vinculada à qualidade de potência'
+                              : isQdp ? 'Nova qualidade de potência'
+                                : isAtd && preset.parentTaskId ? 'Nova ordem de serviço'
+                                  : isAtd && !preset.parentTaskId ? 'Nova lista de atendimento'
+                                    : 'Nova tarefa';
       const deleteBtn = document.getElementById('deleteOpTaskBtn');
       if (deleteBtn) deleteBtn.style.display = 'none';
       this._clearForm(preset);
@@ -8828,20 +9344,21 @@ const Controllers = {
       const task = Store.findOpTask(id);
       if (!task) return;
       Store.editingOpTaskId = id;
+      const isLinkedOsChild = isLinkedOsCategory(task.categoria) && task.parentTaskId;
       document.getElementById('opTaskModalTitle').textContent =
-        task.categoria === 'troca-poste' ? 'Editar troca de poste'
-          : task.categoria === 'certificacao-cemig' ? 'Editar certificação Cemig'
-            : task.categoria === 'otimizacao-rede' ? 'Editar otimização de rede'
-              : task.categoria === 'qualidade-potencia' ? 'Editar qualidade de potência'
-                : task.categoria === 'manutencao-corretiva' ? 'Editar manutenção corretiva'
-                : 'Editar tarefa';
+        isLinkedOsChild ? 'Editar OS vinculada'
+          : task.categoria === 'troca-poste' ? 'Editar troca de poste'
+            : task.categoria === 'certificacao-cemig' ? 'Editar certificação Cemig'
+              : task.categoria === 'otimizacao-rede' ? 'Editar otimização de rede'
+                : task.categoria === 'qualidade-potencia' ? 'Editar qualidade de potência'
+                  : task.categoria === 'manutencao-corretiva' ? 'Editar manutenção corretiva'
+                    : task.categoria === 'rompimentos' ? 'Editar rompimento'
+                      : 'Editar tarefa';
       document.getElementById('op-titulo').value =
         task.categoria === 'troca-poste' || task.categoria === 'certificacao-cemig' || task.categoria === 'atendimento-cliente'
+        || isLinkedOsChild
           ? ''
           : task.titulo;
-      document.getElementById('op-responsavel').value = task.responsavel;
-      const chatIdHidden = document.getElementById('op-responsavel-chatid');
-      if (chatIdHidden) chatIdHidden.value = String(task.responsavelChatId || '').trim();
       const proto = document.getElementById('op-atd-protocolo');
       const dataEnt = document.getElementById('op-atd-data-entrada');
       const dataInst = document.getElementById('op-atd-data-instalacao');
@@ -8850,7 +9367,23 @@ const Controllers = {
       const opOtimProto = document.getElementById('op-otim-protocolo');
       const opOtimOs = document.getElementById('op-otim-ordem-servico');
       const opCemigProto = document.getElementById('op-cemig-protocolo');
-      if (task.categoria === 'otimizacao-rede') {
+      if (task.categoria === 'otimizacao-rede' && task.parentTaskId) {
+        if (proto) proto.value = '';
+        if (dataEnt) dataEnt.value = '';
+        this._setOpAtdSubprocessoSelectValue('');
+        if (dataInst) dataInst.value = '';
+        if (os) os.value = String(task.ordemServico || '').trim();
+        if (desc) desc.value = this._stripHtmlLite(String(task.descricao || ''));
+        const childTituloOtim = document.getElementById('op-atd-child-titulo');
+        if (childTituloOtim) childTituloOtim.value = String(task.titulo || '').trim();
+        if (opOtimProto) opOtimProto.value = '';
+        if (opOtimOs) opOtimOs.value = '';
+        const otimDescOtimChild = document.getElementById('op-otim-descricao');
+        if (otimDescOtimChild) otimDescOtimChild.innerHTML = '';
+        if (opCemigProto) opCemigProto.value = '';
+        const cemigDescOtimChild = document.getElementById('op-cemig-descricao');
+        if (cemigDescOtimChild) cemigDescOtimChild.innerHTML = '';
+      } else if (task.categoria === 'otimizacao-rede') {
         if (opOtimProto) opOtimProto.value = String(task.protocolo || '').trim();
         if (opOtimOs) opOtimOs.value = String(task.ordemServico || '').trim();
         const otimDescEdit = document.getElementById('op-otim-descricao');
@@ -8869,6 +9402,22 @@ const Controllers = {
         if (opCemigProto) opCemigProto.value = '';
         const cemigDescOtim = document.getElementById('op-cemig-descricao');
         if (cemigDescOtim) cemigDescOtim.innerHTML = '';
+      } else if (task.categoria === 'certificacao-cemig' && task.parentTaskId) {
+        if (os) os.value = String(task.ordemServico || '').trim();
+        if (desc) desc.value = this._stripHtmlLite(String(task.descricao || ''));
+        const childTituloCem = document.getElementById('op-atd-child-titulo');
+        if (childTituloCem) childTituloCem.value = String(task.titulo || '').trim();
+        if (opCemigProto) opCemigProto.value = '';
+        const cemigDescChild = document.getElementById('op-cemig-descricao');
+        if (cemigDescChild) cemigDescChild.innerHTML = '';
+        if (proto) proto.value = '';
+        if (dataEnt) dataEnt.value = '';
+        this._setOpAtdSubprocessoSelectValue('');
+        if (dataInst) dataInst.value = '';
+        if (opOtimProto) opOtimProto.value = '';
+        if (opOtimOs) opOtimOs.value = '';
+        const otimDescC = document.getElementById('op-otim-descricao');
+        if (otimDescC) otimDescC.innerHTML = '';
       } else if (task.categoria === 'certificacao-cemig') {
         let p = String(task.protocolo || '').trim();
         if (!p && task.titulo) {
@@ -8893,6 +9442,28 @@ const Controllers = {
           cemigDescEdit.innerHTML = this._normalizeOtimDescricaoImgSrcForEdit(String(task.descricao || ''));
           this._wrapBareOtimDescricaoImages(cemigDescEdit);
         }
+      } else if ((task.categoria === 'qualidade-potencia' || task.categoria === 'manutencao-corretiva') && task.parentTaskId) {
+        if (os) os.value = String(task.ordemServico || '').trim();
+        if (desc) desc.value = String(task.descricao || '').trim();
+        const childTituloQdp = document.getElementById('op-atd-child-titulo');
+        if (childTituloQdp) childTituloQdp.value = String(task.titulo || '').trim();
+        const qdpCli = document.getElementById('op-qdp-cliente');
+        const qdpOs = document.getElementById('op-qdp-ordem-servico');
+        const qdpCto = document.getElementById('op-qdp-cto');
+        if (qdpCli) qdpCli.value = '';
+        if (qdpOs) qdpOs.value = '';
+        if (qdpCto) qdpCto.value = '';
+        if (proto) proto.value = '';
+        if (dataEnt) dataEnt.value = '';
+        this._setOpAtdSubprocessoSelectValue('');
+        if (dataInst) dataInst.value = '';
+        if (opOtimProto) opOtimProto.value = '';
+        if (opOtimOs) opOtimOs.value = '';
+        if (opCemigProto) opCemigProto.value = '';
+        const otimDescQdp = document.getElementById('op-otim-descricao');
+        if (otimDescQdp) otimDescQdp.innerHTML = '';
+        const cemigDescQdp = document.getElementById('op-cemig-descricao');
+        if (cemigDescQdp) cemigDescQdp.innerHTML = '';
       } else if (task.categoria === 'qualidade-potencia' || task.categoria === 'manutencao-corretiva') {
         const qdpCli = document.getElementById('op-qdp-cliente');
         const qdpOs = document.getElementById('op-qdp-ordem-servico');
@@ -8930,7 +9501,9 @@ const Controllers = {
         const childTituloEdit = document.getElementById('op-atd-child-titulo');
         if (childTituloEdit) {
           childTituloEdit.value =
-            task.categoria === 'atendimento-cliente' && task.parentTaskId ? String(task.titulo || '').trim() : '';
+            isLinkedOsCategory(task.categoria) && task.parentTaskId
+              ? String(task.titulo || '').trim()
+              : '';
         }
         if (opOtimProto) opOtimProto.value = '';
         if (opOtimOs) opOtimOs.value = '';
@@ -8943,6 +9516,10 @@ const Controllers = {
       document.getElementById('op-prazo').value       = task.prazo || '';
       document.getElementById('op-prioridade').value  = task.prioridade || '';
       document.getElementById('op-regiao').value      = task.regiao || '';
+      this._syncTecnicosDatalist();
+      this._setOpTecnicosFromStrings(task.responsavel, String(task.responsavelChatId || '').trim());
+      const addTecEdit = document.getElementById('op-responsavel-add');
+      if (addTecEdit) addTecEdit.value = '';
       const hidden = document.getElementById('op-parent-task-id');
       if (hidden) hidden.value = task.parentTaskId ? String(task.parentTaskId) : '';
       const setorCtoInput = document.getElementById('op-setor-cto');
@@ -8965,7 +9542,7 @@ const Controllers = {
       const cemigGC = document.getElementById('op-cemig-coords');
       const cemigGA = document.getElementById('op-cemig-address');
       const cemigGH = document.getElementById('op-cemig-address-hint');
-      if (task.categoria === 'otimizacao-rede') {
+      if (task.categoria === 'otimizacao-rede' && !task.parentTaskId) {
         if (otimGC) otimGC.value = String(task.coordenadas || '').trim();
         if (otimGA) otimGA.value = String(task.localizacaoTexto || '').trim();
         if (otimGH) otimGH.textContent = task.coordenadas ? 'Localização salva na tarefa.' : geoHintOpcional;
@@ -9078,17 +9655,22 @@ const Controllers = {
       // Atualiza categoria ativa para a que foi salva (aba Tarefas)
       if (Store.currentPage === 'tarefas') Store.currentOpCategory = data.categoria;
 
-      const isAtdChild =
-        data.categoria === 'atendimento-cliente' &&
+      const keepOpenForNextLinkedOs =
+        !Store.editingOpTaskId &&
         !!data.parentTaskId &&
-        !Store.editingOpTaskId;
+        this._supportsLinkedOs(data.categoria);
 
-      if (isAtdChild) {
-        // Mantém modal aberto para cadastrar várias OS na sequência.
+      if (keepOpenForNextLinkedOs) {
+        // Mantém modal aberto para cadastrar várias OS na sequência (só fecha no X).
         this.openNewModal({
-          category: 'atendimento-cliente',
+          category: data.categoria,
           parentTaskId: data.parentTaskId,
-          status: 'Backlog',
+          isParentTask: false,
+          status: data.categoria === 'atendimento-cliente'
+            ? 'Backlog'
+            : data.categoria === 'certificacao-cemig'
+              ? 'Pendente'
+              : 'Criada',
         });
       } else {
         ModalService.close('opTaskModal');
@@ -9099,7 +9681,26 @@ const Controllers = {
 
     init() {
       this._syncTecnicosDatalist();
-      document.getElementById('op-responsavel')?.addEventListener('input', () => this._syncSelectedTecnicoChatId());
+      const addTecInput = document.getElementById('op-responsavel-add');
+      const chipsEl = document.getElementById('op-tech-multi-chips');
+      if (addTecInput) {
+        addTecInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            this._commitOpTecnicoAddInput();
+          }
+        });
+        addTecInput.addEventListener('change', () => this._commitOpTecnicoAddInput());
+      }
+      if (chipsEl) {
+        chipsEl.addEventListener('click', (e) => {
+          const btn = e.target.closest('.op-tech-chip__remove');
+          if (!btn) return;
+          const chip = btn.closest('.op-tech-chip');
+          const name = chip?.getAttribute('data-tech-name') || '';
+          if (name) this._removeOpTecnico(name);
+        });
+      }
       document.getElementById('op-regiao')?.addEventListener('change', () => {
         this._syncTecnicosDatalist();
         this._syncSelectedTecnicoChatId();
@@ -9152,6 +9753,24 @@ const Controllers = {
         this.openNewModal({ kind: 'parent', category: 'atendimento-cliente', status: 'Backlog' });
       });
       document.getElementById('saveOpTaskBtn').addEventListener('click', () => this.save());
+
+      document.getElementById('opTaskModal')?.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+        const modal = document.getElementById('opTaskModal');
+        if (!modal?.classList.contains('open')) return;
+        const target = e.target;
+        if (!(target instanceof HTMLElement)) return;
+        if (target.closest('#opAtdChildrenList')) return;
+        if (target.closest('.atd-status-dropdown')) return;
+        if (target.id === 'op-responsavel-add') return;
+        const tag = target.tagName.toLowerCase();
+        if (tag === 'textarea') return;
+        if (target.isContentEditable) return;
+        if (tag === 'button' && target.id !== 'saveOpTaskBtn') return;
+        e.preventDefault();
+        this.save();
+      });
 
       const gPanel = document.getElementById('opGlobalStatusPickerPanel');
       if (gPanel && !gPanel.dataset.boundPick) {
@@ -9533,180 +10152,6 @@ const Controllers = {
     },
   },
 
-  /* ── Easter egg: sequência numérica (Configurações) ─────── */
-  configSecret: {
-    _seq: '91166734',
-    _buf: '',
-    init() {
-      if (this._inited) return;
-      this._inited = true;
-
-      const onKeyDown = (e) => {
-        if (Store.currentPage !== 'config') return;
-        const k = String(e.key || '');
-        if (!/^\d$/.test(k)) return;
-
-        this._buf = (this._buf + k).slice(-32);
-        if (!this._buf.endsWith(this._seq)) return;
-
-        const btn = document.getElementById('configSecretBtn');
-        if (btn) btn.hidden = false;
-      };
-
-      document.addEventListener('keydown', onKeyDown, true);
-
-      document.getElementById('configSecretBtn')?.addEventListener('click', async () => {
-        try {
-          const res = await ApiService.sendUserPing({
-            to: 'joaoibipar',
-            title: 'Código secreto',
-            message: 'Você recebeu uma notificação do botão "aperte".',
-          });
-          if (res && res.ok) {
-            ToastService?.show?.('Notificação enviada para joaoibipar.', 'success');
-          } else {
-            ToastService?.show?.('Não consegui enviar a notificação no servidor.', 'warning');
-          }
-        } catch {
-          ToastService?.show?.('Falha ao enviar notificação.', 'danger');
-        }
-      });
-    },
-    syncUi() {
-      const btn = document.getElementById('configSecretBtn');
-      if (!btn) return;
-      // Sempre começa oculto ao entrar/atualizar Configurações.
-      btn.hidden = true;
-      this._buf = '';
-    },
-  },
-
-  /* ── Som de notificação (burro) ───────────────────────── */
-  burroNotif: {
-    _audioCtx: null,
-    _unlocked: false,
-    _audioEl: null,
-    _lastPlayedIdKey: 'planner.burroNotif.lastPlayedId.v1',
-    init() {
-      if (this._inited) return;
-      this._inited = true;
-      const unlock = async () => {
-        if (this._unlocked) return;
-        try {
-          // Preferir MP3 (som real). WebAudio fica como fallback.
-          if (!this._audioEl) {
-            const v = (window.APP_CONFIG && window.APP_CONFIG.appBuild) ? String(window.APP_CONFIG.appBuild) : '';
-            const qs = v ? `?v=${encodeURIComponent(v)}` : '';
-            this._audioEl = new Audio(`./assets/sounds/burro.mp3${qs}`);
-            this._audioEl.preload = 'auto';
-            this._audioEl.volume = 1.0;
-          }
-          const Ctx = window.AudioContext || window.webkitAudioContext;
-          if (!Ctx) return;
-          this._audioCtx = this._audioCtx || new Ctx();
-          if (this._audioCtx.state === 'suspended') await this._audioCtx.resume();
-          this._unlocked = true;
-        } catch {
-          /* ignore */
-        }
-      };
-      // Browsers bloqueiam áudio sem gesto do usuário: destrava no 1º clique/tecla.
-      document.addEventListener('pointerdown', unlock, { once: true, capture: true });
-      document.addEventListener('keydown', unlock, { once: true, capture: true });
-    },
-    _getLastPlayedId() {
-      try { return Number(localStorage.getItem(this._lastPlayedIdKey) || 0) || 0; } catch { return 0; }
-    },
-    _setLastPlayedId(id) {
-      try { localStorage.setItem(this._lastPlayedIdKey, String(Number(id) || 0)); } catch {}
-    },
-    play(notifId) {
-      const id = Number(notifId) || 0;
-      if (id <= 0) return;
-      if (id <= this._getLastPlayedId()) return;
-      this._setLastPlayedId(id);
-
-      try {
-        // Preferência: tocar o MP3 real do burro.
-        if (this._audioEl) {
-          this._audioEl.pause();
-          this._audioEl.currentTime = 0;
-          const p = this._audioEl.play();
-          // Se o browser bloquear (sem gesto), cai pro fallback WebAudio quando desbloquear.
-          if (p && typeof p.catch === 'function') p.catch(() => {});
-          return;
-        }
-
-        const Ctx = window.AudioContext || window.webkitAudioContext;
-        if (!Ctx) return;
-        const ctx = this._audioCtx || new Ctx();
-        this._audioCtx = ctx;
-        if (ctx.state === 'suspended') {
-          // Se não desbloqueou ainda, não dá pra tocar — vai tocar no próximo ping.
-          return;
-        }
-        const t0 = ctx.currentTime + 0.01;
-
-        const osc = ctx.createOscillator();
-        const osc2 = ctx.createOscillator();
-        const gain = ctx.createGain();
-        const comp = ctx.createDynamicsCompressor();
-        const filter = ctx.createBiquadFilter();
-
-        // Timbre "bray": serrilhado + sweep forte + leve tremolo.
-        osc.type = 'sawtooth';
-        osc2.type = 'square';
-        filter.type = 'bandpass';
-        filter.frequency.setValueAtTime(700, t0);
-        filter.Q.setValueAtTime(6, t0);
-
-        // Volume bem alto + compressor (evita clipping feio).
-        gain.gain.setValueAtTime(0.0001, t0);
-        gain.gain.exponentialRampToValueAtTime(3.0, t0 + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.10);
-
-        comp.threshold.setValueAtTime(-18, t0);
-        comp.knee.setValueAtTime(12, t0);
-        comp.ratio.setValueAtTime(14, t0);
-        comp.attack.setValueAtTime(0.003, t0);
-        comp.release.setValueAtTime(0.12, t0);
-
-        // Sweep: sobe e desce (bem característico)
-        osc.frequency.setValueAtTime(220, t0);
-        osc.frequency.exponentialRampToValueAtTime(520, t0 + 0.20);
-        osc.frequency.exponentialRampToValueAtTime(180, t0 + 0.55);
-        osc.frequency.exponentialRampToValueAtTime(420, t0 + 0.80);
-        osc.frequency.exponentialRampToValueAtTime(200, t0 + 1.05);
-
-        osc2.frequency.setValueAtTime(110, t0);
-        osc2.frequency.exponentialRampToValueAtTime(260, t0 + 0.20);
-        osc2.frequency.exponentialRampToValueAtTime(90, t0 + 0.55);
-        osc2.frequency.exponentialRampToValueAtTime(210, t0 + 0.80);
-        osc2.frequency.exponentialRampToValueAtTime(100, t0 + 1.05);
-
-        osc.connect(filter);
-        osc2.connect(filter);
-        filter.connect(gain);
-        gain.connect(comp);
-        comp.connect(ctx.destination);
-
-        osc.start(t0);
-        osc2.start(t0);
-        osc.stop(t0 + 1.12);
-        osc2.stop(t0 + 1.12);
-      } catch {
-        /* ignore */
-      }
-    },
-  },
-
-  /* ── Notes (removido) ─────────────────────────────────── */
-  notes: {
-    init() {
-      // Bloco de "Notas rápidas" do dashboard foi removido.
-    },
-  },
-
   /* ── Global Modal Helpers ─────────────────────────────── */
   globalModal: {
     init() {
@@ -9798,6 +10243,7 @@ async function initApp() {
     if (p === 'dashboard') UI.renderDashboard();
     else if (p === 'tarefas' || p === 'atendimento') UI.refreshOperationalUi();
     else if (p === 'escalas') UI.renderEscalasPage();
+    else if (p === 'ordem-servicos') window.OsDashboard?.render?.();
   });
 
   UI.renderAgenda();
@@ -9909,6 +10355,7 @@ async function initApp() {
       if (changedCount) {
         UI.renderDashboard();
         if (Store.currentPage === 'escalas') UI.renderEscalasPage();
+        else if (Store.currentPage === 'ordem-servicos') window.OsDashboard?.render?.();
         else UI.refreshOperationalUi();
             }
       if (changedNotifs.length) {

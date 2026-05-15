@@ -4117,10 +4117,11 @@ input[type=number]::-webkit-inner-spin-button { margin: 0; }
 .atd-modal-children-list li {
   padding: 8px 10px;
   margin-bottom: 5px;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  column-gap: 10px;
+  row-gap: 4px;
   font-size: 11px;
   color: var(--white3);
   border: 1px solid rgba(148, 163, 184, 0.32);
@@ -4135,6 +4136,30 @@ input[type=number]::-webkit-inner-spin-button { margin: 0; }
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  justify-content: center;
+}
+.atd-modal-children-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.atd-modal-children-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.atd-modal-children-list .atd-modal-children-tools .task-copy-id-btn,
+.atd-modal-children-list .atd-modal-children-tools .op-status-picker-btn,
+.atd-modal-children-list .atd-modal-children-tools .atd-book-ico {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.atd-modal-children-list .atd-modal-children-tools .task-copy-id-btn svg,
+.atd-modal-children-list .atd-modal-children-tools .op-status-picker-btn svg {
+  width: 12px;
+  height: 12px;
 }
 .atd-modal-children-check {
   flex-shrink: 0;
@@ -4289,6 +4314,93 @@ input[type=number]::-webkit-inner-spin-button { margin: 0; }
   display: none !important;
 }
 
+/* Otimização de Rede — formulário dedicado no modal */
+#opTaskModal.otim-rede-mode #opPriorityRegionRow,
+#opTaskModal.otim-rede-mode #opMainRow {
+  display: none !important;
+}
+
+.op-otim-rede-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+#opTaskModal.otim-rede-mode #opOtimRegiaoTecRow,
+#opTaskModal.otim-rede-mode #opOtimMetaRow,
+#opTaskModal.otim-rede-mode #opOtimProtoRow {
+  align-items: start;
+}
+
+#opTaskModal.otim-rede-mode #opOtimRegiaoTecRow {
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+}
+
+#opOtimRegiaoTecRow .form-group,
+#opOtimMetaRow .form-group,
+#opOtimProtoRow .form-group {
+  min-width: 0;
+}
+
+/* Técnico: caixa única alinhada ao select de região (chips + digitação na mesma linha) */
+#opTaskModal.otim-rede-mode #opOtimTecSlot .op-tech-multi {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 5px 10px;
+  background: var(--black4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color var(--transition);
+}
+
+#opTaskModal.otim-rede-mode #opOtimTecSlot .op-tech-multi:focus-within {
+  border-color: var(--green-dim);
+}
+
+#opTaskModal.otim-rede-mode #opOtimTecSlot .op-tech-multi__chips {
+  display: contents;
+  min-height: 0;
+}
+
+#opTaskModal.otim-rede-mode #opOtimTecSlot .op-tech-multi__chips:empty {
+  display: none;
+}
+
+#opTaskModal.otim-rede-mode #opOtimTecSlot .op-tech-multi__add {
+  flex: 1 1 140px;
+  min-width: 120px;
+  width: auto;
+  margin: 0;
+  padding: 2px 4px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+#opTaskModal.otim-rede-mode #opOtimTecSlot .op-tech-multi__add:focus {
+  border: none;
+  outline: none;
+}
+
+#opTaskModal.otim-rede-mode #opOtimTecSlot .op-tech-chip {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.op-otim-rede-wrap .form-row {
+  gap: 14px;
+}
+
+.op-otim-rede-wrap .rompimento-location-block {
+  margin: 0;
+}
+
 /* Otimização de Rede — descrição com imagens coladas */
 .op-otim-desc-group .hint code {
   font-size: 10px;
@@ -4369,8 +4481,9 @@ input[type=number]::-webkit-inner-spin-button { margin: 0; }
   #opTaskModal .form-row { grid-template-columns: 1fr; }
 }
 
-/* Modal tarefa operacional: altura limitada + rolagem (evita ocupar a tela inteira, mantém layout) */
+/* Modal tarefa operacional: mais largo para chips de técnicos e linhas em 2 colunas */
 #opTaskModal.modal-overlay > .modal {
+  max-width: min(720px, calc(100vw - 32px));
   max-height: min(88vh, calc(100dvh - 40px));
   display: flex;
   flex-direction: column;
@@ -5706,6 +5819,60 @@ html[data-theme="light"] .team-chat-list {
   .team-chat-compose-main {
     min-width: 0;
   }
+}
+
+.op-tech-multi {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#opTaskModal .op-tech-multi__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.op-tech-multi__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.op-tech-multi__add {
+  width: 100%;
+}
+.op-tech-multi--disabled .op-tech-multi__add {
+  opacity: 0.55;
+  pointer-events: none;
+}
+.op-tech-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 12px;
+  line-height: 1.2;
+}
+.op-tech-chip__av {
+  width: 22px;
+  height: 22px;
+  font-size: 9px;
+  flex-shrink: 0;
+}
+.op-tech-chip__remove {
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+}
+.op-tech-chip__remove:hover {
+  opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
