@@ -61,8 +61,10 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 try {
-    // Evita CSRF de login (forçar sessão do usuário em outra conta).
-    requireSameOriginForMutation();
+    // Limpa apenas chaves de auth (evita quebrar o handler de sessão em alguns hosts).
+    unset($_SESSION['planner_user'], $_SESSION['csrf_token'], $_SESSION['last_activity']);
+
+    requireSameOriginForLogin();
 
     $data = readJsonBody();
     $username = strtolower(trim((string) ($data['username'] ?? '')));
@@ -100,7 +102,7 @@ try {
     $valid = hash_equals($expected, $computed);
 
     if ($valid) {
-        // Marca sessão autenticada para os demais endpoints PHP.
+        // sessão autenticada 
         session_regenerate_id(true);
         $_SESSION['planner_user'] = $username;
         // Garante token CSRF inicial logo no login (o client deve reenviar em mutações).
@@ -112,7 +114,7 @@ try {
 
     jsonResponse($valid ? ['ok' => true, 'csrfToken' => $csrf ?? ''] : ['ok' => false]);
 } catch (Throwable $e) {
-    // Não vazar detalhes de erro para o front.
+    // nao vazar detalhes de erro para o front.
     $errorId = bin2hex(random_bytes(6));
     error_log('[login.php][' . $errorId . '] failed: ' . $e->getMessage());
     jsonResponse(['ok' => false, 'error' => 'internal_error', 'error_id' => $errorId], 500);

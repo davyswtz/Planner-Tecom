@@ -1,0 +1,9 @@
+-- Diretório de técnicos (nomes + chatUserId) no servidor — opcional.
+-- Após rodar, insira em app_config com cfg_key = 'techDirectory' o JSON no formato:
+-- { "GOVAL": [ { "name": "...", "chatUserId": "..." } ], "VALE_DO_ACO": [ ... ] }
+--
+-- Exemplo (ajuste os valores):
+-- INSERT INTO app_config (cfg_key, cfg_value) VALUES (
+--   'techDirectory',
+--   '{"GOVAL":[{"name":"Diogo","chatUserId":"..."}]}'
+-- ) ON DUPLICATE KEY UPDATE cfg_value = VALUES(cfg_value);

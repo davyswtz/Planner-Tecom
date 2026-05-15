@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/db.php';
-require __DIR__ . '/op_desc_images.inc.php';
+require __DIR__ . '/planner_helpers.inc.php';
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'OPTIONS') {
     jsonResponse(['ok' => true]);
@@ -73,37 +73,31 @@ try {
         $stmtT->execute([':since' => $since]);
         $changedTasks = $stmtT->fetchAll() ?: [];
 
-        $opSqlBase = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
-          coordenadas, localizacao_texto AS localizacaoTexto, descricao, categoria, prazo, prioridade, status,
-          is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
-          nome_cliente AS nomeCliente, protocolo, data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
-          assinada_por AS assinadaPor, assinada_em AS assinadaEm, updated_at
-          FROM op_tasks WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC';
-        $opSqlExt = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
-          coordenadas, localizacao_texto AS localizacaoTexto, descricao, categoria, prazo, prioridade, status,
-          is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
-          nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico, sub_processo AS subProcesso,
-          data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
-          assinada_por AS assinadaPor, assinada_em AS assinadaEm, updated_at
-          FROM op_tasks WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC';
-        try {
-            $stmtO = $pdo->prepare($opSqlExt);
-            $stmtO->execute([':since' => $since]);
-            $changedOpTasks = $stmtO->fetchAll() ?: [];
-        } catch (Throwable $opChErr) {
-            error_log('[changes.php] op_tasks ext query failed: ' . $opChErr->getMessage());
-            $stmtO = $pdo->prepare($opSqlBase);
-            $stmtO->execute([':since' => $since]);
-            $changedOpTasks = $stmtO->fetchAll() ?: [];
+        $hasOrdem = dbColumnExists($pdo, 'op_tasks', 'ordem_servico');
+        $hasSub = dbColumnExists($pdo, 'op_tasks', 'sub_processo');
+        $opSqlBase = plannerOpTaskListSelectSqlFallback() . ' WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC';
+        $opSqlExt = plannerOpTaskListSelectSql() . ' WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC';
+        if ($hasOrdem && $hasSub) {
+            $opListSql = $opSqlExt;
+        } elseif ($hasOrdem) {
+            $opListSql = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
+              coordenadas, localizacao_texto AS localizacaoTexto, categoria, prazo, prioridade, status,
+              is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
+              nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico,
+              data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
+              assinada_por AS assinadaPor, assinada_em AS assinadaEm, updated_at
+              FROM op_tasks WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC';
+        } else {
+            $opListSql = $opSqlBase;
         }
+        $stmtO = $pdo->prepare($opListSql);
+        $stmtO->execute([':since' => $since]);
+        $changedOpTasks = $stmtO->fetchAll() ?: [];
         foreach ($changedOpTasks as &$item) {
-            // A descrição já é sanitizada no momento do save (op_tasks.php). Evita custo alto no poll de changes.
-            $item['descricao'] = (string) ($item['descricao'] ?? '');
-            $item['historico'] = json_decode((string) ($item['historico'] ?? '[]'), true) ?: [];
-            $item['isParentTask'] = ((int) ($item['is_parent_task'] ?? 0)) === 1;
-            $item['parentTaskId'] = isset($item['parent_task_id']) ? (int) $item['parent_task_id'] : null;
-            unset($item['is_parent_task'], $item['parent_task_id']);
+            $item = plannerFormatOpTaskRow($item, false);
+            unset($item['updated_at']);
         }
+        unset($item);
 
         $stmtN = $pdo->prepare('SELECT id, kind, title, message, ref_type, ref_id, op_category AS opCategory,
           created_by AS createdBy, created_at AS createdAt, updated_at

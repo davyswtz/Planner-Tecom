@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/db.php';
+require __DIR__ . '/planner_helpers.inc.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     jsonResponse(['ok' => true]);
@@ -20,7 +21,16 @@ try {
         jsonResponse(['ok' => false, 'error' => 'to invalido'], 422);
     }
 
-    $who = (string) ($_SESSION['planner_user'] ?? '');
+    $who = strtolower(trim((string) ($_SESSION['planner_user'] ?? '')));
+    if ($who === '') {
+        jsonResponse(['ok' => false, 'error' => 'unauthorized'], 401);
+    }
+
+    $pdo = db();
+    if (!plannerUsernameExists($pdo, $to)) {
+        jsonResponse(['ok' => false, 'error' => 'destinatario_invalido'], 422);
+    }
+    plannerEnforceNotifyRateLimit($who, $to);
     $title = trim((string) ($data['title'] ?? ''));
     $message = trim((string) ($data['message'] ?? ''));
     if ($title === '') $title = 'Notificação';
@@ -29,7 +39,6 @@ try {
     // Convenção simples: prefixo "@user" para permitir filtro no front sem mudar schema.
     $message = '@' . $to . ' ' . $message;
 
-    $pdo = db();
     $n = $pdo->prepare('INSERT INTO app_notification (kind, title, message, ref_type, ref_id, op_category, created_by)
                         VALUES (:kind, :title, :message, :ref_type, :ref_id, :op_category, :created_by)');
     $n->execute([

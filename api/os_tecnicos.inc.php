@@ -5,20 +5,23 @@ declare(strict_types=1);
  * Sincroniza registros da tabela os_tecnicos a partir de op_tasks (OS filhas / com técnico).
  */
 
-function dbColumnExists(PDO $pdo, string $table, string $column): bool
-{
-    static $cache = [];
-    $key = $table . '.' . $column;
-    if (array_key_exists($key, $cache)) {
+if (!function_exists('dbColumnExists')) {
+    // Definido em db.php; fallback legado se o include vier sem db.php.
+    function dbColumnExists(PDO $pdo, string $table, string $column): bool
+    {
+        static $cache = [];
+        $key = $table . '.' . $column;
+        if (array_key_exists($key, $cache)) {
+            return $cache[$key];
+        }
+        $stmt = $pdo->prepare(
+            'SELECT COUNT(*) FROM information_schema.COLUMNS
+              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t AND COLUMN_NAME = :c'
+        );
+        $stmt->execute([':t' => $table, ':c' => $column]);
+        $cache[$key] = ((int) $stmt->fetchColumn()) > 0;
         return $cache[$key];
     }
-    $stmt = $pdo->prepare(
-        'SELECT COUNT(*) FROM information_schema.COLUMNS
-          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t AND COLUMN_NAME = :c'
-    );
-    $stmt->execute([':t' => $table, ':c' => $column]);
-    $cache[$key] = ((int) $stmt->fetchColumn()) > 0;
-    return $cache[$key];
 }
 
 function osTecnicosTableExists(PDO $pdo): bool

@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/db.php';
-require __DIR__ . '/op_desc_images.inc.php';
+require __DIR__ . '/planner_helpers.inc.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     jsonResponse(['ok' => true]);
@@ -12,11 +12,9 @@ try {
         jsonResponse(['ok' => false, 'error' => 'unauthorized'], 401);
     }
 
-    // Cache curto por usuário: reduz TTFB em hospedagem compartilhada (HostGator).
-    // TTL baixo para não “atrasar” atualizações; changes.php continua sendo o caminho recomendado.
     $cacheTtl = 5;
     $cacheUser = (string) ($_SESSION['planner_user'] ?? 'anon');
-    $cacheKey = 'planner_bootstrap_' . hash('sha256', $cacheUser . '|' . ($_SERVER['HTTP_HOST'] ?? '') . '|v1');
+    $cacheKey = 'planner_bootstrap_' . hash('sha256', $cacheUser . '|' . ($_SERVER['HTTP_HOST'] ?? '') . '|v2_light');
     $cacheFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $cacheKey . '.json';
     if (is_readable($cacheFile)) {
         $raw = (string) @file_get_contents($cacheFile);
@@ -50,23 +48,24 @@ try {
     $tasks = $tableExists('tasks')
         ? $safeFetchAll('SELECT id, titulo, responsavel, prazo, status, prioridade FROM tasks ORDER BY id ASC', 'tasks')
         : [];
-    $opSqlBase = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
-      coordenadas, localizacao_texto AS localizacaoTexto, descricao, categoria, prazo, prioridade, status,
-      is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
-      nome_cliente AS nomeCliente, protocolo, data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
-      assinada_por AS assinadaPor, assinada_em AS assinadaEm
-      FROM op_tasks ORDER BY id ASC';
-    $opSqlExt = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
-      coordenadas, localizacao_texto AS localizacaoTexto, descricao, categoria, prazo, prioridade, status,
-      is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
-      nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico, sub_processo AS subProcesso,
-      data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
-      assinada_por AS assinadaPor, assinada_em AS assinadaEm
-      FROM op_tasks ORDER BY id ASC';
+    $opSqlBase = plannerOpTaskListSelectSqlFallback() . ' ORDER BY id ASC';
+    $opSqlExt = plannerOpTaskListSelectSql() . ' ORDER BY id ASC';
     $opTasks = [];
     if ($tableExists('op_tasks')) {
-        $opTasks = $safeFetchAll($opSqlExt, 'op_tasks');
-        if (!$opTasks) {
+        $hasOrdem = dbColumnExists($pdo, 'op_tasks', 'ordem_servico');
+        $hasSub = dbColumnExists($pdo, 'op_tasks', 'sub_processo');
+        if ($hasOrdem && $hasSub) {
+            $opTasks = $safeFetchAll($opSqlExt, 'op_tasks');
+        } elseif ($hasOrdem) {
+            $opSqlOrdemOnly = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
+              coordenadas, localizacao_texto AS localizacaoTexto, categoria, prazo, prioridade, status,
+              is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
+              nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico,
+              data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
+              assinada_por AS assinadaPor, assinada_em AS assinadaEm
+              FROM op_tasks ORDER BY id ASC';
+            $opTasks = $safeFetchAll($opSqlOrdemOnly, 'op_tasks_ordem');
+        } else {
             $opTasks = $safeFetchAll($opSqlBase, 'op_tasks_base');
         }
     }
@@ -77,7 +76,6 @@ try {
         ? $safeFetchAll('SELECT id, kind, title, message, ref_type, ref_id, op_category AS opCategory, created_by AS createdBy, created_at AS createdAt
                  FROM app_notification ORDER BY id DESC LIMIT 50', 'app_notification')
         : [];
-    // Feed global (todos os usuários)
     $activity = $tableExists('app_activity_event')
         ? $safeFetchAll('SELECT id, username, event_type AS eventType, severity, message, ref_type AS refType, ref_id AS refId,
           op_category AS opCategory, created_at AS createdAt
@@ -99,13 +97,15 @@ try {
     }
 
     foreach ($opTasks as &$item) {
-        // A descrição já é sanitizada no momento do save (op_tasks.php). Evita custo alto aqui no bootstrap.
-        $item['descricao'] = (string) ($item['descricao'] ?? '');
-        $item['historico'] = json_decode((string) ($item['historico'] ?? '[]'), true) ?: [];
-        $item['isParentTask'] = ((int) ($item['is_parent_task'] ?? 0)) === 1;
-        $item['parentTaskId'] = isset($item['parent_task_id']) ? (int) $item['parent_task_id'] : null;
-        unset($item['is_parent_task'], $item['parent_task_id']);
+        $item = plannerFormatOpTaskRow($item, false);
     }
+    unset($item);
+
+    $rawWebhook = $cfgMap['webhookConfig'] ?? ['url' => '', 'events' => ['andamento' => true, 'concluida' => true, 'finalizada' => true]];
+    $maskedWebhook = plannerMaskWebhookConfigForClient(is_array($rawWebhook) ? $rawWebhook : []);
+    $techDirectory = (isset($cfgMap['techDirectory']) && is_array($cfgMap['techDirectory']))
+        ? $cfgMap['techDirectory']
+        : null;
 
     $payload = [
         'ok' => true,
@@ -115,17 +115,17 @@ try {
         'escalas' => $escalas,
         'notifications' => array_reverse($notifs ?: []),
         'activity' => array_reverse($activity ?: []),
-        'webhookConfig' => $cfgMap['webhookConfig'] ?? ['url' => '', 'events' => ['andamento' => true, 'concluida' => true, 'finalizada' => true]],
+        'webhookConfig' => $maskedWebhook,
         'plannerConfig' => $cfgMap['plannerConfig'] ?? ['note' => ''],
     ];
+    if ($techDirectory !== null) {
+        $payload['techDirectory'] = $techDirectory;
+    }
 
-    // Best-effort: grava cache (não deve quebrar o endpoint se falhar).
     @file_put_contents($cacheFile, json_encode(['ts' => time(), 'payload' => $payload], JSON_UNESCAPED_UNICODE), LOCK_EX);
 
     jsonResponse($payload);
 } catch (Throwable $e) {
-    // FIX: não vazar detalhes internos; logar com contexto.
     error_log('[bootstrap.php] failed: ' . $e->getMessage());
     jsonResponse(['ok' => false, 'error' => 'server_error'], 500);
 }
-

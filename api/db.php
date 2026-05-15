@@ -37,7 +37,7 @@ function isHttpsRequest(): bool
         return true;
     }
     $cfv = strtolower((string) ($_SERVER['HTTP_CF_VISITOR'] ?? ''));
-    if ($cfv !== '' && str_contains($cfv, '"scheme":"https"')) {
+    if ($cfv !== '' && strpos($cfv, '"scheme":"https"') !== false) {
         return true;
     }
     return false;
@@ -51,6 +51,23 @@ function normalizeHost(string $host): string
     return $h;
 }
 
+/** Compara hosts ignorando prefixo www (comum em staging/proxy). */
+function hostsAreSameSite(string $requestHost, string $otherHost): bool
+{
+    $a = normalizeHost($requestHost);
+    $b = normalizeHost($otherHost);
+    if ($a === '' || $b === '') {
+        return false;
+    }
+    if (hash_equals($a, $b)) {
+        return true;
+    }
+    $stripWww = static function (string $h): string {
+        return preg_replace('/^www\./', '', $h) ?: $h;
+    };
+    return hash_equals($stripWww($a), $stripWww($b));
+}
+
 function sameSiteOriginFromRequest(): string
 {
     $host = normalizeHost((string) ($_SERVER['HTTP_HOST'] ?? ''));
@@ -62,7 +79,7 @@ function sameSiteOriginFromRequest(): string
     $origin = (string) ($_SERVER['HTTP_ORIGIN'] ?? '');
     if ($origin !== '') {
         $oHost = normalizeHost((string) (parse_url($origin, PHP_URL_HOST) ?? ''));
-        if ($oHost !== '' && hash_equals($host, $oHost)) {
+        if ($oHost !== '' && hostsAreSameSite($host, $oHost)) {
             return $origin;
         }
     }
@@ -121,6 +138,22 @@ function db(): PDO
     }
 
     return $pdo;
+}
+
+function dbColumnExists(PDO $pdo, string $table, string $column): bool
+{
+    static $cache = [];
+    $key = $table . '.' . $column;
+    if (array_key_exists($key, $cache)) {
+        return $cache[$key];
+    }
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t AND COLUMN_NAME = :c'
+    );
+    $stmt->execute([':t' => $table, ':c' => $column]);
+    $cache[$key] = ((int) $stmt->fetchColumn()) > 0;
+    return $cache[$key];
 }
 
 function readJsonBody(): array
@@ -235,7 +268,37 @@ function requireCsrfToken(): void
     }
 }
 
-function requireSameOriginForMutation(): void
+function requestOriginLooksSameSite(string $requestHost): bool
+{
+    if ($requestHost === '') {
+        return true;
+    }
+    $origin = (string) ($_SERVER['HTTP_ORIGIN'] ?? '');
+    if ($origin !== '') {
+        $oHost = normalizeHost((string) (parse_url($origin, PHP_URL_HOST) ?? ''));
+        if ($oHost !== '' && hostsAreSameSite($requestHost, $oHost)) {
+            return true;
+        }
+    }
+    $referer = (string) ($_SERVER['HTTP_REFERER'] ?? '');
+    if ($referer !== '') {
+        $rHost = normalizeHost((string) (parse_url($referer, PHP_URL_HOST) ?? ''));
+        if ($rHost !== '' && hostsAreSameSite($requestHost, $rHost)) {
+            return true;
+        }
+    }
+    // Navegadores modernos em fetch same-origin costumam enviar Sec-Fetch-Site.
+    $secFetchSite = strtolower((string) ($_SERVER['HTTP_SEC_FETCH_SITE'] ?? ''));
+    if (in_array($secFetchSite, ['same-origin', 'same-site'], true)) {
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Login: valida origem quando enviada, mas não exige CSRF (sessão ainda não existe ou será renovada).
+ */
+function requireSameOriginForLogin(): void
 {
     $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
     if (!in_array($method, ['POST', 'DELETE', 'PUT', 'PATCH'], true)) {
@@ -247,24 +310,31 @@ function requireSameOriginForMutation(): void
     }
     $origin = (string) ($_SERVER['HTTP_ORIGIN'] ?? '');
     $referer = (string) ($_SERVER['HTTP_REFERER'] ?? '');
-
-    // Aceita mesma origem comparando HOST (scheme pode ser mascarado por proxy/CDN).
-    if ($origin !== '') {
-        $oHost = normalizeHost((string) (parse_url($origin, PHP_URL_HOST) ?? ''));
-        if ($oHost !== '' && hash_equals($host, $oHost)) {
-            requireCsrfToken();
-            return;
-        }
+    // Sem Origin/Referer: permitir (rate limit + cookie SameSite); comuns em alguns proxies.
+    if ($origin === '' && $referer === '') {
+        return;
     }
-    if ($origin === '' && $referer !== '') {
-        $rHost = normalizeHost((string) (parse_url($referer, PHP_URL_HOST) ?? ''));
-        if ($rHost !== '' && hash_equals($host, $rHost)) {
-            requireCsrfToken();
-            return;
-        }
+    if (requestOriginLooksSameSite($host)) {
+        return;
+    }
+    jsonResponse(['ok' => false, 'error' => 'forbidden'], 403);
+}
+
+function requireSameOriginForMutation(): void
+{
+    $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+    if (!in_array($method, ['POST', 'DELETE', 'PUT', 'PATCH'], true)) {
+        return;
+    }
+    $host = normalizeHost((string) ($_SERVER['HTTP_HOST'] ?? ''));
+    if ($host === '') {
+        return;
+    }
+    if (requestOriginLooksSameSite($host)) {
+        requireCsrfToken();
+        return;
     }
 
-    // FIX: CSRF básica via Origin/Referer (sessão).
     jsonResponse(['ok' => false, 'error' => 'forbidden'], 403);
 }
 

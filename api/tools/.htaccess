@@ -1,0 +1,2 @@
+# Ferramentas internas — não expor via HTTP na hospedagem compartilhada.
+Require all denied

@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/db.php';
+require __DIR__ . '/planner_helpers.inc.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     jsonResponse(['ok' => true]);
@@ -15,7 +16,9 @@ try {
     requireSameOriginForMutation();
 
     $data = readJsonBody();
-    $url = trim((string) ($data['url'] ?? ''));
+    $pdo = db();
+    $regionKey = trim((string) ($data['regionKey'] ?? ''));
+    $url = plannerResolveWebhookUrl($pdo, $regionKey, (string) ($data['url'] ?? ''));
     $payload = $data['payload'] ?? null;
 
     if ($url === '' || !filter_var($url, FILTER_VALIDATE_URL)) {
@@ -31,7 +34,19 @@ try {
         jsonResponse(['ok' => false, 'error' => 'payload_invalido'], 422);
     }
 
-    $body = json_encode($payload, JSON_UNESCAPED_UNICODE);
+    $payloadArr = is_array($payload) ? $payload : (array) $payload;
+    $threadKey = '';
+    if (isset($payloadArr['thread']) && is_array($payloadArr['thread'])) {
+        $threadKey = trim((string) ($payloadArr['thread']['threadKey'] ?? ''));
+    }
+    if ($threadKey !== '' && strpos($url, 'threadKey=') === false) {
+        $sep = (strpos($url, '?') !== false) ? '&' : '?';
+        $url .= $sep
+            . 'threadKey=' . rawurlencode($threadKey)
+            . '&messageReplyOption=REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD';
+    }
+
+    $body = json_encode($payloadArr, JSON_UNESCAPED_UNICODE);
     if ($body === false) {
         jsonResponse(['ok' => false, 'error' => 'payload_encode_failed'], 422);
     }

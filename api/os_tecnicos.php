@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require __DIR__ . '/db.php';
 require __DIR__ . '/os_tecnicos.inc.php';
+require __DIR__ . '/planner_helpers.inc.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     jsonResponse(['ok' => true]);
@@ -29,6 +30,9 @@ try {
     $action = (string) ($data['action'] ?? '');
 
     if ($action === 'rebuild') {
+        plannerRequirePrivilegedUser();
+        $who = strtolower(trim((string) ($_SESSION['planner_user'] ?? '')));
+        plannerEnforceOsTecRebuildRateLimit($who);
         $n = osTecRebuildAll($pdo);
         jsonResponse(['ok' => true, 'rebuilt' => $n]);
     }

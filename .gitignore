@@ -1,5 +1,6 @@
 # Credenciais MySQL
 api/credentials.php
+api/webhooks.local.php
 
 # Diagnósticos locais (NUNCA subir para produção)
 public_html/teste_db.php

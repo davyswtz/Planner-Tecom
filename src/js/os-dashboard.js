@@ -43,6 +43,10 @@
   const fmtDate = (iso) => (iso && Utils.formatDate ? Utils.formatDate(iso) : (iso || '—'));
   const today = () => (Utils.todayIso ? Utils.todayIso() : new Date().toISOString().slice(0, 10));
   const catLabel = (c) => CAT_LABELS[String(c || '').trim()] || String(c || '—');
+  const techLabel = (name) => {
+    const n = String(name ?? '').trim();
+    return n && n !== '—' ? n : 'Sem técnico';
+  };
   const normSt = (s) => String(s ?? '').trim().toLowerCase();
   const isDone = (s) => DONE.has(normSt(s));
   const isProg = (s) => PROGRESS.has(normSt(s));
@@ -161,7 +165,8 @@
       const criada = String(task.criadaEm || '').slice(0, 10);
       const concl = completionDay(task);
       const ref = STATE.dateMode === 'conclusao' ? (concl || criada) : criada;
-      techs.forEach((tecnico) => {
+      techs.forEach((rawTech) => {
+        const tecnico = techLabel(rawTech);
         out.push({
           task, tecnico, criada, concl, ref,
           categoria: String(task.categoria || '').trim(),

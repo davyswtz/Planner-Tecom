@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/db.php';
+require __DIR__ . '/planner_helpers.inc.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     jsonResponse(['ok' => true]);
@@ -19,6 +20,7 @@ try {
 
     $stmt = $pdo->prepare('INSERT INTO app_config (cfg_key, cfg_value) VALUES (:k, :v) ON DUPLICATE KEY UPDATE cfg_value = VALUES(cfg_value)');
     if (isset($data['webhookConfig']) && is_array($data['webhookConfig'])) {
+        plannerRequirePrivilegedUser();
         $incoming = $data['webhookConfig'];
         $existing = [];
         $sel = $pdo->prepare('SELECT cfg_value FROM app_config WHERE cfg_key = :k LIMIT 1');
@@ -31,7 +33,10 @@ try {
             }
         }
         if (!empty($incoming['url']) && is_string($incoming['url'])) {
-            $existing['url'] = trim($incoming['url']);
+            $u = trim($incoming['url']);
+            if ($u !== '' && $u !== 'configured') {
+                $existing['url'] = $u;
+            }
         }
         if (isset($incoming['events']) && is_array($incoming['events'])) {
             $existing['events'] = array_merge(
@@ -46,8 +51,12 @@ try {
             $existing['urlsByRegion'] = [];
         }
         foreach ($incRegions as $rk => $rv) {
-            if (is_string($rv) && trim($rv) !== '') {
-                $existing['urlsByRegion'][$rk] = trim($rv);
+            if (!is_string($rv)) {
+                continue;
+            }
+            $rv = trim($rv);
+            if ($rv !== '' && $rv !== 'configured') {
+                $existing['urlsByRegion'][$rk] = $rv;
             }
         }
         $stmt->execute([

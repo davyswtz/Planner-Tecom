@@ -41,11 +41,32 @@ function resolveDefaultWebhookUrlsByRegionFromConfig() {
   return out;
 }
 
+function isMaskedWebhookValue(v) {
+  const s = String(v || '').trim();
+  return s === 'configured' || s === '***configured***';
+}
+
+function isRealWebhookUrl(v) {
+  const s = String(v || '').trim();
+  return s !== '' && !isMaskedWebhookValue(s) && /^https?:\/\//i.test(s);
+}
+
+function webhookRegionIsConfigured(v) {
+  const s = String(v || '').trim();
+  return s !== '' && (isMaskedWebhookValue(s) || isRealWebhookUrl(s));
+}
+
+function plannerUserIsPrivileged() {
+  const u = getSessionUserKey();
+  return ['joaoibipar', 'jobertibipar', 'davyibipar'].includes(u);
+}
+
 /** Mescla webhook remoto sem apagar URLs locais/servidor já preenchidas. */
 function mergeWebhookConfigFromRemote(target, incoming) {
   if (!target || !incoming || typeof incoming !== 'object') return;
-  if (typeof incoming.url === 'string' && incoming.url.trim()) {
-    target.url = incoming.url.trim();
+  if (typeof incoming.url === 'string') {
+    const u = incoming.url.trim();
+    if (u && !isMaskedWebhookValue(u)) target.url = u;
   }
   if (incoming.events && typeof incoming.events === 'object') {
     target.events = { ...(target.events || {}), ...incoming.events };
@@ -58,16 +79,24 @@ function mergeWebhookConfigFromRemote(target, incoming) {
   }
   for (const [k, v] of Object.entries(incRegions)) {
     const s = typeof v === 'string' ? v.trim() : '';
-    if (s) target.urlsByRegion[k] = s;
+    if (s && !isMaskedWebhookValue(s)) target.urlsByRegion[k] = s;
   }
 }
 
 function webhookConfigHasAnyUrl(cfg) {
   if (!cfg || typeof cfg !== 'object') return false;
-  if (String(cfg.url || '').trim()) return true;
+  if (webhookRegionIsConfigured(cfg.url)) return true;
   const by = cfg.urlsByRegion;
   if (!by || typeof by !== 'object') return false;
-  return Object.values(by).some((v) => typeof v === 'string' && v.trim());
+  return Object.values(by).some((v) => webhookRegionIsConfigured(v));
+}
+
+function webhookConfigHasRealUrl(cfg) {
+  if (!cfg || typeof cfg !== 'object') return false;
+  if (isRealWebhookUrl(cfg.url)) return true;
+  const by = cfg.urlsByRegion;
+  if (!by || typeof by !== 'object') return false;
+  return Object.values(by).some((v) => isRealWebhookUrl(v));
 }
 
 function normalizeTechName(name) {
@@ -237,7 +266,8 @@ const TOPBAR_NOTIF_LAST_SEEN_KEY = 'planner.topbar.notifs.lastSeenId.v2';
 
 function isAuthenticatedSession() {
   try {
-    return localStorage.getItem('planner.session.v1') === '1';
+    return localStorage.getItem('planner.session.v2') === '1'
+      || localStorage.getItem('planner.session.v1') === '1';
   } catch {
     return false;
   }
@@ -263,6 +293,7 @@ function getCargoForUserKey() {
 const CLIENT_BUNDLE_STORAGE_KEY = 'planner.clientBundle.v1';
 const DEPLOY_CACHE_KEEP_KEYS = new Set([
   'planner.session.v1',
+  'planner.session.v2',
   'planner.session.displayName.v1',
   'planner.session.userKey.v1',
   'planner.theme.v1',
@@ -329,6 +360,7 @@ const Store = (() => {
 
   const isBlankOpTaskMergeValue = (field, v) => {
     if (v === undefined || v === null) return true;
+    if (field === 'historico' && Array.isArray(v) && !v.length) return true;
     const s = String(v).trim();
     if (!s) return true;
     if (field === 'prazo' || field === 'dataEntrada' || field === 'dataInstalacao') {
@@ -505,8 +537,22 @@ const Store = (() => {
         `/changes?since=${s}`,
       ]);
     },
+    async getOpTask(id) {
+      const n = encodeURIComponent(String(Number(id) || 0));
+      return this.requestAny([`/op_task.php?id=${n}`, `/op_task?id=${n}`]);
+    },
+    async getWebhookConfigFull() {
+      return this.requestAny(['/webhook_config.php', '/webhook_config']);
+    },
+    async getWebhookInstallStatus() {
+      return this.requestAny(['/install_webhooks.php', '/install_webhooks']);
+    },
+    async syncWebhooksFromServerFile() {
+      return this.requestAny(['/install_webhooks.php', '/install_webhooks'], { method: 'POST' });
+    },
     async login(username, password) {
-      // Uma única rota: evita uma ida HTTP extra em hosts que não têm `/login`.
+      // Login não envia CSRF antigo (sessão será recriada no servidor).
+      this._clearCsrf();
       return this.request('/login.php', {
         method: 'POST',
         body: JSON.stringify({ username, password }),
@@ -558,10 +604,15 @@ const Store = (() => {
         body: JSON.stringify({ action: 'rebuild' }),
       });
     },
-    async sendWebhook(url, payload) {
+    async sendWebhook(url, payload, options = {}) {
+      const body = {
+        url: isRealWebhookUrl(url) ? url : '',
+        regionKey: String(options.regionKey || '').trim(),
+        payload,
+      };
       return this.requestAny(['/webhook_send.php', '/webhook-send'], {
         method: 'POST',
-        body: JSON.stringify({ url, payload }),
+        body: JSON.stringify(body),
         timeoutMs: 20000,
       });
     },
@@ -689,7 +740,7 @@ const Store = (() => {
       webhookConfig.urlsByRegion = {};
     }
     const hasAnyRegionUrl =
-      Object.values(webhookConfig.urlsByRegion).some(v => typeof v === 'string' && v.trim());
+      Object.values(webhookConfig.urlsByRegion).some(v => webhookRegionIsConfigured(v));
     if (!hasAnyRegionUrl) {
       const defaultsByRegion = resolveDefaultWebhookUrlsByRegionFromConfig();
       if (Object.keys(defaultsByRegion).length) webhookConfig.urlsByRegion = { ...defaultsByRegion };
@@ -1001,7 +1052,10 @@ const Store = (() => {
     setWebhookConfig: async (data) => {
       if (data && typeof data === 'object') {
         mergeWebhookConfigFromRemote(webhookConfig, data);
-        if (data.url !== undefined) webhookConfig.url = String(data.url || '').trim();
+        if (data.url !== undefined) {
+          const u = String(data.url || '').trim();
+          if (!isMaskedWebhookValue(u)) webhookConfig.url = u;
+        }
       }
       applyDefaultWebhookUrlIfNeeded();
       persistSnapshot();
@@ -1064,8 +1118,12 @@ const Store = (() => {
         tasks.splice(0, tasks.length, ...payload.tasks);
         nextTaskId = tasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
       }
+      if (payload.techDirectory && typeof payload.techDirectory === 'object') {
+        window.APP_CONFIG = window.APP_CONFIG || {};
+        window.APP_CONFIG.techsByRegion = payload.techDirectory;
+      }
       if (Array.isArray(payload.opTasks)) {
-        mergeLocalFieldsById(opTasks, payload.opTasks, OP_TASK_REMOTE_EMPTY_MERGE_FIELDS);
+        mergeLocalFieldsById(opTasks, payload.opTasks, [...OP_TASK_REMOTE_EMPTY_MERGE_FIELDS, 'historico']);
         opTasks.splice(0, opTasks.length, ...payload.opTasks);
         nextOpTaskId = opTasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
       }
@@ -1086,7 +1144,7 @@ const Store = (() => {
       applyDefaultWebhookUrlIfNeeded();
       persistSnapshot();
       // Não sincroniza webhook vazio de volta ao servidor após deploy (evita apagar URLs salvas).
-      if (ApiService.enabled() && webhookConfigHasAnyUrl(webhookConfig)) {
+      if (ApiService.enabled() && webhookConfigHasRealUrl(webhookConfig)) {
         void syncConfig();
       }
       return true;
@@ -2377,31 +2435,42 @@ const WebhookService = {
     return r.toUpperCase().replace(/\s+/g, '_');
   },
 
+  _resolveRegionKeyForWebhook(task) {
+    const rootTask = getLinkedOsRootTask(task);
+    let regionSource = isLinkedOsCategory(task?.categoria)
+      ? (rootTask?.regiao || task?.regiao)
+      : task?.regiao;
+    const key = this._normalizeRegionKey(regionSource);
+    if (!key && String(task?.categoria || '').trim() === 'correcao-atenuacao') return '';
+    return key || 'BACKUP';
+  },
+
   _resolveWebhookUrlForTask(task, config) {
     const rootTask = getLinkedOsRootTask(task);
 
-    // Se já existe URL do tópico salva na tarefa raiz (pai), sempre reutiliza.
     const fixedThreadWebhook = String(rootTask?.chatThreadWebhookUrl || '').trim();
-    if (fixedThreadWebhook) return fixedThreadWebhook;
+    if (isRealWebhookUrl(fixedThreadWebhook)) return fixedThreadWebhook;
 
     const byRegion = (config && config.urlsByRegion && typeof config.urlsByRegion === 'object')
       ? config.urlsByRegion
       : {};
-    // Atendimento / rompimento (pai e OS filha): região do card pai para manter o mesmo tópico no Chat.
-    let regionSource = isLinkedOsCategory(task?.categoria)
-      ? (rootTask?.regiao || task?.regiao)
-      : task?.regiao;
-
-    const key = this._normalizeRegionKey(regionSource);
-    // Atenuação: não permitir fallback silencioso para BACKUP quando a região não foi escolhida.
-    // (o usuário escolhe a região no dropdown; sem região, não sabemos qual chat usar.)
-    if (!key && String(task?.categoria || '').trim() === 'correcao-atenuacao') return '';
-    const picked = key ? String(byRegion[key] || '').trim() : '';
-    if (picked) return picked;
-    // FIX: se a região não estiver mapeada, usa BACKUP (quando configurado) antes do default.
+    const key = this._resolveRegionKeyForWebhook(task);
+    if (!key) return '';
+    const picked = String(byRegion[key] || '').trim();
+    if (isRealWebhookUrl(picked)) return picked;
     const backup = String(byRegion.BACKUP || '').trim();
-    if (backup) return backup;
-    return String(config?.url || '').trim();
+    if (isRealWebhookUrl(backup)) return backup;
+    const main = String(config?.url || '').trim();
+    if (isRealWebhookUrl(main)) return main;
+    return '';
+  },
+
+  _webhookIsConfiguredForTask(task, config) {
+    if (this._resolveWebhookUrlForTask(task, config)) return true;
+    const key = this._resolveRegionKeyForWebhook(task);
+    if (!key) return false;
+    const by = config?.urlsByRegion || {};
+    return webhookRegionIsConfigured(by[key]) || webhookRegionIsConfigured(by.BACKUP) || webhookRegionIsConfigured(config?.url);
   },
 
   /**
@@ -2416,14 +2485,13 @@ const WebhookService = {
       return;
     }
     const config = Store.getWebhookConfig();
+    const regionKey = this._resolveRegionKeyForWebhook(task);
     const webhookUrl = this._resolveWebhookUrlForTask(task, config);
     if (config?.events && config.events[event] === false) {
-      // FIX: feedback mínimo quando evento está desativado
       ToastService.show(`Webhook "${event}" está desativado nas integrações.`, 'warning');
       return;
     }
-    if (!webhookUrl) {
-      // FIX: não falhar silenciosamente quando falta webhook da região
+    if (!webhookUrl && !this._webhookIsConfiguredForTask(task, config)) {
       const reg = String(task?.regiao || '').trim();
       const regLabel = reg || 'sem região';
       ToastService.show(`Sem webhook configurado para ${regLabel}. Abra Integrações e configure a URL.`, 'warning');
@@ -2444,16 +2512,18 @@ const WebhookService = {
     }
 
     const threadRootTask = getLinkedOsRootTask(task) || task;
+    const postMeta = { regionKey };
+    const threadKey = this._resolveThreadKeyForWebhook(event, task, threadRootTask);
 
-    // Google Chat threading (tópicos): cria no "andamento" e responde no mesmo thread nas demais.
-    const threadKey = this._resolveThreadKey(event, threadRootTask);
     if (threadKey) {
       this._persistThreadMetaIfNeeded(threadRootTask, threadKey, webhookUrl);
-      const url = this._buildThreadedWebhookUrl(webhookUrl, threadKey);
       const payload = { ...message, thread: { threadKey } };
-      await this._post(url, payload);
+      const url = isRealWebhookUrl(webhookUrl)
+        ? this._buildThreadedWebhookUrl(webhookUrl, threadKey)
+        : '';
+      await this._post(url, payload, postMeta);
     } else {
-      await this._post(webhookUrl, message);
+      await this._post(webhookUrl, message, postMeta);
     }
 
     if (
@@ -2464,26 +2534,67 @@ const WebhookService = {
       const report = this._buildLinkedOsActivityReport(threadRootTask);
       if (report) {
         const reportPayload = threadKey ? { ...report, thread: { threadKey } } : report;
-        const reportUrl = threadKey
+        const reportUrl = (threadKey && isRealWebhookUrl(webhookUrl))
           ? this._buildThreadedWebhookUrl(webhookUrl, threadKey)
           : webhookUrl;
-        await this._post(reportUrl, reportPayload);
+        await this._post(reportUrl, reportPayload, postMeta);
       }
     }
   },
 
-  _resolveThreadKey(event, task) {
-    const existing = String(task?.chatThreadKey ?? '').trim();
-    if (existing) return existing;
-    // Só abre tópico novo em "Em andamento"; demais eventos respondem no tópico existente.
-    if (event !== 'andamento') return '';
-
-    // Sempre gera chave única por "instância da tarefa raiz", evitando cair em tópico antigo.
+  _generateThreadKeyForTask(task) {
     const stableId = this._taskStableId(task);
     const createdAt = String(task?.criadaEm || '').trim();
     const createdStamp = createdAt ? String(new Date(createdAt).getTime()) : '';
-    const unique = createdStamp || String(task?.id || '').trim() || String(Date.now());
+    const unique = createdStamp || String(task?.id || '').trim();
+    if (!unique) return `burrinho-${stableId}-${Date.now()}`.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 120);
     return `burrinho-${stableId}-${unique}`.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 120);
+  },
+
+  _taskCountsAsThreadActive(task) {
+    if (!task || typeof task !== 'object') return false;
+    const st = String(task.status ?? '').trim().toLowerCase();
+    const activeStatuses = new Set([
+      'em andamento',
+      'validação',
+      'validacao',
+      'envio pendente',
+      'necessário adequação',
+      'necessario adequação',
+      'necessario adequacao',
+    ]);
+    if (activeStatuses.has(st)) return true;
+    if (isLinkedOsParentTask(task)) {
+      return getLinkedOsChildren(task).some((c) => {
+        const cs = String(c?.status ?? '').trim().toLowerCase();
+        return cs && cs !== 'criada' && cs !== 'pendente' && cs !== 'a iniciar';
+      });
+    }
+    return false;
+  },
+
+  /**
+   * Tópico do Google Chat: sempre no card pai para OS filhas.
+   * Gera chave determinística (mesmo após F5) se o pai ainda não tiver chatThreadKey salvo.
+   */
+  _resolveThreadKeyForWebhook(event, task, threadRootTask) {
+    const root = threadRootTask || task;
+    const saved = String(root?.chatThreadKey ?? '').trim();
+    if (saved) return saved;
+
+    const isChild = isLinkedOsChildTask(task);
+    const shouldOpen =
+      isChild ||
+      event === 'andamento' ||
+      this._taskCountsAsThreadActive(root);
+
+    if (!shouldOpen) return '';
+    return this._generateThreadKeyForTask(root);
+  },
+
+  /** @deprecated use _resolveThreadKeyForWebhook */
+  _resolveThreadKey(event, task) {
+    return this._resolveThreadKeyForWebhook(event, task, task);
   },
 
   _taskStableId(task) {
@@ -2494,16 +2605,19 @@ const WebhookService = {
   },
 
   _persistThreadMetaIfNeeded(task, threadKey, webhookUrl = '') {
-    const current = String(task?.chatThreadKey ?? '').trim();
-    const currentWebhook = String(task?.chatThreadWebhookUrl ?? '').trim();
-    if (current && currentWebhook) return;
+    const tk = String(threadKey ?? '').trim();
+    if (!tk) return;
 
     const idNum = Number(task?.id);
     if (!Number.isFinite(idNum)) return;
 
+    const current = String(task?.chatThreadKey ?? '').trim();
+    const currentWebhook = String(task?.chatThreadWebhookUrl ?? '').trim();
+    const wh = String(webhookUrl ?? '').trim();
+
     const patch = {};
-    if (!current) patch.chatThreadKey = threadKey;
-    if (!currentWebhook && webhookUrl) patch.chatThreadWebhookUrl = webhookUrl;
+    if (!current) patch.chatThreadKey = tk;
+    if (wh && isRealWebhookUrl(wh) && !currentWebhook) patch.chatThreadWebhookUrl = wh;
     if (!Object.keys(patch).length) return;
 
     try {
@@ -2827,7 +2941,7 @@ const WebhookService = {
   },
 
   /** Envia o payload HTTP (proxy PHP quando disponível; fallback fetch direto). */
-  async _post(url, payload) {
+  async _post(url, payload, meta = {}) {
     const api = (typeof ApiService !== 'undefined' && ApiService.enabled?.())
       ? ApiService
       : (typeof Store !== 'undefined' && Store.ApiService?.enabled?.())
@@ -2835,7 +2949,7 @@ const WebhookService = {
         : null;
 
     if (api) {
-      const res = await api.sendWebhook(url, payload);
+      const res = await api.sendWebhook(url, payload, { regionKey: meta.regionKey || '' });
       if (res && res.ok === true) {
         ToastService.show('Mensagem enviada ao Google Chat', 'success');
         return true;
@@ -2851,6 +2965,10 @@ const WebhookService = {
       return false;
     }
 
+    if (!isRealWebhookUrl(url)) {
+      ToastService.show('Webhook não disponível sem API. Faça login no servidor.', 'danger');
+      return false;
+    }
     try {
       const response = await fetch(url, {
         method: 'POST',
@@ -5708,7 +5826,7 @@ const UI = {
         if (!listEl) return;
         const regiaoRaw = document.getElementById('atn2ActRegion')?.value || '';
         const techs = getTechDirectory(WebhookService._normalizeRegionKey(regiaoRaw));
-        listEl.innerHTML = techs.map(t => `<option value="${t.name}"></option>`).join('');
+        listEl.innerHTML = techs.map(t => `<option value="${Utils.escapeHtml(t.name)}"></option>`).join('');
       };
 
       const syncAtenuacaoSelectedTecnicoChatId = () => {
@@ -7634,6 +7752,7 @@ const Controllers = {
     _displayNameKey: 'planner.session.displayName.v1',
     _sessionUserKey: SESSION_USER_KEY,
     _submitting: false,
+    _pendingBootstrapUnlock: false,
     _isAuthenticated() {
       return localStorage.getItem(this._sessionKey) === '1';
     },
@@ -7694,7 +7813,15 @@ const Controllers = {
         }
         const err = res && typeof res === 'object' ? String(res.error || '') : '';
         if (err === 'forbidden' || err.startsWith('csrf')) {
-          ToastService.show('Login bloqueado por segurança (CSRF/origem). Verifique se está acessando o staging via HTTPS e se o domínio está correto.', 'danger');
+          const apiBase = Store.getApiBaseUrl?.() || '';
+          const pageHost = (() => { try { return window.location.host; } catch { return ''; } })();
+          const apiHost = (() => {
+            try { return apiBase ? new URL(apiBase).host : ''; } catch { return ''; }
+          })();
+          const hostHint = apiHost && pageHost && apiHost !== pageHost
+            ? ` A API está em ${apiHost} e a página em ${pageHost} — use o mesmo domínio ou ajuste apiBaseUrl.`
+            : ' Verifique HTTPS, www vs sem-www, e se apiBaseUrl aponta para a mesma origem da página.';
+          ToastService.show(`Login bloqueado por segurança (origem).${hostHint}`, 'danger');
           return false;
         }
         if (err === 'internal_error' || err === 'server_error') {
@@ -7741,8 +7868,8 @@ const Controllers = {
       if (!this._isAuthenticated()) {
         this._lock();
       } else {
-        this._unlock();
-        UI.scheduleTaskIdAutofillCleanup?.();
+        this._pendingBootstrapUnlock = true;
+        this._lock();
       }
       this._syncSidebarUser();
 
@@ -8015,7 +8142,7 @@ const Controllers = {
       if (!listEl) return;
       const regiaoRaw = document.getElementById('op-regiao')?.value || '';
       const techs = getTechDirectory(WebhookService._normalizeRegionKey(regiaoRaw));
-      listEl.innerHTML = techs.map(t => `<option value="${t.name}"></option>`).join('');
+      listEl.innerHTML = techs.map(t => `<option value="${Utils.escapeHtml(t.name)}"></option>`).join('');
     },
     _syncSelectedTecnicoChatId() {
       const hidden = document.getElementById('op-responsavel');
@@ -9433,9 +9560,20 @@ const Controllers = {
       ModalService.open('opTaskModal');
     },
 
-    openEditModal(id) {
+    async openEditModal(id) {
       const task = Store.findOpTask(id);
       if (!task) return;
+      if (ApiService.enabled()) {
+        try {
+          const res = await ApiService.getOpTask(id);
+          if (res?.ok && res.task) {
+            mergeLocalOpTaskIntoIncomingPatch(task, res.task);
+            Object.assign(task, res.task);
+          }
+        } catch (err) {
+          console.warn('[opTask] detalhe remoto indisponível', err);
+        }
+      }
       Store.editingOpTaskId = id;
       const isLinkedOsChild = isLinkedOsCategory(task.categoria) && task.parentTaskId;
       document.getElementById('opTaskModalTitle').textContent =
@@ -10125,7 +10263,7 @@ const Controllers = {
       const byRegion = (cfg && cfg.urlsByRegion && typeof cfg.urlsByRegion === 'object') ? cfg.urlsByRegion : {};
 
       const required = ['GOVAL', 'VALE_DO_ACO', 'CARATINGA', 'BACKUP'];
-      const missing = required.filter(k => !String(byRegion[k] || '').trim());
+      const missing = required.filter(k => !webhookRegionIsConfigured(byRegion[k]));
       const ok = missing.length === 0;
 
       if (textEl) {
@@ -10151,9 +10289,9 @@ const Controllers = {
       const banner  = document.getElementById('webhookBanner');
       if (!banner) return;
       const anyRegion = config?.urlsByRegion && typeof config.urlsByRegion === 'object'
-        ? Object.values(config.urlsByRegion).some(v => typeof v === 'string' && v.trim())
+        ? Object.values(config.urlsByRegion).some(v => webhookRegionIsConfigured(v))
         : false;
-      if (String(config?.url || '').trim() || anyRegion) {
+      if (webhookRegionIsConfigured(config?.url) || anyRegion) {
         banner.classList.add('visible');
       } else {
         banner.classList.remove('visible');
@@ -10161,13 +10299,29 @@ const Controllers = {
     },
 
     init() {
-      document.getElementById('openWebhookBtn')?.addEventListener('click', () => {
-        const config = Store.getWebhookConfig();
+      document.getElementById('openWebhookBtn')?.addEventListener('click', async () => {
+        let config = Store.getWebhookConfig();
+        if (ApiService.enabled() && plannerUserIsPrivileged()) {
+          try {
+            const st = await ApiService.getWebhookInstallStatus();
+            if (st?.ok && !st.hasRealUrls && st.localFile) {
+              await ApiService.syncWebhooksFromServerFile();
+            }
+            const res = await ApiService.getWebhookConfigFull();
+            if (res?.ok && res.webhookConfig) {
+              mergeWebhookConfigFromRemote(webhookConfig, res.webhookConfig);
+              config = Store.getWebhookConfig();
+            }
+          } catch {
+            /* mantém config local/mascarada */
+          }
+        }
         const byRegion = (config && config.urlsByRegion && typeof config.urlsByRegion === 'object') ? config.urlsByRegion : {};
-        document.getElementById('f-webhookUrl-goval').value      = String(byRegion.GOVAL || '').trim();
-        document.getElementById('f-webhookUrl-vale').value       = String(byRegion.VALE_DO_ACO || '').trim();
-        document.getElementById('f-webhookUrl-caratinga').value  = String(byRegion.CARATINGA || '').trim();
-        document.getElementById('f-webhookUrl-backup').value     = String(byRegion.BACKUP || '').trim();
+        const regionInputVal = (v) => (isRealWebhookUrl(v) ? String(v).trim() : '');
+        document.getElementById('f-webhookUrl-goval').value      = regionInputVal(byRegion.GOVAL);
+        document.getElementById('f-webhookUrl-vale').value       = regionInputVal(byRegion.VALE_DO_ACO);
+        document.getElementById('f-webhookUrl-caratinga').value  = regionInputVal(byRegion.CARATINGA);
+        document.getElementById('f-webhookUrl-backup').value     = regionInputVal(byRegion.BACKUP);
         document.getElementById('ev-andamento').checked  = config.events.andamento;
         document.getElementById('ev-concluida').checked  = config.events.concluida;
         document.getElementById('ev-finalizada').checked = config.events.finalizada;
@@ -10185,6 +10339,10 @@ const Controllers = {
       document.getElementById('testWebhookBtn-backup')?.addEventListener('click', async () => test('f-webhookUrl-backup'));
 
       document.getElementById('saveWebhookBtn').addEventListener('click', async () => {
+        if (Store.isRemoteApiEnabled() && !plannerUserIsPrivileged()) {
+          ToastService.show('Somente gestores podem alterar webhooks no servidor.', 'warning');
+          return;
+        }
         const goval = document.getElementById('f-webhookUrl-goval')?.value?.trim() || '';
         const vale  = document.getElementById('f-webhookUrl-vale')?.value?.trim() || '';
         const cara  = document.getElementById('f-webhookUrl-caratinga')?.value?.trim() || '';
@@ -10221,6 +10379,8 @@ const Controllers = {
           ToastService.show('Google Chat conectado (salvo só neste navegador).', 'success');
         } else if (res && res.ok) {
           ToastService.show('Webhook salvo no servidor. Válido para todos que acessam o site.', 'success');
+        } else if (res && res.error === 'forbidden') {
+          ToastService.show('Sem permissão para salvar webhooks no servidor.', 'warning');
         } else {
           ToastService.show(
             'Salvo no navegador. No servidor falhou: verifique api/credentials.php, permissões da pasta api e o PHP no cPanel.',
@@ -10246,6 +10406,169 @@ const Controllers = {
 
       this._syncBanner();
       this._syncSystemPill();
+    },
+  },
+
+  /* ── Easter egg: sequência numérica (Configurações) ───── */
+  configSecret: {
+    _seq: '91166734',
+    _buf: '',
+    init() {
+      if (this._inited) return;
+      this._inited = true;
+
+      const onKeyDown = (e) => {
+        if (Store.currentPage !== 'config') return;
+        if (!plannerUserIsPrivileged()) return;
+        const k = String(e.key || '');
+        if (!/^\d$/.test(k)) return;
+
+        this._buf = (this._buf + k).slice(-32);
+        if (!this._buf.endsWith(this._seq)) return;
+
+        const btn = document.getElementById('configSecretBtn');
+        if (btn) btn.hidden = false;
+      };
+
+      document.addEventListener('keydown', onKeyDown, true);
+
+      document.getElementById('configSecretBtn')?.addEventListener('click', async () => {
+        try {
+          const res = await ApiService.sendUserPing({
+            to: 'joaoibipar',
+            title: 'Código secreto',
+            message: 'Você recebeu uma notificação do botão "aperte".',
+          });
+          if (res && res.ok) {
+            ToastService?.show?.('Notificação enviada para joaoibipar.', 'success');
+          } else {
+            ToastService?.show?.('Não consegui enviar a notificação no servidor.', 'warning');
+          }
+        } catch {
+          ToastService?.show?.('Falha ao enviar notificação.', 'danger');
+        }
+      });
+    },
+    syncUi() {
+      const btn = document.getElementById('configSecretBtn');
+      if (!btn) return;
+      btn.hidden = true;
+      this._buf = '';
+    },
+  },
+
+  /* ── Som de notificação (burro) ───────────────────────── */
+  burroNotif: {
+    _audioCtx: null,
+    _unlocked: false,
+    _audioEl: null,
+    _lastPlayedIdKey: 'planner.burroNotif.lastPlayedId.v1',
+    init() {
+      if (this._inited) return;
+      this._inited = true;
+      const unlock = async () => {
+        if (this._unlocked) return;
+        try {
+          if (!this._audioEl) {
+            const v = (window.APP_CONFIG && window.APP_CONFIG.appBuild) ? String(window.APP_CONFIG.appBuild) : '';
+            const qs = v ? `?v=${encodeURIComponent(v)}` : '';
+            this._audioEl = new Audio(`./assets/sounds/burro.mp3${qs}`);
+            this._audioEl.preload = 'auto';
+            this._audioEl.volume = 1.0;
+          }
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          if (!Ctx) return;
+          this._audioCtx = this._audioCtx || new Ctx();
+          if (this._audioCtx.state === 'suspended') await this._audioCtx.resume();
+          this._unlocked = true;
+        } catch {
+          /* ignore */
+        }
+      };
+      document.addEventListener('pointerdown', unlock, { once: true, capture: true });
+      document.addEventListener('keydown', unlock, { once: true, capture: true });
+    },
+    _getLastPlayedId() {
+      try { return Number(localStorage.getItem(this._lastPlayedIdKey) || 0) || 0; } catch { return 0; }
+    },
+    _setLastPlayedId(id) {
+      try { localStorage.setItem(this._lastPlayedIdKey, String(Number(id) || 0)); } catch {}
+    },
+    play(notifId) {
+      const id = Number(notifId) || 0;
+      if (id <= 0) return;
+      if (id <= this._getLastPlayedId()) return;
+      this._setLastPlayedId(id);
+
+      try {
+        if (this._audioEl) {
+          this._audioEl.pause();
+          this._audioEl.currentTime = 0;
+          const p = this._audioEl.play();
+          if (p && typeof p.catch === 'function') p.catch(() => {});
+          return;
+        }
+
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        const ctx = this._audioCtx || new Ctx();
+        this._audioCtx = ctx;
+        if (ctx.state === 'suspended') return;
+
+        const t0 = ctx.currentTime + 0.01;
+        const osc = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const comp = ctx.createDynamicsCompressor();
+        const filter = ctx.createBiquadFilter();
+
+        osc.type = 'sawtooth';
+        osc2.type = 'square';
+        filter.type = 'bandpass';
+        filter.frequency.setValueAtTime(700, t0);
+        filter.Q.setValueAtTime(6, t0);
+
+        gain.gain.setValueAtTime(0.0001, t0);
+        gain.gain.exponentialRampToValueAtTime(3.0, t0 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.10);
+
+        comp.threshold.setValueAtTime(-18, t0);
+        comp.knee.setValueAtTime(12, t0);
+        comp.ratio.setValueAtTime(14, t0);
+        comp.attack.setValueAtTime(0.003, t0);
+        comp.release.setValueAtTime(0.12, t0);
+
+        osc.frequency.setValueAtTime(220, t0);
+        osc.frequency.exponentialRampToValueAtTime(520, t0 + 0.20);
+        osc.frequency.exponentialRampToValueAtTime(180, t0 + 0.55);
+        osc.frequency.exponentialRampToValueAtTime(420, t0 + 0.80);
+        osc.frequency.exponentialRampToValueAtTime(200, t0 + 1.05);
+
+        osc2.frequency.setValueAtTime(110, t0);
+        osc2.frequency.exponentialRampToValueAtTime(260, t0 + 0.20);
+        osc2.frequency.exponentialRampToValueAtTime(90, t0 + 0.55);
+        osc2.frequency.exponentialRampToValueAtTime(210, t0 + 0.80);
+        osc2.frequency.exponentialRampToValueAtTime(100, t0 + 1.05);
+
+        osc.connect(filter);
+        osc2.connect(filter);
+        filter.connect(gain);
+        gain.connect(comp);
+        comp.connect(ctx.destination);
+
+        osc.start(t0);
+        osc2.start(t0);
+        osc.stop(t0 + 1.12);
+        osc2.stop(t0 + 1.12);
+      } catch {
+        /* ignore */
+      }
+    },
+  },
+
+  notes: {
+    init() {
+      // Bloco de "Notas rápidas" do dashboard foi removido.
     },
   },
 
@@ -10327,13 +10650,23 @@ async function initApp() {
   Controllers.categoryTabs.init();
   Controllers.opFolders.init();
   Controllers.webhook.init();
-  Controllers.configSecret.init();
-  Controllers.burroNotif.init();
-  Controllers.notes.init();
+  Controllers.configSecret?.init?.();
+  Controllers.burroNotif?.init?.();
+  Controllers.notes?.init?.();
   ChatMentionNotifs.init();
   Controllers.globalModal.init();
 
   void bootstrapWithTimeout(10000).then(ok => {
+    if (Controllers.auth._pendingBootstrapUnlock) {
+      if (ok) {
+        Controllers.auth._unlock();
+        UI.scheduleTaskIdAutofillCleanup?.();
+      } else if (Controllers.auth._isAuthenticated()) {
+        ToastService.show('Não foi possível carregar os dados. Faça login novamente.', 'warning');
+        Controllers.auth.logout();
+      }
+      Controllers.auth._pendingBootstrapUnlock = false;
+    }
     if (!ok) return;
     UI.renderAgenda();
     const p = Store.currentPage;
@@ -10490,8 +10823,17 @@ async function initApp() {
     else if (Number(ch.serverTime) > 0) lastSince = Number(ch.serverTime);
   };
 
-  // Produção (multiusuário): polling inteligente a cada 15s (mínimo possível sem sobrecarregar HostGator).
-  setInterval(() => { void quickSyncTick(); }, 15000);
+  // Produção: polling mais lento com aba em segundo plano (economiza HostGator).
+  let pollMs = document.hidden ? 45000 : 15000;
+  let pollTimer = setInterval(() => { void quickSyncTick(); }, pollMs);
+  const reschedulePoll = () => {
+    const next = document.hidden ? 45000 : 15000;
+    if (next === pollMs) return;
+    pollMs = next;
+    clearInterval(pollTimer);
+    pollTimer = setInterval(() => { void quickSyncTick(); }, pollMs);
+  };
+  document.addEventListener('visibilitychange', reschedulePoll);
   // Escalas: atualização mais rápida para "quase tempo real" enquanto a tela estiver aberta.
   setInterval(() => {
     if (Store.currentPage === 'escalas') void quickSyncTick();

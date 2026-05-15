@@ -19,7 +19,12 @@ try {
     }
 
     $pdo = db();
-    $stmt = $pdo->prepare('SELECT mime_type, image_data FROM op_task_image WHERE id = :id LIMIT 1');
+    $stmt = $pdo->prepare(
+        'SELECT i.mime_type, i.image_data
+           FROM op_task_image i
+          WHERE i.id = :id
+          LIMIT 1'
+    );
     $stmt->execute([':id' => $id]);
     $row = $stmt->fetch();
     if (!$row || !isset($row['image_data'])) {
