@@ -73,16 +73,29 @@ try {
         $stmtT->execute([':since' => $since]);
         $changedTasks = $stmtT->fetchAll() ?: [];
 
-        $opSql = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
+        $opSqlBase = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
           coordenadas, localizacao_texto AS localizacaoTexto, descricao, categoria, prazo, prioridade, status,
           is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
-          nome_cliente AS nomeCliente, protocolo, data_entrada AS dataEntrada,
-          data_instalacao AS dataInstalacao,
+          nome_cliente AS nomeCliente, protocolo, data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
           assinada_por AS assinadaPor, assinada_em AS assinadaEm, updated_at
           FROM op_tasks WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC';
-        $stmtO = $pdo->prepare($opSql);
-        $stmtO->execute([':since' => $since]);
-        $changedOpTasks = $stmtO->fetchAll() ?: [];
+        $opSqlExt = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
+          coordenadas, localizacao_texto AS localizacaoTexto, descricao, categoria, prazo, prioridade, status,
+          is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
+          nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico, sub_processo AS subProcesso,
+          data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
+          assinada_por AS assinadaPor, assinada_em AS assinadaEm, updated_at
+          FROM op_tasks WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC';
+        try {
+            $stmtO = $pdo->prepare($opSqlExt);
+            $stmtO->execute([':since' => $since]);
+            $changedOpTasks = $stmtO->fetchAll() ?: [];
+        } catch (Throwable $opChErr) {
+            error_log('[changes.php] op_tasks ext query failed: ' . $opChErr->getMessage());
+            $stmtO = $pdo->prepare($opSqlBase);
+            $stmtO->execute([':since' => $since]);
+            $changedOpTasks = $stmtO->fetchAll() ?: [];
+        }
         foreach ($changedOpTasks as &$item) {
             // A descrição já é sanitizada no momento do save (op_tasks.php). Evita custo alto no poll de changes.
             $item['descricao'] = (string) ($item['descricao'] ?? '');

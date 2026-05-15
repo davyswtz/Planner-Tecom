@@ -50,14 +50,26 @@ try {
     $tasks = $tableExists('tasks')
         ? $safeFetchAll('SELECT id, titulo, responsavel, prazo, status, prioridade FROM tasks ORDER BY id ASC', 'tasks')
         : [];
-    $opSql = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
+    $opSqlBase = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
       coordenadas, localizacao_texto AS localizacaoTexto, descricao, categoria, prazo, prioridade, status,
       is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
-      nome_cliente AS nomeCliente, protocolo, data_entrada AS dataEntrada,
-      data_instalacao AS dataInstalacao,
+      nome_cliente AS nomeCliente, protocolo, data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
       assinada_por AS assinadaPor, assinada_em AS assinadaEm
       FROM op_tasks ORDER BY id ASC';
-    $opTasks = $tableExists('op_tasks') ? $safeFetchAll($opSql, 'op_tasks') : [];
+    $opSqlExt = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
+      coordenadas, localizacao_texto AS localizacaoTexto, descricao, categoria, prazo, prioridade, status,
+      is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
+      nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico, sub_processo AS subProcesso,
+      data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
+      assinada_por AS assinadaPor, assinada_em AS assinadaEm
+      FROM op_tasks ORDER BY id ASC';
+    $opTasks = [];
+    if ($tableExists('op_tasks')) {
+        $opTasks = $safeFetchAll($opSqlExt, 'op_tasks');
+        if (!$opTasks) {
+            $opTasks = $safeFetchAll($opSqlBase, 'op_tasks_base');
+        }
+    }
     $cfgRows = $tableExists('app_config')
         ? $safeFetchAll('SELECT cfg_key, cfg_value FROM app_config', 'app_config')
         : [];

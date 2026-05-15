@@ -1,0 +1,2 @@
+-- Campos de OS vinculada em op_tasks + estrutura completa de os_tecnicos
+-- Execute no phpMyAdmin o conteúdo de: api/migrations/014_os_tecnicos_and_op_os_fields.sql

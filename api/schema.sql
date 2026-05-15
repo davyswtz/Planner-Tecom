@@ -46,6 +46,8 @@ CREATE TABLE IF NOT EXISTS op_tasks (
   chat_thread_key VARCHAR(140) NOT NULL DEFAULT '',
   nome_cliente VARCHAR(255) NOT NULL DEFAULT '',
   protocolo VARCHAR(180) NOT NULL DEFAULT '',
+  ordem_servico VARCHAR(180) NOT NULL DEFAULT '',
+  sub_processo VARCHAR(120) NOT NULL DEFAULT '',
   data_entrada VARCHAR(64) NOT NULL DEFAULT '',
   data_instalacao VARCHAR(64) NOT NULL DEFAULT '',
   assinada_por VARCHAR(120) NOT NULL DEFAULT '',
@@ -61,6 +63,35 @@ CREATE TABLE IF NOT EXISTS op_tasks (
   KEY idx_op_tasks_status_prazo (status, prazo),
   KEY idx_op_tasks_taskCode (taskCode),
   KEY idx_op_tasks_parent_status (parent_task_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ─── OS por técnico (dashboard Ordens de Serviço) ──────────────────────────
+CREATE TABLE IF NOT EXISTS os_tecnicos (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  task_id BIGINT NOT NULL,
+  parent_task_id BIGINT NULL,
+  tecnico_nome VARCHAR(120) NOT NULL,
+  ordem_servico VARCHAR(180) NOT NULL DEFAULT '',
+  titulo VARCHAR(500) NOT NULL DEFAULT '',
+  task_code VARCHAR(32) NOT NULL DEFAULT '',
+  categoria VARCHAR(48) NOT NULL DEFAULT '',
+  regiao VARCHAR(64) NOT NULL DEFAULT '',
+  status VARCHAR(48) NOT NULL DEFAULT '',
+  protocolo VARCHAR(180) NOT NULL DEFAULT '',
+  prioridade VARCHAR(24) NOT NULL DEFAULT '',
+  data_criacao DATE NULL,
+  data_conclusao VARCHAR(64) NOT NULL DEFAULT '',
+  criada_em VARCHAR(64) NOT NULL DEFAULT '',
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_os_tec_task_tecnico (task_id, tecnico_nome),
+  KEY idx_os_tec_tecnico (tecnico_nome),
+  KEY idx_os_tec_parent (parent_task_id),
+  KEY idx_os_tec_categoria (categoria),
+  KEY idx_os_tec_regiao (regiao),
+  KEY idx_os_tec_status (status),
+  KEY idx_os_tec_data_criacao (data_criacao),
+  KEY idx_os_tec_updated (updated_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ─── Imagens embutidas na descrição (op_tasks) ─────────────────────────────

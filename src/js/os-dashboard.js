@@ -30,6 +30,15 @@
     busca: '',
   };
 
+  const CACHE = {
+    loaded: false,
+    loading: false,
+    rebuildTried: false,
+    tasks: null,
+    source: 'local',
+    renderGen: 0,
+  };
+
   const esc = (s) => (typeof Utils !== 'undefined' && Utils.escapeHtml ? Utils.escapeHtml(s) : String(s ?? ''));
   const fmtDate = (iso) => (iso && Utils.formatDate ? Utils.formatDate(iso) : (iso || '—'));
   const today = () => (Utils.todayIso ? Utils.todayIso() : new Date().toISOString().slice(0, 10));
@@ -46,8 +55,86 @@
     return '';
   }
 
-  function osTasks() {
+  function osTasksFromStore() {
     return (Store.getOpTasks?.() || []).filter((t) => t && Number(t.parentTaskId));
+  }
+
+  function groupDbRowsToTasks(rows) {
+    const map = new Map();
+    rows.forEach((r) => {
+      const id = Number(r.taskId || r.task_id);
+      if (!id) return;
+      const tech = String(r.tecnicoNome || r.tecnico_nome || '').trim() || '—';
+      const concl = String(r.dataConclusao || r.data_conclusao || '').trim();
+      const criadaEm = String(r.criadaEm || r.criada_em || '').trim()
+        || (r.dataCriacao || r.data_criacao ? `${r.dataCriacao || r.data_criacao}T12:00:00.000Z` : '');
+      if (!map.has(id)) {
+        map.set(id, {
+          id,
+          parentTaskId: r.parentTaskId != null ? Number(r.parentTaskId) : (r.parent_task_id != null ? Number(r.parent_task_id) : null),
+          ordemServico: String(r.ordemServico || r.ordem_servico || '').trim(),
+          titulo: String(r.titulo || '').trim(),
+          categoria: String(r.categoria || '').trim(),
+          regiao: String(r.regiao || '').trim(),
+          status: String(r.status || '').trim(),
+          protocolo: String(r.protocolo || '').trim(),
+          taskCode: String(r.taskCode || r.task_code || '').trim(),
+          responsavel: tech,
+          criadaEm,
+          historico: concl ? [{ status: 'Concluída', timestamp: `${concl}T12:00:00.000Z` }] : [],
+        });
+      } else {
+        const t = map.get(id);
+        if (tech !== '—' && !parseResponsaveis?.(t.responsavel)?.includes(tech)) {
+          t.responsavel = t.responsavel && t.responsavel !== '—' ? `${t.responsavel} · ${tech}` : tech;
+        }
+      }
+    });
+    return [...map.values()];
+  }
+
+  async function loadOsTasks() {
+    if (CACHE.loaded && CACHE.tasks) return CACHE.tasks;
+
+    const api = (typeof ApiService !== 'undefined' && ApiService.enabled?.()) ? ApiService
+      : (typeof Store !== 'undefined' && Store.ApiService?.enabled?.()) ? Store.ApiService : null;
+
+    if (api) {
+      if (CACHE.loading) {
+        await new Promise((r) => setTimeout(r, 80));
+        if (CACHE.loaded && CACHE.tasks) return CACHE.tasks;
+      }
+      CACHE.loading = true;
+      try {
+        let resp = await api.getOsTecnicos();
+        if (resp?.ok && Array.isArray(resp.rows) && !resp.rows.length && !CACHE.rebuildTried) {
+          CACHE.rebuildTried = true;
+          await api.rebuildOsTecnicos();
+          resp = await api.getOsTecnicos();
+        }
+        if (resp?.ok && Array.isArray(resp.rows) && resp.rows.length) {
+          CACHE.tasks = groupDbRowsToTasks(resp.rows);
+          CACHE.source = 'db';
+          CACHE.loaded = true;
+          return CACHE.tasks;
+        }
+      } catch {
+        /* fallback local */
+      } finally {
+        CACHE.loading = false;
+      }
+    }
+
+    CACHE.tasks = osTasksFromStore();
+    CACHE.source = 'local';
+    CACHE.loaded = true;
+    return CACHE.tasks;
+  }
+
+  function invalidate() {
+    CACHE.loaded = false;
+    CACHE.tasks = null;
+    CACHE.rebuildTried = false;
   }
 
   function techOptions(tasks) {
@@ -236,11 +323,13 @@
     STATE.busca = document.getElementById('osdFiltroBusca')?.value || '';
   }
 
-  function render() {
+  async function render() {
     const root = document.getElementById('osdRoot');
     if (!root) return;
+    const gen = ++CACHE.renderGen;
     readFiltersFromDom();
-    const tasks = osTasks();
+    const tasks = await loadOsTasks();
+    if (gen !== CACHE.renderGen) return;
     syncFiltersUi(tasks);
     const allRows = expandRows(tasks);
     const rows = filterRows(allRows);
@@ -347,7 +436,8 @@
     const upd = document.getElementById('osdUpdatedAt');
     if (upd) {
       const now = new Date();
-      upd.textContent = `Atualizado ${now.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })} · ${tasks.length} OS no sistema`;
+      const src = CACHE.source === 'db' ? 'banco' : 'memória local';
+      upd.textContent = `Atualizado ${now.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })} · ${tasks.length} OS · fonte: ${src}`;
     }
   }
 
@@ -401,9 +491,9 @@
       if (sel) sel.value = STATE.tecnico === name ? '' : name;
       render();
     });
-    document.getElementById('osdBtnExport')?.addEventListener('click', () => {
+    document.getElementById('osdBtnExport')?.addEventListener('click', async () => {
       readFiltersFromDom();
-      const tasks = osTasks();
+      const tasks = await loadOsTasks();
       const rows = filterRows(expandRows(tasks));
       const seen = new Set();
       const lines = ['Técnico;OS;Categoria;Região;Status;Criada;Concluída;Código'];
@@ -434,5 +524,5 @@
     if (ate && !ate.value) ate.value = today();
   }
 
-  global.OsDashboard = { init, render };
+  global.OsDashboard = { init, render, invalidate };
 })(window);

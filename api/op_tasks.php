@@ -2,6 +2,7 @@
 declare(strict_types=1);
 require __DIR__ . '/db.php';
 require __DIR__ . '/op_desc_images.inc.php';
+require __DIR__ . '/os_tecnicos.inc.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     jsonResponse(['ok' => true]);
@@ -52,6 +53,9 @@ try {
             // A migration 008 é opcional/gradual; exclusão não deve falhar se o log ainda não existir.
             error_log('[op_tasks.php] delete log skipped: ' . $e->getMessage());
         }
+        foreach ($rowsToDelete as $row) {
+            osTecDeleteForTask($pdo, (int) ($row['id'] ?? 0));
+        }
         jsonResponse(['ok' => true]);
     }
 
@@ -81,44 +85,36 @@ try {
     // DATE no MySQL: string vazia vira 0000-00-00 em modos permissivos — usar NULL.
     $prazoIn = trim((string) ($data['prazo'] ?? ''));
     $prazoBind = ($prazoIn === '' || $prazoIn === '0000-00-00') ? null : $prazoIn;
-    $sql = 'INSERT INTO op_tasks (
-              id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
-              coordenadas, localizacao_texto, descricao, categoria, prazo, prioridade, status,
-              is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key,
-              nome_cliente, protocolo, data_entrada, data_instalacao, assinada_por, assinada_em
-            )
-            VALUES (
-              :id, :taskCode, :titulo, :setor, :regiao, :responsavel, :clientesAfetados,
-              :coordenadas, :localizacao_texto, :descricao, :categoria, :prazo, :prioridade, :status,
-              :is_parent_task, :parent_task_id, :criadaEm, :historico, :chat_thread_key,
-              :nome_cliente, :protocolo, :data_entrada, :data_instalacao, :assinada_por, :assinada_em
-            )
-            ON DUPLICATE KEY UPDATE
-              taskCode = VALUES(taskCode),
-              titulo = VALUES(titulo),
-              setor = VALUES(setor),
-              regiao = VALUES(regiao),
-              responsavel = VALUES(responsavel),
-              clientesAfetados = VALUES(clientesAfetados),
-              coordenadas = VALUES(coordenadas),
-              localizacao_texto = VALUES(localizacao_texto),
-              descricao = VALUES(descricao),
-              categoria = VALUES(categoria),
-              prazo = VALUES(prazo),
-              prioridade = VALUES(prioridade),
-              status = VALUES(status),
-              is_parent_task = VALUES(is_parent_task),
-              parent_task_id = VALUES(parent_task_id),
-              criadaEm = VALUES(criadaEm),
-              historico = VALUES(historico),
-              chat_thread_key = VALUES(chat_thread_key),
-              nome_cliente = VALUES(nome_cliente),
-              protocolo = VALUES(protocolo),
-              data_entrada = VALUES(data_entrada),
-              data_instalacao = VALUES(data_instalacao),
-              assinada_por = VALUES(assinada_por),
-              assinada_em = VALUES(assinada_em),
-              updated_at = NOW()';
+
+    $hasOrdemServico = dbColumnExists($pdo, 'op_tasks', 'ordem_servico');
+    $hasSubProcesso = dbColumnExists($pdo, 'op_tasks', 'sub_processo');
+    $insertCols = [
+        'id', 'taskCode', 'titulo', 'setor', 'regiao', 'responsavel', 'clientesAfetados',
+        'coordenadas', 'localizacao_texto', 'descricao', 'categoria', 'prazo', 'prioridade', 'status',
+        'is_parent_task', 'parent_task_id', 'criadaEm', 'historico', 'chat_thread_key',
+        'nome_cliente', 'protocolo',
+    ];
+    $insertParams = [
+        ':id', ':taskCode', ':titulo', ':setor', ':regiao', ':responsavel', ':clientesAfetados',
+        ':coordenadas', ':localizacao_texto', ':descricao', ':categoria', ':prazo', ':prioridade', ':status',
+        ':is_parent_task', ':parent_task_id', ':criadaEm', ':historico', ':chat_thread_key',
+        ':nome_cliente', ':protocolo',
+    ];
+    if ($hasOrdemServico) {
+        $insertCols[] = 'ordem_servico';
+        $insertParams[] = ':ordem_servico';
+    }
+    if ($hasSubProcesso) {
+        $insertCols[] = 'sub_processo';
+        $insertParams[] = ':sub_processo';
+    }
+    $insertCols = array_merge($insertCols, ['data_entrada', 'data_instalacao', 'assinada_por', 'assinada_em']);
+    $insertParams = array_merge($insertParams, [':data_entrada', ':data_instalacao', ':assinada_por', ':assinada_em']);
+    $updates = array_map(static fn (string $c) => "{$c} = VALUES({$c})", $insertCols);
+    $updates[] = 'updated_at = NOW()';
+    $sql = 'INSERT INTO op_tasks (' . implode(', ', $insertCols) . ')
+            VALUES (' . implode(', ', $insertParams) . ')
+            ON DUPLICATE KEY UPDATE ' . implode(', ', $updates);
     $stmt = $pdo->prepare($sql);
     $historicoIn = $data['historico'] ?? [];
     if (!is_array($historicoIn)) {
@@ -131,7 +127,7 @@ try {
 
     $pdo->beginTransaction();
     try {
-        $stmt->execute([
+        $bind = [
             ':id' => $id,
             ':taskCode' => (string) ($data['taskCode'] ?? ''),
             ':titulo' => (string) ($data['titulo'] ?? ''),
@@ -157,7 +153,14 @@ try {
             ':data_instalacao' => (string) ($data['dataInstalacao'] ?? ''),
             ':assinada_por' => (string) ($data['assinadaPor'] ?? ''),
             ':assinada_em' => (string) ($data['assinadaEm'] ?? ''),
-        ]);
+        ];
+        if ($hasOrdemServico) {
+            $bind[':ordem_servico'] = (string) ($data['ordemServico'] ?? '');
+        }
+        if ($hasSubProcesso) {
+            $bind[':sub_processo'] = (string) ($data['subProcesso'] ?? '');
+        }
+        $stmt->execute($bind);
 
         $finalDesc = sanitizeOpTaskDescricaoHtml(processOpTaskDescricaoImages($descricaoRaw, $id, $pdo));
         pruneOpTaskImagesNotInHtml($pdo, $id, $finalDesc);
@@ -216,6 +219,12 @@ try {
                 ]);
             }
         }
+        try {
+            osTecSyncFromOpTask($pdo, $id, $data);
+        } catch (Throwable $osTecErr) {
+            error_log('[op_tasks.php] os_tecnicos sync skipped: ' . $osTecErr->getMessage());
+        }
+
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {

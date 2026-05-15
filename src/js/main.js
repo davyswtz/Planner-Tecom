@@ -41,6 +41,35 @@ function resolveDefaultWebhookUrlsByRegionFromConfig() {
   return out;
 }
 
+/** Mescla webhook remoto sem apagar URLs locais/servidor já preenchidas. */
+function mergeWebhookConfigFromRemote(target, incoming) {
+  if (!target || !incoming || typeof incoming !== 'object') return;
+  if (typeof incoming.url === 'string' && incoming.url.trim()) {
+    target.url = incoming.url.trim();
+  }
+  if (incoming.events && typeof incoming.events === 'object') {
+    target.events = { ...(target.events || {}), ...incoming.events };
+  }
+  const incRegions = incoming.urlsByRegion && typeof incoming.urlsByRegion === 'object'
+    ? incoming.urlsByRegion
+    : {};
+  if (!target.urlsByRegion || typeof target.urlsByRegion !== 'object') {
+    target.urlsByRegion = {};
+  }
+  for (const [k, v] of Object.entries(incRegions)) {
+    const s = typeof v === 'string' ? v.trim() : '';
+    if (s) target.urlsByRegion[k] = s;
+  }
+}
+
+function webhookConfigHasAnyUrl(cfg) {
+  if (!cfg || typeof cfg !== 'object') return false;
+  if (String(cfg.url || '').trim()) return true;
+  const by = cfg.urlsByRegion;
+  if (!by || typeof by !== 'object') return false;
+  return Object.values(by).some((v) => typeof v === 'string' && v.trim());
+}
+
 function normalizeTechName(name) {
   return String(name || '')
     .trim()
@@ -237,6 +266,7 @@ const DEPLOY_CACHE_KEEP_KEYS = new Set([
   'planner.session.displayName.v1',
   'planner.session.userKey.v1',
   'planner.theme.v1',
+  'planner.webhook.v1',
 ]);
 
 function applyDeployCacheReset() {
@@ -517,6 +547,23 @@ const Store = (() => {
     },
     async deleteEscala(id) {
       return this.requestAny(['/escalas.php', '/escalas'], { method: 'DELETE', body: JSON.stringify({ id }) });
+    },
+    async getOsTecnicos() {
+      const b = Date.now();
+      return this.requestAny([`/os_tecnicos.php?_=${b}`, '/os_tecnicos.php']);
+    },
+    async rebuildOsTecnicos() {
+      return this.requestAny(['/os_tecnicos.php', '/os_tecnicos'], {
+        method: 'POST',
+        body: JSON.stringify({ action: 'rebuild' }),
+      });
+    },
+    async sendWebhook(url, payload) {
+      return this.requestAny(['/webhook_send.php', '/webhook-send'], {
+        method: 'POST',
+        body: JSON.stringify({ url, payload }),
+        timeoutMs: 20000,
+      });
     },
     // (Chat removido)
     buildUrl(path) {
@@ -952,7 +999,11 @@ const Store = (() => {
     getWebhookConfig: ()     => ({ ...webhookConfig }),
     /** @returns {Promise<{ok?: boolean}|null>} */
     setWebhookConfig: async (data) => {
-      Object.assign(webhookConfig, data);
+      if (data && typeof data === 'object') {
+        mergeWebhookConfigFromRemote(webhookConfig, data);
+        if (data.url !== undefined) webhookConfig.url = String(data.url || '').trim();
+      }
+      applyDefaultWebhookUrlIfNeeded();
       persistSnapshot();
       return syncConfig();
     },
@@ -1023,7 +1074,7 @@ const Store = (() => {
         persistSnapshot();
       }
       if (payload.webhookConfig && typeof payload.webhookConfig === 'object') {
-        Object.assign(webhookConfig, payload.webhookConfig);
+        mergeWebhookConfigFromRemote(webhookConfig, payload.webhookConfig);
       }
       if (payload.plannerConfig && typeof payload.plannerConfig === 'object') {
         Object.assign(plannerConfig, payload.plannerConfig);
@@ -1034,7 +1085,8 @@ const Store = (() => {
       }
       applyDefaultWebhookUrlIfNeeded();
       persistSnapshot();
-      if (ApiService.enabled()) {
+      // Não sincroniza webhook vazio de volta ao servidor após deploy (evita apagar URLs salvas).
+      if (ApiService.enabled() && webhookConfigHasAnyUrl(webhookConfig)) {
         void syncConfig();
       }
       return true;
@@ -2359,25 +2411,39 @@ const WebhookService = {
    * @param {'Rompimentos'|'Troca de Poste'|null} category
    */
   async send(event, task, category = null) {
+    if (!task) {
+      ToastService.show('Tarefa não encontrada para envio ao Google Chat.', 'warning');
+      return;
+    }
     const config = Store.getWebhookConfig();
     const webhookUrl = this._resolveWebhookUrlForTask(task, config);
     if (config?.events && config.events[event] === false) {
       // FIX: feedback mínimo quando evento está desativado
-      if (event === 'andamento') ToastService.show('Webhook de "Em andamento" está desativado nas integrações.', 'warning');
+      ToastService.show(`Webhook "${event}" está desativado nas integrações.`, 'warning');
       return;
     }
     if (!webhookUrl) {
       // FIX: não falhar silenciosamente quando falta webhook da região
       const reg = String(task?.regiao || '').trim();
       const regLabel = reg || 'sem região';
-      if (event === 'andamento') ToastService.show(`Sem webhook configurado para ${regLabel}.`, 'warning');
+      ToastService.show(`Sem webhook configurado para ${regLabel}. Abra Integrações e configure a URL.`, 'warning');
       return;
     }
 
-    const message = this._buildMessage(event, task, category);
+    let message;
+    try {
+      message = this._buildMessage(event, task, category);
+    } catch (err) {
+      console.error('[WebhookService] buildMessage failed', err);
+      ToastService.show('Erro ao montar mensagem do Google Chat.', 'danger');
+      return;
+    }
+    if (!message || typeof message !== 'object') {
+      ToastService.show('Mensagem do Google Chat inválida.', 'danger');
+      return;
+    }
 
-    const threadRootTask = getLinkedOsRootTask(task);
-    if (!threadRootTask) return;
+    const threadRootTask = getLinkedOsRootTask(task) || task;
 
     // Google Chat threading (tópicos): cria no "andamento" e responde no mesmo thread nas demais.
     const threadKey = this._resolveThreadKey(event, threadRootTask);
@@ -2760,31 +2826,53 @@ const WebhookService = {
     };
   },
 
-  /** Envia o payload HTTP */
+  /** Envia o payload HTTP (proxy PHP quando disponível; fallback fetch direto). */
   async _post(url, payload) {
+    const api = (typeof ApiService !== 'undefined' && ApiService.enabled?.())
+      ? ApiService
+      : (typeof Store !== 'undefined' && Store.ApiService?.enabled?.())
+        ? Store.ApiService
+        : null;
+
+    if (api) {
+      const res = await api.sendWebhook(url, payload);
+      if (res && res.ok === true) {
+        ToastService.show('Mensagem enviada ao Google Chat', 'success');
+        return true;
+      }
+      const err = res && typeof res.error === 'string' ? res.error : 'envio_falhou';
+      if (err === 'unauthorized') {
+        ToastService.show('Sessão expirada. Faça login novamente.', 'danger');
+      } else if (err === 'host_nao_permitido' || err === 'url_invalida') {
+        ToastService.show('URL do webhook inválida. Use o link do Google Chat (chat.googleapis.com).', 'danger');
+      } else {
+        ToastService.show('Google Chat recusou o envio. Verifique a URL do webhook.', 'danger');
+      }
+      return false;
+    }
+
     try {
-      await fetch(url, {
-        method:  'POST',
+      const response = await fetch(url, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(payload),
-        mode:    'no-cors',
+        body: JSON.stringify(payload),
       });
-      // Com `no-cors` não é possível validar status; feedback otimista, porém sem garantir entrega.
+      if (!response.ok) {
+        ToastService.show(`Google Chat retornou erro (${response.status}).`, 'danger');
+        return false;
+      }
       ToastService.show('Mensagem enviada ao Google Chat', 'success');
+      return true;
     } catch {
-      ToastService.show('Erro ao enviar para o Google Chat', 'danger');
+      ToastService.show('Erro de rede ao enviar para o Google Chat', 'danger');
+      return false;
     }
   },
 
   /** Envia mensagem de teste */
   async sendTest(url) {
     const payload = { text: '🔔 *Burrinho Projetos* — Conexão testada com sucesso!\nSeu webhook está funcionando corretamente.' };
-    try {
-      await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), mode: 'no-cors' });
-      ToastService.show('Mensagem de teste enviada!', 'success');
-    } catch {
-      ToastService.show('Não foi possível enviar o teste', 'danger');
-    }
+    await this._post(url, payload);
   },
 };
 
@@ -2977,6 +3065,7 @@ const OpTaskService = {
     'correcao-atenuacao': 'Correção de atenuação',
     'troca-etiqueta': 'Troca de etiqueta',
     'qualidade-potencia': 'Qualidade de potência',
+    'manutencao-corretiva': 'Manutenção corretiva',
   },
 
   /** Kanban Certificação Cemig — ordem do fluxo */
@@ -4045,6 +4134,7 @@ const UI = {
     if (page === 'atendimento') this.renderAtendimentoPage();
     if (page === 'ordem-servicos') {
       window.OsDashboard?.init?.();
+      window.OsDashboard?.invalidate?.();
       window.OsDashboard?.render?.();
     }
     if (page === 'config') {
@@ -4964,7 +5054,10 @@ const UI = {
 
   /** Atualiza Kanban (Tarefas) ou painel de Atendimento conforme a página ativa. */
   refreshOperationalUi() {
-    if (Store.currentPage === 'ordem-servicos') window.OsDashboard?.render?.();
+    if (Store.currentPage === 'ordem-servicos') {
+      window.OsDashboard?.invalidate?.();
+      window.OsDashboard?.render?.();
+    }
     else if (Store.currentPage === 'atendimento') this.renderAtendimentoPage();
     else if (Store.currentPage === 'correcao-atenuacao') {
       // Re-render completo com o modal aberto recria o DOM e derruba foco/seleção nos inputs.
@@ -10096,8 +10189,12 @@ const Controllers = {
         const vale  = document.getElementById('f-webhookUrl-vale')?.value?.trim() || '';
         const cara  = document.getElementById('f-webhookUrl-caratinga')?.value?.trim() || '';
         const backup = document.getElementById('f-webhookUrl-backup')?.value?.trim() || '';
-        // FIX: não exigir todas as regiões — salvar com 1+ URLs preenchidas.
+        const prevByRegion = (Store.getWebhookConfig()?.urlsByRegion && typeof Store.getWebhookConfig().urlsByRegion === 'object')
+          ? { ...Store.getWebhookConfig().urlsByRegion }
+          : {};
+        // Mescla com URLs já salvas (não apaga regiões não editadas neste modal).
         const urlsByRegion = {
+          ...prevByRegion,
           ...(goval ? { GOVAL: goval } : {}),
           ...(vale ? { VALE_DO_ACO: vale } : {}),
           ...(cara ? { CARATINGA: cara } : {}),
@@ -10243,7 +10340,10 @@ async function initApp() {
     if (p === 'dashboard') UI.renderDashboard();
     else if (p === 'tarefas' || p === 'atendimento') UI.refreshOperationalUi();
     else if (p === 'escalas') UI.renderEscalasPage();
-    else if (p === 'ordem-servicos') window.OsDashboard?.render?.();
+    else if (p === 'ordem-servicos') {
+      window.OsDashboard?.invalidate?.();
+      window.OsDashboard?.render?.();
+    }
   });
 
   UI.renderAgenda();
@@ -10355,7 +10455,10 @@ async function initApp() {
       if (changedCount) {
         UI.renderDashboard();
         if (Store.currentPage === 'escalas') UI.renderEscalasPage();
-        else if (Store.currentPage === 'ordem-servicos') window.OsDashboard?.render?.();
+        else if (Store.currentPage === 'ordem-servicos') {
+          window.OsDashboard?.invalidate?.();
+          window.OsDashboard?.render?.();
+        }
         else UI.refreshOperationalUi();
             }
       if (changedNotifs.length) {
