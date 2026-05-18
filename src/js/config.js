@@ -5,7 +5,7 @@
   window.APP_CONFIG = {
     ...prev,
     // Sempre sobrescreve para quebrar cache de JS/CSS no deploy local
-    appBuild: '2026-05-15-descricao-persist-fix-1',
+    appBuild: '2026-05-15-kanban-status-sync-fix-1',
     // Webhooks por região (Google Chat). Deixe vazio no repositório.
     defaultWebhookUrlsByRegion: Object.prototype.hasOwnProperty.call(prev, 'defaultWebhookUrlsByRegion')
       ? prev.defaultWebhookUrlsByRegion

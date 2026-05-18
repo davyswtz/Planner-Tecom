@@ -359,6 +359,27 @@ const Store = (() => {
     'descricao',
   ];
 
+  /** Evita que poll/bootstrap reverta status recém-alterado no kanban. */
+  const pendingOpTaskLocalSync = new Map();
+  const OP_TASK_STATUS_GUARD_MS = 20000;
+
+  const opTaskHistoricoLastMs = (task) => {
+    const hist = Array.isArray(task?.historico) ? task.historico : [];
+    if (!hist.length) return 0;
+    const ts = new Date(hist[hist.length - 1]?.timestamp || 0).getTime();
+    return Number.isFinite(ts) ? ts : 0;
+  };
+
+  const markOpTaskLocalSyncPending = (id, status) => {
+    const n = Number(id);
+    if (!Number.isFinite(n)) return;
+    pendingOpTaskLocalSync.set(n, { status: String(status || '').trim(), at: Date.now() });
+  };
+
+  const clearOpTaskLocalSyncPending = (id) => {
+    pendingOpTaskLocalSync.delete(Number(id));
+  };
+
   const isBlankOpTaskMergeValue = (field, v) => {
     if (v === undefined || v === null) return true;
     if (field === 'historico' && Array.isArray(v) && !v.length) return true;
@@ -372,6 +393,19 @@ const Store = (() => {
 
   const mergeLocalOpTaskIntoIncomingPatch = (localTask, incomingPatch) => {
     if (!localTask || !incomingPatch) return;
+    const id = Number(localTask.id);
+    const pending = Number.isFinite(id) ? pendingOpTaskLocalSync.get(id) : null;
+    if (pending && (Date.now() - pending.at) < OP_TASK_STATUS_GUARD_MS) {
+      if (pending.status) incomingPatch.status = pending.status;
+      if (Array.isArray(localTask.historico) && localTask.historico.length) {
+        incomingPatch.historico = localTask.historico;
+      }
+    } else if (opTaskHistoricoLastMs(localTask) > opTaskHistoricoLastMs(incomingPatch)) {
+      incomingPatch.status = localTask.status;
+      incomingPatch.historico = localTask.historico;
+    } else if (pending && (Date.now() - pending.at) >= OP_TASK_STATUS_GUARD_MS) {
+      clearOpTaskLocalSyncPending(id);
+    }
     for (const f of OP_TASK_REMOTE_EMPTY_MERGE_FIELDS) {
       if (!isBlankOpTaskMergeValue(f, incomingPatch[f])) continue;
       if (isBlankOpTaskMergeValue(f, localTask[f])) continue;
@@ -686,19 +720,22 @@ const Store = (() => {
   const syncUpOpTask = (task) => {
     if (!ApiService.enabled()) return;
     void ApiService.saveOpTask(task).then((resp) => {
+      const tid = Number(task?.id);
       if (!resp || !resp.ok) {
         if (resp && typeof resp.error === 'string') {
           console.warn('[op_tasks] Falha ao sincronizar tarefa', task?.id, resp.error);
         }
+        if (Number.isFinite(tid) && pendingOpTaskLocalSync.has(tid)) {
+          ToastService?.show?.('Não foi possível salvar no servidor. O status pode voltar ao recarregar.', 'warning');
+        }
         return;
       }
-      if (typeof resp.descricao === 'string' && task && task.id) {
-        const t = opTasks.find(x => Number(x.id) === Number(task.id));
-        if (t) {
-          t.descricao = resp.descricao;
-          t.descricaoLen = resp.descricao.length;
-          persistSnapshot();
-        }
+      if (Number.isFinite(tid)) clearOpTaskLocalSyncPending(tid);
+      const t = opTasks.find(x => Number(x.id) === tid);
+      if (t && typeof resp.descricao === 'string') {
+        t.descricao = resp.descricao;
+        t.descricaoLen = resp.descricao.length;
+        persistSnapshot();
       }
     });
   };
@@ -860,8 +897,10 @@ const Store = (() => {
     updateOpTaskStatus: (id, newStatus, autor = 'Usuário') => {
       const task = opTasks.find(t => t.id === id);
       if (!task) return null;
-      task.status = newStatus;
-      task.historico.push({ status: newStatus, timestamp: new Date().toISOString(), autor });
+      const statusNorm = String(newStatus || '').trim();
+      markOpTaskLocalSyncPending(id, statusNorm);
+      task.status = statusNorm;
+      task.historico.push({ status: statusNorm, timestamp: new Date().toISOString(), autor });
       persistSnapshot();
       syncUpOpTask(task);
       return task;
@@ -869,6 +908,9 @@ const Store = (() => {
     updateOpTask: (id, data) => {
       const i = opTasks.findIndex(t => t.id === id);
       if (i !== -1) {
+        if (data && typeof data.status === 'string') {
+          markOpTaskLocalSyncPending(id, data.status);
+        }
         Object.assign(opTasks[i], data);
         if (typeof data.descricao === 'string') {
           opTasks[i].descricaoLen = data.descricao.length;
@@ -1129,7 +1171,16 @@ const Store = (() => {
         window.APP_CONFIG.techsByRegion = payload.techDirectory;
       }
       if (Array.isArray(payload.opTasks)) {
+        const localOpMap = new Map();
+        for (const t of opTasks) {
+          const oid = Number(t?.id);
+          if (Number.isFinite(oid)) localOpMap.set(oid, t);
+        }
         mergeLocalFieldsById(opTasks, payload.opTasks, [...OP_TASK_REMOTE_EMPTY_MERGE_FIELDS, 'historico']);
+        for (const inc of payload.opTasks) {
+          const local = localOpMap.get(Number(inc?.id));
+          if (local) mergeLocalOpTaskIntoIncomingPatch(local, inc);
+        }
         opTasks.splice(0, opTasks.length, ...payload.opTasks);
         nextOpTaskId = opTasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
       }
@@ -4219,6 +4270,7 @@ const UI = {
     document.getElementById('breadcrumbLeaf').textContent = meta.crumb;
 
     Store.currentPage = page;
+    try { window.dispatchEvent(new Event('planner:poll-reschedule')); } catch { /* ignore */ }
     // Notifica controllers que dependem da página atual (ex.: chat inicia polling ao abrir).
     try {
       // (Chat interno removido)
@@ -4952,6 +5004,7 @@ const UI = {
       if (s === 'Concluída') return 'Concluída';
       if (s === 'Em andamento') return 'Em andamento';
       if (s.toLowerCase().includes('retorno')) return 'Em andamento';
+      if (s === 'Backlog' || s === 'Criada' || s === 'A iniciar' || s === 'Pendente') return 'Criada';
       return 'Criada';
     };
 
@@ -10919,17 +10972,23 @@ async function initApp() {
     else if (Number(ch.serverTime) > 0) lastSince = Number(ch.serverTime);
   };
 
-  // Produção: polling mais lento com aba em segundo plano (economiza HostGator).
-  let pollMs = document.hidden ? 45000 : 15000;
+  const operationalPollMs = () => {
+    if (document.hidden) return 45000;
+    const p = Store.currentPage;
+    if (p === 'tarefas' || p === 'atendimento') return 5000;
+    return 15000;
+  };
+  let pollMs = operationalPollMs();
   let pollTimer = setInterval(() => { void quickSyncTick(); }, pollMs);
   const reschedulePoll = () => {
-    const next = document.hidden ? 45000 : 15000;
+    const next = operationalPollMs();
     if (next === pollMs) return;
     pollMs = next;
     clearInterval(pollTimer);
     pollTimer = setInterval(() => { void quickSyncTick(); }, pollMs);
   };
   document.addEventListener('visibilitychange', reschedulePoll);
+  window.addEventListener('planner:poll-reschedule', reschedulePoll);
   // Escalas: atualização mais rápida para "quase tempo real" enquanto a tela estiver aberta.
   setInterval(() => {
     if (Store.currentPage === 'escalas') void quickSyncTick();
