@@ -85,7 +85,8 @@ try {
               is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
               nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico,
               data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
-              assinada_por AS assinadaPor, assinada_em AS assinadaEm, updated_at
+              assinada_por AS assinadaPor, assinada_em AS assinadaEm,
+              CHAR_LENGTH(COALESCE(descricao, \'\')) AS descricaoLen, updated_at
               FROM op_tasks WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC';
         } else {
             $opListSql = $opSqlBase;

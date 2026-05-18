@@ -94,6 +94,19 @@ CREATE TABLE IF NOT EXISTS os_tecnicos (
   KEY idx_os_tec_updated (updated_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ─── Histórico de descrições (auditoria / recuperação) ─────────────────────
+CREATE TABLE IF NOT EXISTS op_task_descricao_log (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  op_task_id BIGINT NOT NULL,
+  descricao MEDIUMTEXT NOT NULL,
+  saved_by VARCHAR(120) NOT NULL DEFAULT '',
+  saved_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_op_desc_log_task (op_task_id),
+  KEY idx_op_desc_log_saved_at (saved_at),
+  CONSTRAINT fk_op_desc_log_task FOREIGN KEY (op_task_id) REFERENCES op_tasks (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ─── Imagens embutidas na descrição (op_tasks) ─────────────────────────────
 CREATE TABLE IF NOT EXISTS op_task_image (
   id INT NOT NULL AUTO_INCREMENT,

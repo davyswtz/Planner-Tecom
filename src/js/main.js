@@ -356,6 +356,7 @@ const Store = (() => {
     'assinadaPor',
     'assinadaEm',
     'prazo',
+    'descricao',
   ];
 
   const isBlankOpTaskMergeValue = (field, v) => {
@@ -695,6 +696,7 @@ const Store = (() => {
         const t = opTasks.find(x => Number(x.id) === Number(task.id));
         if (t) {
           t.descricao = resp.descricao;
+          t.descricaoLen = resp.descricao.length;
           persistSnapshot();
         }
       }
@@ -844,6 +846,7 @@ const Store = (() => {
       const t = {
         id: nextOpTaskId++,
         ...data,
+        descricaoLen: typeof data.descricao === 'string' ? data.descricao.length : 0,
         criadaEm: nowIso,
         assinadaPor: signedBy,
         assinadaEm: nowIso,
@@ -867,6 +870,9 @@ const Store = (() => {
       const i = opTasks.findIndex(t => t.id === id);
       if (i !== -1) {
         Object.assign(opTasks[i], data);
+        if (typeof data.descricao === 'string') {
+          opTasks[i].descricaoLen = data.descricao.length;
+        }
         persistSnapshot();
         syncUpOpTask(opTasks[i]);
       }
@@ -8757,6 +8763,7 @@ const Controllers = {
       const atdChildWrap = document.getElementById('opAtdChildOnlyWrap');
       const regiaoSlot = document.getElementById('opAtdRegiaoSlot');
       const prioridadeSlot = document.getElementById('opAtdPrioridadeSlot');
+      const childPrioridadeSlot = document.getElementById('opAtdChildPrioridadeSlot');
       const childTecnicoSlot = document.getElementById('opAtdChildTecnicoSlot');
       const childRegiaoSlot = document.getElementById('opAtdChildRegiaoSlot');
       const priorityRow = document.getElementById('opPriorityRegionRow');
@@ -8826,7 +8833,7 @@ const Controllers = {
       }
 
       if (atdChildOnly || osLinkedChildOnly) {
-        // Para filha: mostra técnico + região no bloco próprio e esconde prazo/prioridade
+        // Subtarefa/OS filha: técnico, região e prioridade no bloco da filha
         const tecGroup = document.getElementById('opResponsavelGroup');
         if (childTecnicoSlot && tecGroup && tecGroup.parentElement !== childTecnicoSlot) {
           childTecnicoSlot.appendChild(tecGroup);
@@ -8834,8 +8841,13 @@ const Controllers = {
         if (childRegiaoSlot && regiaoGroup && regiaoGroup.parentElement !== childRegiaoSlot) {
           childRegiaoSlot.appendChild(regiaoGroup);
         }
+        const prioridadeGroup = document.getElementById('opPrioridadeGroup');
+        if (childPrioridadeSlot && prioridadeGroup && prioridadeGroup.parentElement !== childPrioridadeSlot) {
+          childPrioridadeSlot.appendChild(prioridadeGroup);
+        }
         if (tecGroup) tecGroup.style.display = '';
         if (regiaoGroup) regiaoGroup.style.display = '';
+        if (prioridadeGroup) prioridadeGroup.style.display = '';
         if (prazoGroup) prazoGroup.style.display = 'none';
         if (priorityRow) priorityRow.style.display = 'none';
       } else {
@@ -9261,6 +9273,8 @@ const Controllers = {
       if (preset.parentTaskId) {
         const parent = Store.findOpTask(Number(preset.parentTaskId));
         if (parent?.regiao) document.getElementById('op-regiao').value = parent.regiao;
+        const prioEl = document.getElementById('op-prioridade');
+        if (prioEl && parent?.prioridade) prioEl.value = parent.prioridade;
       }
       this._newTaskPreset = { ...preset };
       this._syncParentHidden(null);
@@ -9272,6 +9286,71 @@ const Controllers = {
         modalCopyBtnClear.hidden = true;
         delete modalCopyBtnClear.dataset.copyProtocol;
       }
+    },
+
+    /** Coleta descrição do formulário sem apagar texto já salvo quando o campo veio vazio. */
+    _collectOpDescricaoForSave({
+      existing,
+      descAtdRaw,
+      finalDescricaoMeta,
+      isRompimento,
+      isRompParentOnly,
+      isOtimParentOnly,
+      isOtimChildOnly,
+      isCemigParentOnly,
+      isCemigChildOnly,
+      isAtdChildOnly,
+      isOsLinkedChildOnly,
+      isParentTask,
+    }) {
+      const existingStr = String(existing?.descricao ?? '');
+      const pick = (v) => String(v ?? '').trim();
+      const otimEl = document.getElementById('op-otim-descricao');
+      const cemigEl = document.getElementById('op-cemig-descricao');
+      const atdEl = document.getElementById('op-atd-descricao');
+
+      if (isOtimParentOnly || isOtimChildOnly) {
+        const html = otimEl ? pick(otimEl.innerHTML) : '';
+        return html || existingStr;
+      }
+      if (isCemigParentOnly || isCemigChildOnly) {
+        const html = cemigEl ? pick(cemigEl.innerHTML) : '';
+        return html || existingStr;
+      }
+      if (isAtdChildOnly || isOsLinkedChildOnly) {
+        const raw = pick(descAtdRaw) || (atdEl ? pick(atdEl.value) : '');
+        return raw || existingStr;
+      }
+      if (isRompParentOnly) {
+        return pick(finalDescricaoMeta) || existingStr;
+      }
+      const atdRaw = pick(descAtdRaw) || (atdEl ? pick(atdEl.value) : '');
+      if (atdRaw) return atdRaw;
+      if (existingStr) return existingStr;
+      if (isRompimento && isParentTask) return pick(finalDescricaoMeta);
+      return pick(finalDescricaoMeta) || '';
+    },
+
+    /** Prioridade ao salvar: rompimento pai padrão Alta; subtarefas/OS filhas respeitam o select. */
+    _resolveOpPrioridadeForSave({
+      prioPick,
+      existing,
+      selectedParent,
+      isRompParentOnly,
+      isRompChildOnly,
+      isOtimParentOnly,
+      isCemigParentOnly,
+      isAtdChildOnly,
+      isOsLinkedChildOnly,
+    }) {
+      const pick = String(prioPick || '').trim();
+      const inherited = String(existing?.prioridade || selectedParent?.prioridade || '').trim();
+      if (isOtimParentOnly || isCemigParentOnly) return pick || 'Média';
+      if (isRompParentOnly) return pick || 'Alta';
+      if (isRompChildOnly || isAtdChildOnly || isOsLinkedChildOnly) {
+        return pick || inherited || 'Média';
+      }
+      return pick || inherited || 'Média';
     },
 
     _validate() {
@@ -9418,7 +9497,17 @@ const Controllers = {
               ? (prazo || existing?.prazo || '')
               : (isParentTask ? prazo : (selectedParent?.prazo || existing?.prazo || '')));
       const prioPick = prioridadeEl ? prioridadeEl.value : '';
-      const finalPrioridade = isRompimento ? 'Alta' : (isOtimParentOnly || isCemigParentOnly ? 'Média' : prioPick);
+      const finalPrioridade = this._resolveOpPrioridadeForSave({
+        prioPick,
+        existing,
+        selectedParent,
+        isRompParentOnly,
+        isRompChildOnly,
+        isOtimParentOnly,
+        isCemigParentOnly,
+        isAtdChildOnly,
+        isOsLinkedChildOnly,
+      });
       const finalDescricaoMeta = isRompimento
         ? `Tipo: ${tipoRompimento} | Coordenadas: ${coordsRaw} | Local: ${autoAddress}`
         : (isTrocaPoste ? '' : '');
@@ -9480,17 +9569,20 @@ const Controllers = {
         const regionKey = WebhookService._normalizeRegionKey(regiaoField || regiao || selectedParent?.regiao || '');
         syncedResponsavelChatId = buildResponsavelChatIdsForNames(namesForIds, regionKey, finalResponsavelChatId);
       }
-      const otimDescEl = document.getElementById('op-otim-descricao');
-      const otimDescHtml = isOtimParentOnly && otimDescEl ? String(otimDescEl.innerHTML || '').trim() : '';
-      const cemigDescEl = document.getElementById('op-cemig-descricao');
-      const cemigDescHtml = isCemigParentOnly && cemigDescEl ? String(cemigDescEl.innerHTML || '').trim() : '';
-      const finalDescricaoAtd = isOtimParentOnly
-        ? otimDescHtml
-        : isCemigParentOnly
-          ? cemigDescHtml
-          : ((this._isAtendimentoClienteCategory(category) || isOsLinkedChildOnly) && !isParentTask)
-            ? descAtdRaw
-            : finalDescricaoMeta;
+      const finalDescricaoAtd = this._collectOpDescricaoForSave({
+        existing,
+        descAtdRaw,
+        finalDescricaoMeta,
+        isRompimento,
+        isRompParentOnly,
+        isOtimParentOnly,
+        isOtimChildOnly,
+        isCemigParentOnly,
+        isCemigChildOnly,
+        isAtdChildOnly,
+        isOsLinkedChildOnly,
+        isParentTask,
+      });
       const payload = {
         taskCode,
         titulo: finalTitulo,
@@ -9871,6 +9963,10 @@ const Controllers = {
 
       if (Store.editingOpTaskId) {
         savedTask = Store.updateOpTask(Store.editingOpTaskId, data);
+        if (savedTask && typeof data.descricao === 'string') {
+          savedTask.descricao = data.descricao;
+          savedTask.descricaoLen = data.descricao.length;
+        }
         ToastService.show('Tarefa atualizada com sucesso', 'success');
       } else {
         savedTask = Store.addOpTask(data);

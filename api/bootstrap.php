@@ -62,7 +62,8 @@ try {
               is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
               nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico,
               data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
-              assinada_por AS assinadaPor, assinada_em AS assinadaEm
+              assinada_por AS assinadaPor, assinada_em AS assinadaEm,
+              CHAR_LENGTH(COALESCE(descricao, \'\')) AS descricaoLen
               FROM op_tasks ORDER BY id ASC';
             $opTasks = $safeFetchAll($opSqlOrdemOnly, 'op_tasks_ordem');
         } else {

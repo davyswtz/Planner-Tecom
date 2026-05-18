@@ -168,6 +168,7 @@ try {
             $u = $pdo->prepare('UPDATE op_tasks SET descricao = :d WHERE id = :id');
             $u->execute([':d' => $finalDesc, ':id' => $id]);
         }
+        plannerLogOpTaskDescricao($pdo, $id, $finalDesc);
 
         // Notificação global (sininho): apenas quando for criação.
         if ($isNew) {

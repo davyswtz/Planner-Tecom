@@ -56,7 +56,7 @@ function plannerMaskWebhookConfigForClient(array $cfg): array
     ];
 }
 
-/** Colunas leves para bootstrap / changes (sem descricao). */
+/** Colunas leves para bootstrap / changes (sem descricao completa; inclui descricaoLen). */
 function plannerOpTaskListSelectSql(): string
 {
     return 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
@@ -64,7 +64,8 @@ function plannerOpTaskListSelectSql(): string
       is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
       nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico, sub_processo AS subProcesso,
       data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
-      assinada_por AS assinadaPor, assinada_em AS assinadaEm
+      assinada_por AS assinadaPor, assinada_em AS assinadaEm,
+      CHAR_LENGTH(COALESCE(descricao, \'\')) AS descricaoLen
       FROM op_tasks';
 }
 
@@ -74,7 +75,8 @@ function plannerOpTaskListSelectSqlFallback(): string
       coordenadas, localizacao_texto AS localizacaoTexto, categoria, prazo, prioridade, status,
       is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
       nome_cliente AS nomeCliente, protocolo, data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
-      assinada_por AS assinadaPor, assinada_em AS assinadaEm
+      assinada_por AS assinadaPor, assinada_em AS assinadaEm,
+      CHAR_LENGTH(COALESCE(descricao, \'\')) AS descricaoLen
       FROM op_tasks';
 }
 
@@ -96,11 +98,42 @@ function plannerFormatOpTaskRow(array $item, bool $includeDescricao = false): ar
     } else {
         unset($item['descricao']);
     }
+    if (array_key_exists('descricaoLen', $item)) {
+        $item['descricaoLen'] = (int) ($item['descricaoLen'] ?? 0);
+    }
     $item['historico'] = json_decode((string) ($item['historico'] ?? '[]'), true) ?: [];
     $item['isParentTask'] = ((int) ($item['is_parent_task'] ?? 0)) === 1;
     $item['parentTaskId'] = isset($item['parent_task_id']) ? (int) $item['parent_task_id'] : null;
     unset($item['is_parent_task'], $item['parent_task_id']);
     return $item;
+}
+
+/** Histórico de descrições salvas (auditoria / recuperação). */
+function plannerLogOpTaskDescricao(PDO $pdo, int $opTaskId, string $descricao): void
+{
+    if ($opTaskId <= 0) {
+        return;
+    }
+    try {
+        $chk = $pdo->query(
+            "SELECT 1 FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'op_task_descricao_log' LIMIT 1"
+        );
+        if (!$chk || !$chk->fetchColumn()) {
+            return;
+        }
+        $who = (string) ($_SESSION['planner_user'] ?? '');
+        $stmt = $pdo->prepare(
+            'INSERT INTO op_task_descricao_log (op_task_id, descricao, saved_by) VALUES (:id, :d, :u)'
+        );
+        $stmt->execute([
+            ':id' => $opTaskId,
+            ':d' => $descricao,
+            ':u' => $who,
+        ]);
+    } catch (Throwable $e) {
+        error_log('[plannerLogOpTaskDescricao] skipped: ' . $e->getMessage());
+    }
 }
 
 function plannerUsernameExists(PDO $pdo, string $username): bool
