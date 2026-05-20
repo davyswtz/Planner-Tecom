@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/db.php';
+require __DIR__ . '/planner_helpers.inc.php';
 require __DIR__ . '/op_desc_images.inc.php';
 require __DIR__ . '/os_tecnicos.inc.php';
 
@@ -11,6 +12,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 try {
     requireAuth();
     requireSameOriginForMutation();
+    $deletedBy = (string) ($_SESSION['planner_user'] ?? '');
+    // Libera lock da sessão após validação — o restante só usa DB.
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
 
     $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
     if ($method === 'DELETE') {
@@ -21,7 +27,7 @@ try {
         }
         $cascade = !empty($data['cascade']);
         $pdo = db();
-        $deletedBy = (string) ($_SESSION['planner_user'] ?? '');
+        $who = $deletedBy;
         if ($cascade) {
             $idsStmt = $pdo->prepare('SELECT id, parent_task_id FROM op_tasks WHERE id = :id OR parent_task_id = :id');
             $idsStmt->execute([':id' => $id]);
@@ -172,7 +178,7 @@ try {
 
         // Notificação global (sininho): apenas quando for criação.
         if ($isNew) {
-            $who = (string) ($_SESSION['planner_user'] ?? '');
+            $who = $deletedBy;
             $cat = (string) ($data['categoria'] ?? 'rompimentos');
             $titleN = 'Nova tarefa operacional adicionada';
             $msgN = sprintf('%s: %s', $cat, (string) ($data['titulo'] ?? ''));
@@ -203,7 +209,7 @@ try {
 
         // Evento de mudança de status (para o feed do usuário).
         if (!$isNew) {
-            $who = (string) ($_SESSION['planner_user'] ?? '');
+            $who = $deletedBy;
             $cat = (string) ($data['categoria'] ?? '');
             $nextStatus = (string) ($data['status'] ?? '');
             if ($nextStatus !== '' && $prevStatus !== '' && $nextStatus !== $prevStatus) {
@@ -234,7 +240,19 @@ try {
         throw $e;
     }
 
-    jsonResponse(['ok' => true, 'descricao' => $finalDesc]);
+    $updatedAt = time();
+    try {
+        $tsStmt = $pdo->prepare('SELECT UNIX_TIMESTAMP(updated_at) AS updatedAt FROM op_tasks WHERE id = :id LIMIT 1');
+        $tsStmt->execute([':id' => $id]);
+        $tsRow = $tsStmt->fetch(PDO::FETCH_ASSOC);
+        if ($tsRow && isset($tsRow['updatedAt'])) {
+            $updatedAt = (int) $tsRow['updatedAt'];
+        }
+    } catch (Throwable $tsErr) {
+        error_log('[op_tasks.php] updatedAt read skipped: ' . $tsErr->getMessage());
+    }
+
+    jsonResponse(['ok' => true, 'descricao' => $finalDesc, 'updatedAt' => $updatedAt]);
 } catch (Throwable $e) {
     // FIX: não expor mensagens internas do PDO/SQL ao cliente; logar com contexto.
     error_log('[op_tasks.php] failed: ' . $e->getMessage());

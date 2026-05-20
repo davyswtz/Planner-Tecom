@@ -13,6 +13,11 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
 
 try {
     requireAuth();
+    // Libera o lock de sessão imediatamente — changes.php não escreve mais nada na sessão.
+    // Isso evita bloquear o POST de op_tasks.php enquanto o poll está rodando.
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
 
     $pdo = db();
     $since = isset($_GET['since']) ? (int) $_GET['since'] : 0;
@@ -86,7 +91,8 @@ try {
               nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico,
               data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
               assinada_por AS assinadaPor, assinada_em AS assinadaEm,
-              CHAR_LENGTH(COALESCE(descricao, \'\')) AS descricaoLen, updated_at
+              CHAR_LENGTH(COALESCE(descricao, \'\')) AS descricaoLen,
+              UNIX_TIMESTAMP(updated_at) AS updatedAt
               FROM op_tasks WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC';
         } else {
             $opListSql = $opSqlBase;
@@ -96,7 +102,6 @@ try {
         $changedOpTasks = $stmtO->fetchAll() ?: [];
         foreach ($changedOpTasks as &$item) {
             $item = plannerFormatOpTaskRow($item, false);
-            unset($item['updated_at']);
         }
         unset($item);
 

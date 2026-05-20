@@ -12,8 +12,17 @@ try {
         jsonResponse(['ok' => false, 'error' => 'unauthorized'], 401);
     }
 
-    $cacheTtl = 5;
+    $cacheTtl = 1;
     $cacheUser = (string) ($_SESSION['planner_user'] ?? 'anon');
+
+    // Gera/confirma CSRF token (única escrita na sessão neste endpoint).
+    $csrfTokenValue = csrfToken();
+
+    // Libera lock de sessão — todas as operações abaixo são somente leitura do DB.
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+
     $cacheKey = 'planner_bootstrap_' . hash('sha256', $cacheUser . '|' . ($_SERVER['HTTP_HOST'] ?? '') . '|v2_light');
     $cacheFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $cacheKey . '.json';
     if (is_readable($cacheFile)) {
@@ -63,7 +72,8 @@ try {
               nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico,
               data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
               assinada_por AS assinadaPor, assinada_em AS assinadaEm,
-              CHAR_LENGTH(COALESCE(descricao, \'\')) AS descricaoLen
+              CHAR_LENGTH(COALESCE(descricao, \'\')) AS descricaoLen,
+              UNIX_TIMESTAMP(updated_at) AS updatedAt
               FROM op_tasks ORDER BY id ASC';
             $opTasks = $safeFetchAll($opSqlOrdemOnly, 'op_tasks_ordem');
         } else {
@@ -110,7 +120,7 @@ try {
 
     $payload = [
         'ok' => true,
-        'csrfToken' => csrfToken(),
+        'csrfToken' => $csrfTokenValue,
         'tasks' => $tasks,
         'opTasks' => $opTasks,
         'escalas' => $escalas,

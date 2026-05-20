@@ -23,6 +23,20 @@ function plannerRequirePrivilegedUser(): void
     }
 }
 
+/** Limpa cache de bootstrap.php após criar/alterar tarefas (evita F5 com lista desatualizada). */
+function plannerInvalidateBootstrapCache(?string $username = null): void
+{
+    $cacheUser = trim($username ?? (string) ($_SESSION['planner_user'] ?? 'anon'));
+    if ($cacheUser === '') {
+        $cacheUser = 'anon';
+    }
+    $cacheKey = 'planner_bootstrap_' . hash('sha256', $cacheUser . '|' . ($_SERVER['HTTP_HOST'] ?? '') . '|v2_light');
+    $cacheFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $cacheKey . '.json';
+    if (is_file($cacheFile)) {
+        @unlink($cacheFile);
+    }
+}
+
 function plannerMaskWebhookUrl(string $url): string
 {
     $u = trim($url);
@@ -65,7 +79,8 @@ function plannerOpTaskListSelectSql(): string
       nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico, sub_processo AS subProcesso,
       data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
       assinada_por AS assinadaPor, assinada_em AS assinadaEm,
-      CHAR_LENGTH(COALESCE(descricao, \'\')) AS descricaoLen
+      CHAR_LENGTH(COALESCE(descricao, \'\')) AS descricaoLen,
+      UNIX_TIMESTAMP(updated_at) AS updatedAt
       FROM op_tasks';
 }
 
@@ -76,7 +91,8 @@ function plannerOpTaskListSelectSqlFallback(): string
       is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
       nome_cliente AS nomeCliente, protocolo, data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
       assinada_por AS assinadaPor, assinada_em AS assinadaEm,
-      CHAR_LENGTH(COALESCE(descricao, \'\')) AS descricaoLen
+      CHAR_LENGTH(COALESCE(descricao, \'\')) AS descricaoLen,
+      UNIX_TIMESTAMP(updated_at) AS updatedAt
       FROM op_tasks';
 }
 
@@ -100,6 +116,13 @@ function plannerFormatOpTaskRow(array $item, bool $includeDescricao = false): ar
     }
     if (array_key_exists('descricaoLen', $item)) {
         $item['descricaoLen'] = (int) ($item['descricaoLen'] ?? 0);
+    }
+    if (array_key_exists('updatedAt', $item)) {
+        $item['updatedAt'] = (int) ($item['updatedAt'] ?? 0);
+    } elseif (array_key_exists('updated_at', $item)) {
+        $raw = $item['updated_at'];
+        $item['updatedAt'] = is_numeric($raw) ? (int) $raw : (int) strtotime((string) $raw);
+        unset($item['updated_at']);
     }
     $item['historico'] = json_decode((string) ($item['historico'] ?? '[]'), true) ?: [];
     $item['isParentTask'] = ((int) ($item['is_parent_task'] ?? 0)) === 1;

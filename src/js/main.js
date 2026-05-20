@@ -361,7 +361,31 @@ const Store = (() => {
 
   /** Evita que poll/bootstrap reverta status recém-alterado no kanban. */
   const pendingOpTaskLocalSync = new Map();
-  const OP_TASK_STATUS_GUARD_MS = 20000;
+  /** Tarefas ainda não confirmadas no MySQL (evita sumir no F5). */
+  const pendingOpTaskServerSave = new Set();
+  const OP_TASK_STATUS_GUARD_MS = 8000;
+
+  const opTaskUpdatedAtMs = (task) => {
+    const u = task?.updatedAt ?? task?.updated_at;
+    if (u == null || u === '') return 0;
+    if (typeof u === 'number') {
+      if (u > 1e12) return u;
+      if (u > 0) return u * 1000;
+      return 0;
+    }
+    const n = Number(u);
+    if (Number.isFinite(n) && n > 0) return n > 1e12 ? n : n * 1000;
+    const t = Date.parse(String(u));
+    return Number.isFinite(t) ? t : 0;
+  };
+
+  const incomingOpTaskIsNewerThanLocal = (localTask, incomingPatch) => {
+    const lu = opTaskUpdatedAtMs(localTask);
+    const iu = opTaskUpdatedAtMs(incomingPatch);
+    if (iu > lu) return true;
+    if (iu < lu) return false;
+    return opTaskHistoricoLastMs(incomingPatch) > opTaskHistoricoLastMs(localTask);
+  };
 
   const opTaskHistoricoLastMs = (task) => {
     const hist = Array.isArray(task?.historico) ? task.historico : [];
@@ -395,7 +419,12 @@ const Store = (() => {
     if (!localTask || !incomingPatch) return;
     const id = Number(localTask.id);
     const pending = Number.isFinite(id) ? pendingOpTaskLocalSync.get(id) : null;
-    if (pending && (Date.now() - pending.at) < OP_TASK_STATUS_GUARD_MS) {
+    const pendingActive = !!(pending && (Date.now() - pending.at) < OP_TASK_STATUS_GUARD_MS);
+    const incomingNewer = incomingOpTaskIsNewerThanLocal(localTask, incomingPatch);
+
+    if (incomingNewer) {
+      if (Number.isFinite(id)) clearOpTaskLocalSyncPending(id);
+    } else if (pendingActive) {
       if (pending.status) incomingPatch.status = pending.status;
       if (Array.isArray(localTask.historico) && localTask.historico.length) {
         incomingPatch.historico = localTask.historico;
@@ -403,7 +432,7 @@ const Store = (() => {
     } else if (opTaskHistoricoLastMs(localTask) > opTaskHistoricoLastMs(incomingPatch)) {
       incomingPatch.status = localTask.status;
       incomingPatch.historico = localTask.historico;
-    } else if (pending && (Date.now() - pending.at) >= OP_TASK_STATUS_GUARD_MS) {
+    } else if (pending) {
       clearOpTaskLocalSyncPending(id);
     }
     for (const f of OP_TASK_REMOTE_EMPTY_MERGE_FIELDS) {
@@ -717,27 +746,75 @@ const Store = (() => {
     return JSON.stringify(value);
   };
   const syncUpTask = (task) => { ApiService.saveTask(task); };
-  const syncUpOpTask = (task) => {
-    if (!ApiService.enabled()) return;
-    void ApiService.saveOpTask(task).then((resp) => {
-      const tid = Number(task?.id);
-      if (!resp || !resp.ok) {
-        if (resp && typeof resp.error === 'string') {
-          console.warn('[op_tasks] Falha ao sincronizar tarefa', task?.id, resp.error);
-        }
-        if (Number.isFinite(tid) && pendingOpTaskLocalSync.has(tid)) {
-          ToastService?.show?.('Não foi possível salvar no servidor. O status pode voltar ao recarregar.', 'warning');
-        }
-        return;
+
+  const mergeLocalOnlyOpTasksIntoIncoming = (localArr, incomingArr) => {
+    const out = Array.isArray(incomingArr) ? [...incomingArr] : [];
+    const serverIds = new Set(
+      out.map((t) => Number(t?.id)).filter((id) => Number.isFinite(id)),
+    );
+    for (const local of (Array.isArray(localArr) ? localArr : [])) {
+      const id = Number(local?.id);
+      if (!Number.isFinite(id) || serverIds.has(id)) continue;
+      out.push(local);
+      serverIds.add(id);
+      pendingOpTaskServerSave.add(id);
+    }
+    return out;
+  };
+
+  const flushPendingOpTaskServerSaves = () => {
+    if (!ApiService.enabled() || !pendingOpTaskServerSave.size) return;
+    for (const id of [...pendingOpTaskServerSave]) {
+      const t = opTasks.find((x) => Number(x?.id) === Number(id));
+      if (t) void syncUpOpTask(t);
+    }
+  };
+
+  const syncUpOpTask = async (task, _retry = false) => {
+    if (!ApiService.enabled()) return true;
+    const tid = Number(task?.id);
+    if (!Number.isFinite(tid)) return false;
+    pendingOpTaskServerSave.add(tid);
+
+    // Garante CSRF antes do POST
+    if (!ApiService._readCsrf()) {
+      const boot = await ApiService.getBootstrap();
+      if (!boot || boot.ok !== true) {
+        console.error('[op_tasks] Falha ao obter CSRF via bootstrap — tarefa id=' + tid + ' não salva');
+        return false;
       }
-      if (Number.isFinite(tid)) clearOpTaskLocalSyncPending(tid);
-      const t = opTasks.find(x => Number(x.id) === tid);
-      if (t && typeof resp.descricao === 'string') {
+    }
+
+    const resp = await ApiService.saveOpTask(task);
+    if (!resp || !resp.ok) {
+      const err = resp && typeof resp.error === 'string' ? resp.error : 'unknown';
+      const status = resp && resp.status ? resp.status : '?';
+      console.error('[op_tasks] ERRO ao salvar tarefa id=' + tid + ' err=' + err + ' http=' + status, resp);
+
+      // Se CSRF inválido/expirado, tenta uma vez renovar e reenviar
+      if (!_retry && (err === 'csrf_invalid' || err === 'csrf_required')) {
+        console.warn('[op_tasks] Renovando CSRF e tentando novamente...');
+        const boot = await ApiService.getBootstrap();
+        if (boot && boot.ok === true) {
+          return syncUpOpTask(task, true);
+        }
+      }
+
+      return false;
+    }
+
+    pendingOpTaskServerSave.delete(tid);
+    clearOpTaskLocalSyncPending(tid);
+    const t = opTasks.find((x) => Number(x.id) === tid);
+    if (t) {
+      if (Number(resp.updatedAt) > 0) t.updatedAt = Number(resp.updatedAt);
+      if (typeof resp.descricao === 'string') {
         t.descricao = resp.descricao;
         t.descricaoLen = resp.descricao.length;
-        persistSnapshot();
       }
-    });
+      persistSnapshot();
+    }
+    return true;
   };
   const syncUpEscala = (escala) => {
     if (!ApiService.enabled()) return;
@@ -877,7 +954,7 @@ const Store = (() => {
     // OpTasks
     getOpTasks:      ()           => [...opTasks],
     getOpTasksByCategory: (cat)   => opTasks.filter(t => t.categoria === cat),
-    addOpTask:       (data)       => {
+    addOpTask:       (data, opts)       => {
       const nowIso = new Date().toISOString();
       const signedBy = getSignedUserName();
       const t = {
@@ -885,14 +962,35 @@ const Store = (() => {
         ...data,
         descricaoLen: typeof data.descricao === 'string' ? data.descricao.length : 0,
         criadaEm: nowIso,
+        updatedAt: Math.floor(Date.now() / 1000),
         assinadaPor: signedBy,
         assinadaEm: nowIso,
         historico: [{ status: data.status || 'Criada', timestamp: nowIso, autor: signedBy }],
       };
       opTasks.push(t);
+      pendingOpTaskServerSave.add(t.id);
       persistSnapshot();
-      syncUpOpTask(t);
+      if (!opts?.deferSync) void syncUpOpTask(t);
       return t;
+    },
+    addOpTaskAndSync: async function (data) {
+      const t = this.addOpTask(data, { deferSync: true });
+      const ok = await syncUpOpTask(t);
+      if (!ok) {
+        // Rollback: remove da lista local para não criar duplicata se o usuário tentar novamente
+        const idx = opTasks.findIndex(x => Number(x?.id) === Number(t.id));
+        if (idx !== -1) opTasks.splice(idx, 1);
+        pendingOpTaskServerSave.delete(Number(t.id));
+        persistSnapshot();
+        return null;
+      }
+      return t;
+    },
+    updateOpTaskAndSync: async function (id, data) {
+      const t = this.updateOpTask(id, data, { deferSync: true });
+      if (!t) return null;
+      const ok = await syncUpOpTask(t);
+      return ok ? t : null;
     },
     updateOpTaskStatus: (id, newStatus, autor = 'Usuário') => {
       const task = opTasks.find(t => t.id === id);
@@ -900,12 +998,13 @@ const Store = (() => {
       const statusNorm = String(newStatus || '').trim();
       markOpTaskLocalSyncPending(id, statusNorm);
       task.status = statusNorm;
+      task.updatedAt = Math.floor(Date.now() / 1000);
       task.historico.push({ status: statusNorm, timestamp: new Date().toISOString(), autor });
       persistSnapshot();
-      syncUpOpTask(task);
+      void syncUpOpTask(task);
       return task;
     },
-    updateOpTask: (id, data) => {
+    updateOpTask: (id, data, opts) => {
       const i = opTasks.findIndex(t => t.id === id);
       if (i !== -1) {
         if (data && typeof data.status === 'string') {
@@ -915,8 +1014,9 @@ const Store = (() => {
         if (typeof data.descricao === 'string') {
           opTasks[i].descricaoLen = data.descricao.length;
         }
+        opTasks[i].updatedAt = Math.floor(Date.now() / 1000);
         persistSnapshot();
-        syncUpOpTask(opTasks[i]);
+        if (!opts?.deferSync) void syncUpOpTask(opTasks[i]);
       }
       return opTasks[i];
     },
@@ -1111,6 +1211,7 @@ const Store = (() => {
     },
     loginRemote: async (username, password) => ApiService.login(username, password),
     isRemoteApiEnabled: () => ApiService.enabled(),
+    flushPendingServerSaves: () => flushPendingOpTaskServerSaves(),
     /** Base `.../api` usada nas requisições (útil para mensagens de erro no chat). */
     getApiBaseUrl: () => (ApiService.enabled() ? String(ApiService.baseUrl).replace(/\/$/, '') : ''),
     // Config
@@ -1176,13 +1277,15 @@ const Store = (() => {
           const oid = Number(t?.id);
           if (Number.isFinite(oid)) localOpMap.set(oid, t);
         }
-        mergeLocalFieldsById(opTasks, payload.opTasks, [...OP_TASK_REMOTE_EMPTY_MERGE_FIELDS, 'historico']);
-        for (const inc of payload.opTasks) {
+        const mergedIncoming = mergeLocalOnlyOpTasksIntoIncoming(opTasks, payload.opTasks);
+        mergeLocalFieldsById(opTasks, mergedIncoming, [...OP_TASK_REMOTE_EMPTY_MERGE_FIELDS, 'historico']);
+        for (const inc of mergedIncoming) {
           const local = localOpMap.get(Number(inc?.id));
           if (local) mergeLocalOpTaskIntoIncomingPatch(local, inc);
         }
-        opTasks.splice(0, opTasks.length, ...payload.opTasks);
+        opTasks.splice(0, opTasks.length, ...mergedIncoming);
         nextOpTaskId = opTasks.reduce((max, t) => Math.max(max, Number(t.id) || 0), 0) + 1;
+        flushPendingOpTaskServerSaves();
       }
       if (Array.isArray(payload.escalas)) {
         escalas.splice(0, escalas.length, ...payload.escalas);
@@ -10009,20 +10112,31 @@ const Controllers = {
       UI.renderDashboard();
         },
 
-    save() {
+    async save() {
       const data = this._validate();
       if (!data) return;
+      const saveBtn = document.getElementById('saveOpTaskBtn');
+      if (saveBtn) saveBtn.disabled = true;
       let savedTask = null;
 
+      try {
       if (Store.editingOpTaskId) {
-        savedTask = Store.updateOpTask(Store.editingOpTaskId, data);
-        if (savedTask && typeof data.descricao === 'string') {
+        savedTask = await Store.updateOpTaskAndSync(Store.editingOpTaskId, data);
+        if (!savedTask) {
+          ToastService.show('Não foi possível salvar a tarefa no servidor. Tente novamente.', 'danger');
+          return;
+        }
+        if (typeof data.descricao === 'string') {
           savedTask.descricao = data.descricao;
           savedTask.descricaoLen = data.descricao.length;
         }
         ToastService.show('Tarefa atualizada com sucesso', 'success');
       } else {
-        savedTask = Store.addOpTask(data);
+        savedTask = await Store.addOpTaskAndSync(data);
+        if (!savedTask) {
+          ToastService.show('Falha ao salvar no servidor. Verifique F12 → Console para o erro exato e tente novamente.', 'danger');
+          return;
+        }
         ToastService.show('Tarefa criada com sucesso', 'success');
         // Se já nasce em um status notificável, dispara webhook imediatamente.
         const event = OpTaskService._statusToEvent[data.status];
@@ -10057,6 +10171,9 @@ const Controllers = {
       }
 
       UI.refreshOperationalUi();
+      } finally {
+        if (saveBtn) saveBtn.disabled = false;
+      }
         },
 
     init() {
@@ -10810,6 +10927,7 @@ async function initApp() {
       if (ok) {
         Controllers.auth._unlock();
         UI.scheduleTaskIdAutofillCleanup?.();
+        Store.flushPendingServerSaves();
       } else if (Controllers.auth._isAuthenticated()) {
         ToastService.show('Não foi possível carregar os dados. Faça login novamente.', 'warning');
         Controllers.auth.logout();
@@ -10817,6 +10935,7 @@ async function initApp() {
       Controllers.auth._pendingBootstrapUnlock = false;
     }
     if (!ok) return;
+    Store.flushPendingServerSaves();
     UI.renderAgenda();
     const p = Store.currentPage;
     if (p === 'dashboard') UI.renderDashboard();
@@ -10899,10 +11018,14 @@ async function initApp() {
     return true;
   };
   let syncInFlight = false;
+  let syncQueued = false;
   const quickSyncTick = async () => {
     if (!ApiService.enabled()) return;
     if (!Controllers?.auth?._isAuthenticated?.()) return;
-    if (syncInFlight) return;
+    if (syncInFlight) {
+      syncQueued = true;
+      return;
+    }
     syncInFlight = true;
     try {
       const ch = await ApiService.getChanges(lastSince);
@@ -10912,12 +11035,13 @@ async function initApp() {
         return;
       }
 
-      // Usa o maior updated_at das tabelas (mais confiável que serverTime para não perder updates no mesmo segundo).
-      if (Number(ch.nextSince) > 0) lastSince = Number(ch.nextSince);
-      else if (Number(ch.serverTime) > 0) lastSince = Number(ch.serverTime);
+      // Usa o maior updated_at das tabelas; -1s evita perder updates no mesmo segundo (MySQL).
+      if (Number(ch.nextSince) > 0) lastSince = Math.max(0, Number(ch.nextSince) - 1);
+      else if (Number(ch.serverTime) > 0) lastSince = Math.max(0, Number(ch.serverTime) - 1);
 
       const changedTasks = Array.isArray(ch.changedTasks) ? ch.changedTasks : [];
       const changedOp = Array.isArray(ch.changedOpTasks) ? ch.changedOpTasks : [];
+      const opDeltaCount = changedOp.length;
       const changedEscalas = Array.isArray(ch.changedEscalas) ? ch.changedEscalas : [];
       const changedNotifs = Array.isArray(ch.changedNotifications) ? ch.changedNotifications : [];
       const changedActivity = Array.isArray(ch.changedActivity) ? ch.changedActivity : [];
@@ -10934,7 +11058,7 @@ async function initApp() {
         Store.applyRemoteOpTasks(changedOp) +
         Store.applyRemoteEscalas(changedEscalas) +
         Store.applyRemoteDeletedEntities(changedDeleted);
-      if (changedCount) {
+      if (changedCount || opDeltaCount) {
         UI.renderDashboard();
         if (Store.currentPage === 'escalas') UI.renderEscalasPage();
         else if (Store.currentPage === 'ordem-servicos') {
@@ -10942,7 +11066,7 @@ async function initApp() {
           window.OsDashboard?.render?.();
         }
         else UI.refreshOperationalUi();
-            }
+      }
       if (changedNotifs.length) {
         ChatMentionNotifs.processIncomingTaskNotifications(changedNotifs);
       }
@@ -10958,6 +11082,10 @@ async function initApp() {
       }
     } finally {
       syncInFlight = false;
+      if (syncQueued) {
+        syncQueued = false;
+        void quickSyncTick();
+      }
     }
   };
 
@@ -10968,15 +11096,29 @@ async function initApp() {
     if (!ch || ch.ok !== true) return;
     const sig = changesSig(ch);
     if (sig) lastRemoteSig = sig;
-    if (Number(ch.nextSince) > 0) lastSince = Number(ch.nextSince);
-    else if (Number(ch.serverTime) > 0) lastSince = Number(ch.serverTime);
+    if (Number(ch.nextSince) > 0) lastSince = Math.max(0, Number(ch.nextSince) - 1);
+    else if (Number(ch.serverTime) > 0) lastSince = Math.max(0, Number(ch.serverTime) - 1);
   };
+
+  const OPERATIONAL_LIVE_PAGES = new Set([
+    'tarefas',
+    'atendimento',
+    'rompimentos',
+    'troca-poste',
+    'otimizacao-rede',
+    'certificacao-cemig',
+    'qualidade-potencia',
+    'manutencao-corretiva',
+    'correcao-atenuacao',
+    'troca-etiqueta',
+    'ordem-servicos',
+  ]);
 
   const operationalPollMs = () => {
     if (document.hidden) return 45000;
     const p = Store.currentPage;
-    if (p === 'tarefas' || p === 'atendimento') return 5000;
-    return 15000;
+    if (OPERATIONAL_LIVE_PAGES.has(p)) return 3000;
+    return 10000;
   };
   let pollMs = operationalPollMs();
   let pollTimer = setInterval(() => { void quickSyncTick(); }, pollMs);
@@ -10987,8 +11129,15 @@ async function initApp() {
     clearInterval(pollTimer);
     pollTimer = setInterval(() => { void quickSyncTick(); }, pollMs);
   };
-  document.addEventListener('visibilitychange', reschedulePoll);
-  window.addEventListener('planner:poll-reschedule', reschedulePoll);
+  document.addEventListener('visibilitychange', () => {
+    reschedulePoll();
+    if (!document.hidden) void quickSyncTick();
+  });
+  window.addEventListener('focus', () => { void quickSyncTick(); });
+  window.addEventListener('planner:poll-reschedule', () => {
+    reschedulePoll();
+    void quickSyncTick();
+  });
   // Escalas: atualização mais rápida para "quase tempo real" enquanto a tela estiver aberta.
   setInterval(() => {
     if (Store.currentPage === 'escalas') void quickSyncTick();
@@ -10997,6 +11146,10 @@ async function initApp() {
     if (syncInFlight) return;
     await bootstrapAndRenderIfChanged(8000);
   }, 120000);
+
+  setInterval(() => {
+    Store.flushPendingServerSaves();
+  }, 15000);
 
   void seedRemoteSigIfPossible();
 
