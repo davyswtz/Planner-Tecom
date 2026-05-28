@@ -93,7 +93,8 @@ try {
     $prazoBind = ($prazoIn === '' || $prazoIn === '0000-00-00') ? null : $prazoIn;
 
     $hasOrdemServico = dbColumnExists($pdo, 'op_tasks', 'ordem_servico');
-    $hasSubProcesso = dbColumnExists($pdo, 'op_tasks', 'sub_processo');
+    $hasNumeroOs     = dbColumnExists($pdo, 'op_tasks', 'numero_os');
+    $hasSubProcesso  = dbColumnExists($pdo, 'op_tasks', 'sub_processo');
     $insertCols = [
         'id', 'taskCode', 'titulo', 'setor', 'regiao', 'responsavel', 'clientesAfetados',
         'coordenadas', 'localizacao_texto', 'descricao', 'categoria', 'prazo', 'prioridade', 'status',
@@ -109,6 +110,10 @@ try {
     if ($hasOrdemServico) {
         $insertCols[] = 'ordem_servico';
         $insertParams[] = ':ordem_servico';
+    }
+    if ($hasNumeroOs) {
+        $insertCols[] = 'numero_os';
+        $insertParams[] = ':numero_os';
     }
     if ($hasSubProcesso) {
         $insertCols[] = 'sub_processo';
@@ -162,6 +167,9 @@ try {
         ];
         if ($hasOrdemServico) {
             $bind[':ordem_servico'] = (string) ($data['ordemServico'] ?? '');
+        }
+        if ($hasNumeroOs) {
+            $bind[':numero_os'] = (string) ($data['numeroOs'] ?? '');
         }
         if ($hasSubProcesso) {
             $bind[':sub_processo'] = (string) ($data['subProcesso'] ?? '');
@@ -239,6 +247,8 @@ try {
         }
         throw $e;
     }
+
+    plannerInvalidateBootstrapCache($deletedBy);
 
     $updatedAt = time();
     try {

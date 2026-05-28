@@ -52,64 +52,60 @@ try {
         return (bool) $stmt->fetchColumn();
     };
 
-    // Tabelas com updated_at no schema.sql
-    $tasksTs = $getMaxTs('tasks');
-    $opTasksTs = $getMaxTs('op_tasks');
-    $hasEscalas = $tableExists('escalas');
-    $escalasTs = $hasEscalas ? $getMaxTs('escalas') : 0;
-    $cfgTs = $getMaxTs('app_config');
-    $notifsTs = $getMaxTs('app_notification');
-    $actTs = $getMaxTs('app_activity_event');
+    // Verifica existência de todas as tabelas antes de qualquer query.
+    $hasTasks      = $tableExists('tasks');
+    $hasOpTasks    = $tableExists('op_tasks');
+    $hasEscalas    = $tableExists('escalas');
+    $hasCfg        = $tableExists('app_config');
+    $hasNotifs     = $tableExists('app_notification');
+    $hasActivity   = $tableExists('app_activity_event');
     $hasDeletedLog = $tableExists('deleted_entity_log');
-    $deletedTs = $hasDeletedLog ? $getMaxTs('deleted_entity_log') : 0;
-    $maxTs = max($tasksTs, $opTasksTs, $escalasTs, $cfgTs, $notifsTs);
-    $maxTs = max($maxTs, $actTs, $deletedTs);
 
-    $changedTasks = [];
-    $changedOpTasks = [];
-    $changedEscalas = [];
-    $changedNotifs = [];
-    $changedActivity = [];
-    $changedDeleted = [];
+    $tasksTs    = $hasTasks      ? $getMaxTs('tasks')              : 0;
+    $opTasksTs  = $hasOpTasks    ? $getMaxTs('op_tasks')           : 0;
+    $escalasTs  = $hasEscalas    ? $getMaxTs('escalas')            : 0;
+    $cfgTs      = $hasCfg        ? $getMaxTs('app_config')         : 0;
+    $notifsTs   = $hasNotifs     ? $getMaxTs('app_notification')   : 0;
+    $actTs      = $hasActivity   ? $getMaxTs('app_activity_event') : 0;
+    $deletedTs  = $hasDeletedLog ? $getMaxTs('deleted_entity_log') : 0;
+
+    $maxTs = max($tasksTs, $opTasksTs, $escalasTs, $cfgTs, $notifsTs, $actTs, $deletedTs);
+
+    $changedTasks     = [];
+    $changedOpTasks   = [];
+    $changedEscalas   = [];
+    $changedNotifs    = [];
+    $changedActivity  = [];
+    $changedDeleted   = [];
+
     if ($since > 0) {
         // Retorna apenas alterações desde o último poll (bem mais rápido que bootstrap completo).
-        // Importante: updated_at geralmente tem precisão de 1 segundo. Usar >= evita “perder” updates no mesmo segundo.
-        $stmtT = $pdo->prepare('SELECT id, titulo, responsavel, prazo, status, prioridade, updated_at FROM tasks WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC');
-        $stmtT->execute([':since' => $since]);
-        $changedTasks = $stmtT->fetchAll() ?: [];
-
-        $hasOrdem = dbColumnExists($pdo, 'op_tasks', 'ordem_servico');
-        $hasSub = dbColumnExists($pdo, 'op_tasks', 'sub_processo');
-        $opSqlBase = plannerOpTaskListSelectSqlFallback() . ' WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC';
-        $opSqlExt = plannerOpTaskListSelectSql() . ' WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC';
-        if ($hasOrdem && $hasSub) {
-            $opListSql = $opSqlExt;
-        } elseif ($hasOrdem) {
-            $opListSql = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
-              coordenadas, localizacao_texto AS localizacaoTexto, categoria, prazo, prioridade, status,
-              is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
-              nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico,
-              data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
-              assinada_por AS assinadaPor, assinada_em AS assinadaEm,
-              CHAR_LENGTH(COALESCE(descricao, \'\')) AS descricaoLen,
-              UNIX_TIMESTAMP(updated_at) AS updatedAt
-              FROM op_tasks WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC';
-        } else {
-            $opListSql = $opSqlBase;
+        // Importante: updated_at geralmente tem precisão de 1 segundo. Usar >= evita "perder" updates no mesmo segundo.
+        if ($hasTasks) {
+            $stmtT = $pdo->prepare('SELECT id, titulo, responsavel, prazo, status, prioridade, updated_at FROM tasks WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC');
+            $stmtT->execute([':since' => $since]);
+            $changedTasks = $stmtT->fetchAll() ?: [];
         }
-        $stmtO = $pdo->prepare($opListSql);
-        $stmtO->execute([':since' => $since]);
-        $changedOpTasks = $stmtO->fetchAll() ?: [];
-        foreach ($changedOpTasks as &$item) {
-            $item = plannerFormatOpTaskRow($item, false);
-        }
-        unset($item);
 
-        $stmtN = $pdo->prepare('SELECT id, kind, title, message, ref_type, ref_id, op_category AS opCategory,
-          created_by AS createdBy, created_at AS createdAt, updated_at
-          FROM app_notification WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC');
-        $stmtN->execute([':since' => $since]);
-        $changedNotifs = $stmtN->fetchAll() ?: [];
+        if ($hasOpTasks) {
+            $opListSql = plannerOpTaskListSelectSqlFor($pdo)
+                . ' WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC';
+            $stmtO = $pdo->prepare($opListSql);
+            $stmtO->execute([':since' => $since]);
+            $changedOpTasks = $stmtO->fetchAll() ?: [];
+            foreach ($changedOpTasks as &$item) {
+                $item = plannerFormatOpTaskRow($item, false);
+            }
+            unset($item);
+        }
+
+        if ($hasNotifs) {
+            $stmtN = $pdo->prepare('SELECT id, kind, title, message, ref_type, ref_id, op_category AS opCategory,
+              created_by AS createdBy, created_at AS createdAt, updated_at
+              FROM app_notification WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC');
+            $stmtN->execute([':since' => $since]);
+            $changedNotifs = $stmtN->fetchAll() ?: [];
+        }
 
         if ($hasEscalas) {
             $stmtE = $pdo->prepare('SELECT id, client_uid AS clientUid, data, mes, dia_semana AS diaSemana,
@@ -123,12 +119,14 @@ try {
             $changedEscalas = $stmtE->fetchAll() ?: [];
         }
 
-        // Feed global (todos os usuários)
-        $stmtA = $pdo->prepare('SELECT id, username, event_type AS eventType, severity, message, ref_type AS refType, ref_id AS refId,
-          op_category AS opCategory, created_at AS createdAt, updated_at
-          FROM app_activity_event WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC');
-        $stmtA->execute([':since' => $since]);
-        $changedActivity = $stmtA->fetchAll() ?: [];
+        if ($hasActivity) {
+            // Feed global (todos os usuários)
+            $stmtA = $pdo->prepare('SELECT id, username, event_type AS eventType, severity, message, ref_type AS refType, ref_id AS refId,
+              op_category AS opCategory, created_at AS createdAt, updated_at
+              FROM app_activity_event WHERE updated_at >= FROM_UNIXTIME(:since) ORDER BY updated_at ASC');
+            $stmtA->execute([':since' => $since]);
+            $changedActivity = $stmtA->fetchAll() ?: [];
+        }
 
         if ($hasDeletedLog) {
             $stmtD = $pdo->prepare('SELECT id, entity_type AS entityType, entity_id AS entityId,
@@ -162,4 +160,3 @@ try {
     error_log('[changes.php] failed: ' . $e->getMessage());
     jsonResponse(['ok' => false, 'error' => 'server_error'], 500);
 }
-

@@ -20,21 +20,7 @@ try {
     }
 
     $pdo = db();
-    $hasOrdem = dbColumnExists($pdo, 'op_tasks', 'ordem_servico');
-    $detailSql = $hasOrdem
-        ? 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
-          coordenadas, localizacao_texto AS localizacaoTexto, descricao, categoria, prazo, prioridade, status,
-          is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
-          nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico, sub_processo AS subProcesso,
-          data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
-          assinada_por AS assinadaPor, assinada_em AS assinadaEm
-          FROM op_tasks WHERE id = :id LIMIT 1'
-        : 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
-          coordenadas, localizacao_texto AS localizacaoTexto, descricao, categoria, prazo, prioridade, status,
-          is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
-          nome_cliente AS nomeCliente, protocolo, data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
-          assinada_por AS assinadaPor, assinada_em AS assinadaEm
-          FROM op_tasks WHERE id = :id LIMIT 1';
+    $detailSql = plannerOpTaskDetailSelectSqlFor($pdo);
 
     $stmt = $pdo->prepare($detailSql);
     $stmt->execute([':id' => $id]);

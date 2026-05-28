@@ -1184,6 +1184,10 @@
           <label for="op-atd-nome-cliente">Nome do cliente</label>
           <input type="text" id="op-atd-nome-cliente" placeholder="Opcional" autocomplete="off"/>
         </div>
+        <div class="form-group">
+          <label for="op-atd-os-hubspot">Número da OS HubSpot</label>
+          <input type="text" id="op-atd-os-hubspot" placeholder="Opcional" autocomplete="off"/>
+        </div>
         <div class="form-row">
           <div class="form-group">
             <label for="op-atd-protocolo">Protocolo</label>
@@ -1221,13 +1225,7 @@
           <label for="op-atd-child-titulo">Nome da tarefa</label>
           <input type="text" id="op-atd-child-titulo" placeholder="Opcional" autocomplete="off"/>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label for="op-atd-ordem-servico">Ordem de serviço</label>
-            <input type="text" id="op-atd-ordem-servico" placeholder="Opcional" autocomplete="off"/>
-          </div>
-          <div class="form-group" id="opAtdChildRegiaoSlot"></div>
-        </div>
+        <div class="form-group" id="opAtdChildRegiaoSlot"></div>
         <div class="form-group" id="opAtdChildTecnicoSlot"></div>
         <div class="form-row">
           <div class="form-group" id="opAtdChildPrioridadeSlot"></div>
@@ -1245,7 +1243,7 @@
           <input type="text" id="op-qdp-cliente" placeholder="Opcional" autocomplete="off"/>
         </div>
         <div class="form-group">
-          <label for="op-qdp-ordem-servico">Ordem de serviço</label>
+          <label for="op-qdp-ordem-servico">Número da OS HubSpot</label>
           <input type="text" id="op-qdp-ordem-servico" placeholder="Opcional" autocomplete="off"/>
         </div>
         <div class="form-group">
@@ -1303,7 +1301,7 @@
             <input type="text" id="op-otim-protocolo" placeholder="Ex.: 2026-000123" autocomplete="off"/>
           </div>
           <div class="form-group">
-            <label for="op-otim-ordem-servico">Ordem de serviço</label>
+            <label for="op-otim-ordem-servico">Número da OS HubSpot</label>
             <input type="text" id="op-otim-ordem-servico" placeholder="Ex.: OS-000123" autocomplete="off"/>
           </div>
         </div>
@@ -1339,6 +1337,10 @@
           <label for="op-cemig-protocolo">Protocolo</label>
           <input type="text" id="op-cemig-protocolo" placeholder="Ex.: 2026-000123" autocomplete="off"/>
         </div>
+        <div class="form-group">
+          <label for="op-cemig-os-hubspot">Número da OS HubSpot</label>
+          <input type="text" id="op-cemig-os-hubspot" placeholder="Opcional" autocomplete="off"/>
+        </div>
         <div class="form-row" id="opCemigRegiaoTecRow">
           <div class="form-group" id="opCemigRegiaoSlot"></div>
           <div class="form-group" id="opCemigTecSlot"></div>
@@ -1368,6 +1370,12 @@
           ></div>
           <p class="hint">Imagens podem ser coladas direto no campo (Ctrl+V); use o botão × no canto da imagem para removê-la. Com MySQL, as imagens são gravadas na tabela <code>op_task_image</code>.</p>
         </div>
+      </div>
+
+      <!-- Campo compartilhado: rompimentos / troca-poste / troca-etiqueta / correção-atenuação (pai) -->
+      <div class="form-group" id="opGeralOsHubspotGroup" style="display:none">
+        <label for="op-geral-os-hubspot">Número da OS HubSpot</label>
+        <input type="text" id="op-geral-os-hubspot" placeholder="Opcional" autocomplete="off"/>
       </div>
 
       <div class="form-row" id="opPriorityRegionRow">

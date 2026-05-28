@@ -76,9 +76,18 @@ try {
     enforceLoginRateLimit($username);
 
     $pdo = db();
-    $stmt = $pdo->prepare('SELECT pass_salt, pass_hash, pass_iterations FROM usuario WHERE username = :u LIMIT 1');
-    $stmt->execute([':u' => $username]);
-    $row = $stmt->fetch();
+    $row = null;
+    try {
+        $stmt = $pdo->prepare('SELECT pass_salt, pass_hash, pass_iterations FROM usuario WHERE username = :u LIMIT 1');
+        $stmt->execute([':u' => $username]);
+        $row = $stmt->fetch();
+    } catch (PDOException $pdoErr) {
+        // Banco antigo sem pass_iterations ou restrição em information_schema no host.
+        error_log('[login.php] usuario select (full) failed: ' . $pdoErr->getMessage());
+        $stmt = $pdo->prepare('SELECT pass_salt, pass_hash FROM usuario WHERE username = :u LIMIT 1');
+        $stmt->execute([':u' => $username]);
+        $row = $stmt->fetch();
+    }
 
     if (!$row) {
         recordLoginFailure($username);

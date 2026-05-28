@@ -57,28 +57,10 @@ try {
     $tasks = $tableExists('tasks')
         ? $safeFetchAll('SELECT id, titulo, responsavel, prazo, status, prioridade FROM tasks ORDER BY id ASC', 'tasks')
         : [];
-    $opSqlBase = plannerOpTaskListSelectSqlFallback() . ' ORDER BY id ASC';
-    $opSqlExt = plannerOpTaskListSelectSql() . ' ORDER BY id ASC';
     $opTasks = [];
     if ($tableExists('op_tasks')) {
-        $hasOrdem = dbColumnExists($pdo, 'op_tasks', 'ordem_servico');
-        $hasSub = dbColumnExists($pdo, 'op_tasks', 'sub_processo');
-        if ($hasOrdem && $hasSub) {
-            $opTasks = $safeFetchAll($opSqlExt, 'op_tasks');
-        } elseif ($hasOrdem) {
-            $opSqlOrdemOnly = 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
-              coordenadas, localizacao_texto AS localizacaoTexto, categoria, prazo, prioridade, status,
-              is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
-              nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico,
-              data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
-              assinada_por AS assinadaPor, assinada_em AS assinadaEm,
-              CHAR_LENGTH(COALESCE(descricao, \'\')) AS descricaoLen,
-              UNIX_TIMESTAMP(updated_at) AS updatedAt
-              FROM op_tasks ORDER BY id ASC';
-            $opTasks = $safeFetchAll($opSqlOrdemOnly, 'op_tasks_ordem');
-        } else {
-            $opTasks = $safeFetchAll($opSqlBase, 'op_tasks_base');
-        }
+        $opSql = plannerOpTaskListSelectSqlFor($pdo) . ' ORDER BY id ASC';
+        $opTasks = $safeFetchAll($opSql, 'op_tasks');
     }
     $cfgRows = $tableExists('app_config')
         ? $safeFetchAll('SELECT cfg_key, cfg_value FROM app_config', 'app_config')

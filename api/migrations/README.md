@@ -7,6 +7,7 @@ Ordem recomendada para produção:
 1. `000_schema_migrations.sql`
 2. `007_performance_indexes.sql`
 3. `008_deleted_entity_log.sql`
+4. … demais migrations na ordem numérica do arquivo, até `018_op_tasks_numero_os.sql` (campo **Número da OS HubSpot** em `op_tasks.numero_os`)
 
 Observações:
 

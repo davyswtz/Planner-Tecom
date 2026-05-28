@@ -6,7 +6,7 @@
 
 /**
  * Modelo de tarefa operacional (Rompimentos / Troca de Poste)
- * @typedef {{ id: number, titulo: string, responsavel: string, responsavelChatId?: string, categoria: string, prazo: string, prioridade: string, descricao: string, status: OpStatus, historico: HistoryEntry[], criadaEm: string, assinadaPor?: string, assinadaEm?: string, protocolo?: string, dataEntrada?: string, subProcesso?: string, dataInstalacao?: string, ordemServico?: string, nomeCliente?: string }} OpTask
+ * @typedef {{ id: number, titulo: string, responsavel: string, responsavelChatId?: string, categoria: string, prazo: string, prioridade: string, descricao: string, status: OpStatus, historico: HistoryEntry[], criadaEm: string, assinadaPor?: string, assinadaEm?: string, protocolo?: string, dataEntrada?: string, subProcesso?: string, dataInstalacao?: string, ordemServico?: string, numeroOs?: string, nomeCliente?: string }} OpTask
  * @typedef {'Criada'|'Backlog'|'A iniciar'|'Em andamento'|'Concluída'|'Finalizada'|'Cancelada'|'Validação'|'Envio pendente'|'Necessário adequação'|'Finalizado'} OpStatus
  * @typedef {{ status: OpStatus, timestamp: string, autor: string }} HistoryEntry
  */
@@ -226,6 +226,29 @@ function isLinkedOsParentTask(task) {
   return isLinkedOsCategory(task?.categoria) && !task?.parentTaskId;
 }
 
+/**
+ * Guarda de OS vinculada: tarefas pai em categorias que suportam OS filha
+ * só podem ir para "Em andamento" se já tiverem pelo menos uma OS vinculada.
+ * Tarefas filhas (parentTaskId preenchido) passam sem restrição.
+ * @returns {string|null} Mensagem de bloqueio, ou null se permitido.
+ */
+function linkedOsStartGuard(task, targetStatus) {
+  if (String(targetStatus || '').trim() !== 'Em andamento') return null;
+  if (!task) return null;
+  if (task.parentTaskId) return null;
+  if (!isLinkedOsCategory(task.categoria)) return null;
+  if (getLinkedOsChildren(task).length > 0) return null;
+  return 'Esta tarefa precisa ter ao menos uma OS vinculada antes de iniciar.';
+}
+
+function numeroOsStartGuard(task, targetStatus) {
+  if (String(targetStatus || '').trim() !== 'Em andamento') return null;
+  if (!task) return null;
+  if (task.parentTaskId) return null;
+  if (String(task.numeroOs || '').trim()) return null;
+  return 'O número da OS HubSpot é obrigatório para iniciar esta tarefa.';
+}
+
 /** Ignora placeholder de equipe inativa no autocomplete (não deve virar menção no Chat). */
 function isPlaceholderTechName(name) {
   const n = normalizeTechName(name);
@@ -353,6 +376,7 @@ const Store = (() => {
     'dataInstalacao',
     'subProcesso',
     'ordemServico',
+    'numeroOs',
     'assinadaPor',
     'assinadaEm',
     'prazo',
@@ -1907,6 +1931,7 @@ const WebhookService = {
     const notifLine = this._formatCemigNotificacaoLine(task);
     const coords = s(this._coordsClickableForChat(task?.coordenadas));
 
+    const cemigNumeroOs = s(String(task?.numeroOs || '').trim());
     if (event === 'andamento') {
       return {
         text: B([
@@ -1917,6 +1942,7 @@ const WebhookService = {
           `🔔 ${s(notifLine)}`,
           '',
           `🗺️ Coordenadas: ${coords}`,
+          ...(cemigNumeroOs ? [`🧾 OS HubSpot: ${cemigNumeroOs}`] : []),
           '',
           `🔧 Técnico: ${tecnico}`,
           `👤 Enviado por: ${enviado}`,
@@ -1949,6 +1975,7 @@ const WebhookService = {
         sep,
         `🆔 ID · ${taskId}`,
         `📋 REFERÊNCIA · ${s(ref)}`,
+        ...(cemigNumeroOs ? [`🧾 OS HUBSPOT · ${cemigNumeroOs}`] : []),
         `🗺️ COORDENADAS · ${coords}`,
         `🏠 ENDEREÇO · ${enderecoC}`,
         ...elapsedLine,
@@ -1980,7 +2007,8 @@ const WebhookService = {
     const titulo = String(task.titulo || '').trim();
     const proto = String(task.protocolo || '').trim();
     const os = String(task.ordemServico || '').trim();
-    const protoOs = [proto, os].filter(Boolean).join(' · ');
+    const numeroOs = String(task.numeroOs || '').trim();
+    const protoOs = [proto, numeroOs || os].filter(Boolean).join(' · ');
     const descPlain = this._stripHtmlLite(task.descricao || '');
     const principal = titulo || protoOs || '—';
     const descExtra =
@@ -2023,6 +2051,7 @@ const WebhookService = {
         sep,
         '📌 IDENTIFICAÇÃO',
         `🆔 ID DA TAREFA · ${this._chatSafe(taskId)}`,
+        ...(numeroOs ? [`🧾 OS HUBSPOT · ${this._chatSafe(numeroOs)}`] : []),
         `🌎 REGIÃO · ${this._chatSafe(regiao)}`,
         '',
         '👷 RESPONSÁVEIS',
@@ -2055,6 +2084,7 @@ const WebhookService = {
         sep,
         `🆔 ID · ${this._chatSafe(taskId)}`,
         `📋 REFERÊNCIA · ${this._chatSafe(ref)}`,
+        ...(numeroOs ? [`🧾 OS HUBSPOT · ${this._chatSafe(numeroOs)}`] : []),
         `🗺️ COORDENADAS · ${this._chatSafe(coords)}`,
         `🏠 ENDEREÇO · ${this._chatSafe(endereco)}`,
         ...elapsedLine,
@@ -2066,31 +2096,30 @@ const WebhookService = {
   _buildOsLinkedChildMessage(event, task) {
     if (event === 'andamento') {
       const tecnico = this._resolveTechnicianDisplay(task, { mention: true });
-      const osLabel = String(task.ordemServico || task.titulo || '').trim();
+      const osLabel = String(task.numeroOs || task.ordemServico || task.titulo || '').trim();
       const ordinal = getLinkedOsSiblingOrdinal(task);
       const headline = osLabel
         ? `*${ordinal}° OS ${this._chatSafe(osLabel)} em andamento*`
         : `*${ordinal}° OS em andamento*`;
-      return {
-        text: [
-          headline,
-          `👨‍🔧 Técnico responsável: ${tecnico}`,
-        ].join('\n'),
-      };
+      const hubspotOs = String(task.numeroOs || '').trim();
+      const lines = [headline, `👨‍🔧 Técnico responsável: ${tecnico}`];
+      if (hubspotOs) lines.push(`🧾 OS HubSpot: ${this._chatSafe(hubspotOs)}`);
+      return { text: lines.join('\n') };
     }
     if (event === 'concluida') {
       const ordinal = getLinkedOsSiblingOrdinal(task);
-      const osLabel = String(task.ordemServico || task.titulo || '').trim();
+      const osLabel = String(task.numeroOs || task.ordemServico || task.titulo || '').trim();
       const history = Array.isArray(task?.historico) ? task.historico : [];
       const lastAuthor = String(history[history.length - 1]?.autor || '').trim();
       const enviadoPor = lastAuthor || String(task.assinadaPor || '').trim();
-      return {
-        text: [
-          `✅ ${ordinal}° OS concluída`,
-          `📌 ${this._chatSafe(osLabel || '—')}`,
-          `👤 Enviado por: ${this._chatSafe(enviadoPor)}`,
-        ].join('\n'),
-      };
+      const hubspotOs = String(task.numeroOs || '').trim();
+      const lines = [
+        `✅ ${ordinal}° OS concluída`,
+        `📌 ${this._chatSafe(osLabel || '—')}`,
+      ];
+      if (hubspotOs) lines.push(`🧾 OS HubSpot: ${this._chatSafe(hubspotOs)}`);
+      lines.push(`👤 Enviado por: ${this._chatSafe(enviadoPor)}`);
+      return { text: lines.join('\n') };
     }
     return { text: '' };
   },
@@ -2142,12 +2171,14 @@ const WebhookService = {
       })();
       const enviadoPor = assinatura || 'Não informado';
 
+      const trocaNumeroOs = String(task.numeroOs || '').trim();
       return {
         text: [
           `*🔄 Troca de Poste - ${this._chatSafe(enderecoLine)}*`,
           '📍Coordenadas: ',
           this._chatSafe(coordsLine),
           '',
+          ...(trocaNumeroOs ? [`🧾 OS HubSpot: ${this._chatSafe(trocaNumeroOs)}`] : []),
           `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
           `👤 Enviado por: ${this._chatSafe(enviadoPor)}`,
           `🆔: ${this._chatSafe(taskId)}`,
@@ -2161,6 +2192,7 @@ const WebhookService = {
       finalizada: '🏁 Troca de poste finalizada.',
     }[event] || '🔔 Atualização — troca de poste.';
 
+    const trocaPosteNumeroOs = String(task.numeroOs || '').trim();
     const head = this._rompimentoBoldLines([
       '🪵⚡🔧 TROCA DE POSTE',
       '',
@@ -2169,6 +2201,7 @@ const WebhookService = {
       `🌎 REGIÃO: ${regiao}`,
       `👷‍♂️ TÉCNICO RESPONSÁVEL: ${tecnico}`,
       assinatura ? `🖊️ ASSINATURA: ${assinatura}` : '',
+      trocaPosteNumeroOs ? `🧾 OS HUBSPOT: ${this._chatSafe(trocaPosteNumeroOs)}` : '',
     ]);
 
     let locationBlock;
@@ -2234,6 +2267,7 @@ const WebhookService = {
         ? '*✅ TROCA DE ETIQUETA — CONCLUÍDA*'
         : '*🏷️TROCA DE ETIQUETA*';
 
+    const etqNumeroOs = String(task?.numeroOs || '').trim();
     return {
       text: [
         title,
@@ -2241,6 +2275,7 @@ const WebhookService = {
         '📍Localizações:',
         `${this._chatSafe(ctoId)}: ${this._chatSafe(coordsClickable)}`,
         '',
+        ...(etqNumeroOs ? [`🧾 OS HubSpot: ${this._chatSafe(etqNumeroOs)}`] : []),
         `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
         `👤 Enviado por: ${this._chatSafe(enviadoPor)}`,
         `🆔 : ${this._chatSafe(taskId)}`,
@@ -2302,6 +2337,7 @@ const WebhookService = {
       `${this._chatSafe(r.label || `Elemento ${i + 1}`)}: ${this._chatSafe(r.coords)}`,
     );
 
+    const atnNumeroOs = String(task?.numeroOs || '').trim();
     return {
       text: [
         title,
@@ -2309,6 +2345,7 @@ const WebhookService = {
         '📍Localizações:',
         ...locLines,
         '',
+        ...(atnNumeroOs ? [`🧾 OS HubSpot: ${this._chatSafe(atnNumeroOs)}`] : []),
         `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
         `👤 Enviado por: ${this._chatSafe(enviadoPor)}`,
         `🆔 : ${this._chatSafe(taskId)}`,
@@ -2336,7 +2373,7 @@ const WebhookService = {
     const taskId = s(code || synthetic || `QDP-${String(task?.id || '').padStart(4, '0')}`);
 
     const cliente = s(String(task?.nomeCliente || '').trim() || '—');
-    const os = s(String(task?.ordemServico || '').trim() || '—');
+    const osHubspot = s(String(task?.numeroOs || task?.ordemServico || '').trim() || '—');
     const cto = s(String(task?.setor || '').trim() || '—');
     const regiao = s(String(task?.regiao || '').trim() || '—');
     const prioridade = s(String(task?.prioridade || '').trim() || '—');
@@ -2352,7 +2389,7 @@ const WebhookService = {
           '⚡ QUALIDADE DE POTÊNCIA',
           '',
           `👤 Cliente: ${cliente}`,
-          `🧾 Ordem de serviço: ${os}`,
+          `🧾 OS HubSpot: ${osHubspot}`,
           `🌎 Região: ${regiao}`,
           `🔧 Técnico: ${tecnico}`,
           `🏷️ CTO: ${cto}`,
@@ -2386,7 +2423,7 @@ const WebhookService = {
         sep,
         `🆔 ID · ${taskId}`,
         `👤 CLIENTE · ${cliente}`,
-        `🧾 OS · ${os}`,
+        `🧾 OS HUBSPOT · ${osHubspot}`,
         `🌎 REGIÃO · ${regiao}`,
         `🔧 TÉCNICO · ${tecnico}`,
         `🏷️ CTO · ${cto}`,
@@ -2419,7 +2456,7 @@ const WebhookService = {
 
     // Campos preenchidos no card/modal (no modal o label é "Manutenção", mas o campo persiste em `nomeCliente`)
     const manutencao = s(String(task?.nomeCliente || '').trim() || '—');
-    const os = s(String(task?.ordemServico || '').trim() || '—');
+    const osHubspot = s(String(task?.numeroOs || task?.ordemServico || '').trim() || '—');
     const cto = s(String(task?.setor || '').trim() || '—');
     const regiao = s(String(task?.regiao || '').trim() || '—');
     const prioridade = s(String(task?.prioridade || '').trim() || '—');
@@ -2435,7 +2472,7 @@ const WebhookService = {
           '🛠️ MANUTENÇÃO CORRETIVA',
           '',
           `🧰 Manutenção: ${manutencao}`,
-          `🧾 Ordem de serviço: ${os}`,
+          `🧾 OS HubSpot: ${osHubspot}`,
           `🌎 Região: ${regiao}`,
           `🔧 Técnico: ${tecnico}`,
           `🏷️ CTO: ${cto}`,
@@ -2469,7 +2506,7 @@ const WebhookService = {
         sep,
         `🆔 ID · ${taskId}`,
         `🧰 MANUTENÇÃO · ${manutencao}`,
-        `🧾 OS · ${os}`,
+        `🧾 OS HUBSPOT · ${osHubspot}`,
         `🌎 REGIÃO · ${regiao}`,
         `🔧 TÉCNICO · ${tecnico}`,
         `🏷️ CTO · ${cto}`,
@@ -2876,11 +2913,13 @@ const WebhookService = {
         ? subtasks.map((title, idx) => `${idx + 1}° - ${this._chatSafe(title)}`).join('\n')
         : '1° - ';
 
+      const atdNumeroOs = String(task.numeroOs || '').trim();
       return {
         text: [
           '*Atendimento ao Cliente*',
           `👤 ${this._chatSafe(nomeCliente)}`,
           `📄 Protocolo: ${this._chatSafe(protocolo)}`,
+          ...(atdNumeroOs ? [`🧾 OS HubSpot: ${this._chatSafe(atdNumeroOs)}`] : []),
           `🗓️ Data de entrada: ${this._chatSafe(dataEntrada)}`,
           `⏰ Prazo de saída: ${this._chatSafe(prazoFinal)}`,
           '',
@@ -2957,6 +2996,8 @@ const WebhookService = {
       const clientesAfetados = String(task.clientesAfetados || '').trim();
       const taskId = String(task.taskCode || `ROM-${String(task.id || '').padStart(4, '0')}`).trim();
       const tipoRompimento = this._getRompimentoTipoFromTask(task);
+      const numeroOsRomp = String(task.numeroOs || '').trim();
+      const osHubspotLine = numeroOsRomp ? [`🧾 OS HubSpot: ${this._chatSafe(numeroOsRomp)}`] : [];
 
       const coordsClickable = coordsRaw ? this._coordsClickableForChat(coordsRaw) : '';
 
@@ -2969,7 +3010,7 @@ const WebhookService = {
             `📍 Localização inicial: ${this._chatSafe(coordsClickable)}`,
             `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
             '',
-            '',
+            ...osHubspotLine,
             `Clientes afetados: ${this._chatSafe(clientesAfetados)}`,
             `🆔: ${this._chatSafe(taskId)}`,
           ].join('\n'),
@@ -2985,6 +3026,7 @@ const WebhookService = {
             `📍 Localização inicial: ${this._chatSafe(coordsClickable)}`,
             `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
             '',
+            ...osHubspotLine,
             `Clientes afetados: ${this._chatSafe(clientesAfetados)}`,
             `🆔: ${this._chatSafe(taskId)}`,
           ].join('\n'),
@@ -3000,6 +3042,7 @@ const WebhookService = {
             `📍 Localização inicial: ${this._chatSafe(coordsClickable)}`,
             `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
             '',
+            ...osHubspotLine,
             `Clientes afetados: ${this._chatSafe(clientesAfetados)}`,
             `🆔: ${this._chatSafe(taskId)}`,
           ].join('\n'),
@@ -3016,6 +3059,7 @@ const WebhookService = {
             `📍 Localização inicial: ${this._chatSafe(coordsRaw || 'Não informada')}`,
             `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
             '',
+            ...osHubspotLine,
             `Clientes afetados: ${this._chatSafe(clientesAfetados)}`,
             `🆔: ${this._chatSafe(taskId)}`,
           ].join('\n'),
@@ -3032,6 +3076,7 @@ const WebhookService = {
             `📍 Localização inicial: ${this._chatSafe(coordsRaw || 'Não informada')}`,
             `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
             '',
+            ...osHubspotLine,
             `Clientes afetados: ${this._chatSafe(clientesAfetados)}`,
             `🆔: ${this._chatSafe(taskId)}`,
           ].join('\n'),
@@ -3047,6 +3092,7 @@ const WebhookService = {
           `📍 Localização inicial: ${this._chatSafe(coordsClickable)}`,
           `👨‍🔧 Técnico Responsável: ${this._chatSafe(tecnico)}`,
           '',
+          ...osHubspotLine,
           `Clientes afetados: ${this._chatSafe(clientesAfetados)}`,
           `🆔: ${this._chatSafe(taskId)}`,
         ].join('\n'),
@@ -3062,6 +3108,7 @@ const WebhookService = {
       const endereco = task.localizacaoTexto || 'Não informado';
       const taskId = task.taskCode || `ROM-${String(task.id || '').padStart(4, '0')}`;
       const elapsed = this._formatDurationFromStart(task);
+      const rompNumeroOs = String(task.numeroOs || '').trim();
       const title = event === 'concluida'
         ? '✅ ROMPIMENTO CONCLUÍDO'
         : '🏁 ROMPIMENTO FINALIZADO';
@@ -3072,6 +3119,7 @@ const WebhookService = {
         `🌎 REGIÃO: ${regiao}`,
         `👨‍🔧 TÉCNICO RESPONSÁVEL: ${tecnico}`,
         assinatura ? `🖊️ ASSINATURA: ${assinatura}` : '',
+        rompNumeroOs ? `🧾 OS HUBSPOT: ${this._chatSafe(rompNumeroOs)}` : '',
       ]);
       const coordBlock = `*${this._chatSafe('📍 COORDENADAS')}*\n${this._chatSafe(localizacao)}`;
       const tail = this._rompimentoBoldLines([
@@ -3383,6 +3431,12 @@ const OpTaskService = {
     if (event) {
       const categoryLabel = this._categoryLabels[task.categoria] || task.categoria;
       WebhookService.send(event, task, categoryLabel);
+    }
+
+    const cat = String(task.categoria || '').trim();
+    if (cat === 'correcao-atenuacao' || cat === 'correcao_atenuacao') {
+      window.OsDashboard?.invalidate?.();
+      if (Store.currentPage === 'ordem-servicos') window.OsDashboard?.render?.();
     }
   },
 
@@ -4106,6 +4160,16 @@ const UI = {
             return;
           }
         }
+        const osGuardMsg = linkedOsStartGuard(cur, toStatus);
+        if (osGuardMsg) {
+          ToastService.show(osGuardMsg, 'warning');
+          return;
+        }
+        const numOsGuardMsg = numeroOsStartGuard(cur, toStatus);
+        if (numOsGuardMsg) {
+          ToastService.show(numOsGuardMsg, 'warning');
+          return;
+        }
         this._lastMovedOpTask = { id, status: toStatus };
         OpTaskService.changeStatus(id, toStatus);
         this.renderOpPage();
@@ -4203,6 +4267,16 @@ const UI = {
             ToastService.show('Selecione a região antes de colocar em andamento.', 'warning');
             return;
           }
+        }
+        const osGuardMsg = linkedOsStartGuard(cur, targetStatus);
+        if (osGuardMsg) {
+          ToastService.show(osGuardMsg, 'warning');
+          return;
+        }
+        const numOsGuardMsg = numeroOsStartGuard(cur, targetStatus);
+        if (numOsGuardMsg) {
+          ToastService.show(numOsGuardMsg, 'warning');
+          return;
         }
         this._lastMovedOpTask = { id: draggedId, status: targetStatus };
         OpTaskService.changeStatus(draggedId, targetStatus);
@@ -5323,6 +5397,17 @@ const UI = {
         setTimeout(() => col.classList.remove('drop-flash'), 500);
         const targetStatus = col.dataset.colStatus;
         if (!draggedId || !targetStatus || targetStatus === draggedColKey) return;
+        const cur = Store.findOpTask(draggedId);
+        const osGuardMsg = linkedOsStartGuard(cur, targetStatus);
+        if (osGuardMsg) {
+          ToastService.show(osGuardMsg, 'warning');
+          return;
+        }
+        const numOsGuardMsg = numeroOsStartGuard(cur, targetStatus);
+        if (numOsGuardMsg) {
+          ToastService.show(numOsGuardMsg, 'warning');
+          return;
+        }
         this._lastMovedOpTask = { id: draggedId, status: targetStatus };
         OpTaskService.changeStatus(draggedId, targetStatus);
         UI.refreshOperationalUi();
@@ -6170,19 +6255,15 @@ const UI = {
           if (editId) {
             const before = Store.findOpTask?.(editId);
             const beforeStatus = String(before?.status || '').trim();
-            Store.updateOpTask(editId, patch);
-            const savedTask = Store.findOpTask?.(editId) || before;
-            ToastService?.show?.('Atividade atualizada.', 'success');
-            const event = OpTaskService?._statusToEvent?.[status];
-            if (event && savedTask && beforeStatus !== status) {
-              // Evita cair no BACKUP quando o usuário não escolheu região.
-              if (!String(savedTask.regiao || '').trim()) {
-                ToastService?.show?.('Selecione uma região para enviar ao chat.', 'warning');
-              } else {
-              const categoryLabel = OpTaskService?._categoryLabels?.[savedTask.categoria] || savedTask.categoria;
-              WebhookService?.send?.(event, savedTask, categoryLabel);
-              }
+            const { status: nextStatus, ...restPatch } = patch;
+            Store.updateOpTask(editId, restPatch);
+            if (beforeStatus !== nextStatus) {
+              OpTaskService.changeStatus(editId, nextStatus);
+            } else {
+              window.OsDashboard?.invalidate?.();
+              if (Store.currentPage === 'ordem-servicos') window.OsDashboard?.render?.();
             }
+            ToastService?.show?.('Atividade atualizada.', 'success');
           } else {
             const newId = Store.addOpTask({
               categoria: 'correcao-atenuacao',
@@ -6207,6 +6288,10 @@ const UI = {
               const categoryLabel = OpTaskService?._categoryLabels?.[savedTask.categoria] || savedTask.categoria;
               WebhookService?.send?.(event, savedTask, categoryLabel);
               }
+            }
+            if (savedTask && TaskService._isDoneStatus(status)) {
+              window.OsDashboard?.invalidate?.();
+              if (Store.currentPage === 'ordem-servicos') window.OsDashboard?.render?.();
             }
           }
         } catch {
@@ -8729,6 +8814,10 @@ const Controllers = {
       this._toggleGroup('opRompimentoExtraRow', isRompimento && !isRompLinkedChild);
       this._toggleGroup('opRompimentoSetorGroup', isRompimento && !isRompLinkedChild);
       this._toggleGroup('opRompimentoTipoGroup', isRompimento && !isRompLinkedChild);
+
+      const isGeralOsHubspot = (isRompimento || isTrocaPoste
+        || category === 'troca-etiqueta' || category === 'correcao-atenuacao') && !isLinkedOsLinkedChild;
+      this._toggleGroup('opGeralOsHubspotGroup', isGeralOsHubspot);
       this._toggleGroup('opQdpWrap', isQdp && !isLinkedOsLinkedChild);
 
       this._syncCoordsBlockUi(isRompimento, isTrocaPoste);
@@ -9365,7 +9454,6 @@ const Controllers = {
       const proto = document.getElementById('op-atd-protocolo');
       const dataEnt = document.getElementById('op-atd-data-entrada');
       const dataInst = document.getElementById('op-atd-data-instalacao');
-      const os = document.getElementById('op-atd-ordem-servico');
       const desc = document.getElementById('op-atd-descricao');
       const nomeCliClear = document.getElementById('op-atd-nome-cliente');
       if (nomeCliClear) nomeCliClear.value = '';
@@ -9375,7 +9463,6 @@ const Controllers = {
       if (dataEnt) dataEnt.value = '';
       this._setOpAtdSubprocessoSelectValue('');
       if (dataInst) dataInst.value = '';
-      if (os) os.value = '';
       if (desc) desc.value = '';
       const opOtimProto = document.getElementById('op-otim-protocolo');
       const opOtimOs = document.getElementById('op-otim-ordem-servico');
@@ -9387,6 +9474,12 @@ const Controllers = {
       if (cemigProtoClear) cemigProtoClear.value = '';
       const cemigDescClear = document.getElementById('op-cemig-descricao');
       if (cemigDescClear) cemigDescClear.innerHTML = '';
+      const geralOsHubspot = document.getElementById('op-geral-os-hubspot');
+      if (geralOsHubspot) geralOsHubspot.value = '';
+      const cemigOsHubspot = document.getElementById('op-cemig-os-hubspot');
+      if (cemigOsHubspot) cemigOsHubspot.value = '';
+      const atdOsHubspot = document.getElementById('op-atd-os-hubspot');
+      if (atdOsHubspot) atdOsHubspot.value = '';
       document.getElementById('op-prazo').value       = '';
       {
         const catClear = preset.category || Store.currentOpCategory;
@@ -9534,11 +9627,16 @@ const Controllers = {
       let dataEntradaRaw = document.getElementById('op-atd-data-entrada')?.value || '';
       let subProcessoRaw = document.getElementById('op-atd-subprocesso')?.value?.trim() || '';
       const dataInstalacaoRaw = document.getElementById('op-atd-data-instalacao')?.value || '';
-      const ordemServicoRaw = document.getElementById('op-atd-ordem-servico')?.value?.trim() || '';
+      const ordemServicoRaw = '';
       let descAtdRaw = document.getElementById('op-atd-descricao')?.value?.trim() || '';
       const nomeClienteRaw = document.getElementById('op-atd-nome-cliente')?.value?.trim() || '';
       const qdpClienteRaw = document.getElementById('op-qdp-cliente')?.value?.trim() || '';
       const qdpOrdemServicoRaw = document.getElementById('op-qdp-ordem-servico')?.value?.trim() || '';
+      const numeroOsQdpRaw = document.getElementById('op-qdp-ordem-servico')?.value?.trim() || '';
+      const numeroOsOtimRaw = document.getElementById('op-otim-ordem-servico')?.value?.trim() || '';
+      const numeroOsGeralRaw = document.getElementById('op-geral-os-hubspot')?.value?.trim() || '';
+      const numeroOsCemigRaw = document.getElementById('op-cemig-os-hubspot')?.value?.trim() || '';
+      const numeroOsAtdParentRaw = document.getElementById('op-atd-os-hubspot')?.value?.trim() || '';
       const qdpCtoRaw = document.getElementById('op-qdp-cto')?.value?.trim() || '';
       const selectedParent = parentTaskId ? Store.findOpTask(parentTaskId) : null;
       const codeRegion = isParentTask ? regiao : (selectedParent?.regiao || regiao);
@@ -9707,7 +9805,7 @@ const Controllers = {
         : isQdpParentOnly
           ? ''
           : (isQdpChildOnly || ((this._isAtendimentoClienteCategory(category) || isOsLinkedChildOnly) && !isParentTask))
-            ? ordemServicoRaw
+            ? (existing?.ordemServico || '')
             : (selectedParent?.ordemServico || existing?.ordemServico || '');
       const finalResponsavel = isAtdParentOnly
         ? (responsavel || existing?.responsavel || '')
@@ -9751,6 +9849,14 @@ const Controllers = {
         subProcesso: finalSubProcesso,
         dataInstalacao: finalDataInstalacao,
         ordemServico: finalOrdemServico,
+        numeroOs: isOtimParentOnly ? numeroOsOtimRaw
+          : isQdpParentOnly ? numeroOsQdpRaw
+          : isCemigParentOnly ? numeroOsCemigRaw
+          : isAtdParentOnly ? numeroOsAtdParentRaw
+          : (isRompParentOnly || isTrocaParentOnly
+              || (isParentTask && (category === 'troca-etiqueta' || category === 'correcao-atenuacao')))
+            ? numeroOsGeralRaw
+          : (existing?.numeroOs || ''),
         tipoRompimento: isRompimento ? (isRompChildOnly && selectedParent?.tipoRompimento ? selectedParent.tipoRompimento : tipoRompimento) : '',
         clientesAfetados: isRompParentOnly ? clientesAfetadosRaw : (isRompChildOnly ? (selectedParent?.clientesAfetados || '') : ''),
         coordenadas: (isRompParentOnly || isTrocaParentOnly || isQdpParentOnly || isRompChildOnly || isTrocaChildOnly || isQdpChildOnly)
@@ -9841,17 +9947,21 @@ const Controllers = {
       const proto = document.getElementById('op-atd-protocolo');
       const dataEnt = document.getElementById('op-atd-data-entrada');
       const dataInst = document.getElementById('op-atd-data-instalacao');
-      const os = document.getElementById('op-atd-ordem-servico');
       const desc = document.getElementById('op-atd-descricao');
       const opOtimProto = document.getElementById('op-otim-protocolo');
       const opOtimOs = document.getElementById('op-otim-ordem-servico');
       const opCemigProto = document.getElementById('op-cemig-protocolo');
+      const opGeralOs = document.getElementById('op-geral-os-hubspot');
+      const opCemigOs = document.getElementById('op-cemig-os-hubspot');
+      const opAtdParentOs = document.getElementById('op-atd-os-hubspot');
+      if (opGeralOs) opGeralOs.value = '';
+      if (opCemigOs) opCemigOs.value = '';
+      if (opAtdParentOs) opAtdParentOs.value = '';
       if (task.categoria === 'otimizacao-rede' && task.parentTaskId) {
         if (proto) proto.value = '';
         if (dataEnt) dataEnt.value = '';
         this._setOpAtdSubprocessoSelectValue('');
         if (dataInst) dataInst.value = '';
-        if (os) os.value = String(task.ordemServico || '').trim();
         if (desc) desc.value = this._stripHtmlLite(String(task.descricao || ''));
         const childTituloOtim = document.getElementById('op-atd-child-titulo');
         if (childTituloOtim) childTituloOtim.value = String(task.titulo || '').trim();
@@ -9864,14 +9974,13 @@ const Controllers = {
         if (cemigDescOtimChild) cemigDescOtimChild.innerHTML = '';
       } else if (task.categoria === 'otimizacao-rede') {
         if (opOtimProto) opOtimProto.value = String(task.protocolo || '').trim();
-        if (opOtimOs) opOtimOs.value = String(task.ordemServico || '').trim();
+        if (opOtimOs) opOtimOs.value = String(task.numeroOs || task.ordemServico || '').trim();
         const otimDescEdit = document.getElementById('op-otim-descricao');
         if (otimDescEdit) {
           otimDescEdit.innerHTML = this._normalizeOtimDescricaoImgSrcForEdit(String(task.descricao || ''));
           this._wrapBareOtimDescricaoImages(otimDescEdit);
         }
         if (proto) proto.value = '';
-        if (os) os.value = '';
         if (dataEnt) dataEnt.value = '';
         this._setOpAtdSubprocessoSelectValue('');
         if (dataInst) dataInst.value = '';
@@ -9882,7 +9991,6 @@ const Controllers = {
         const cemigDescOtim = document.getElementById('op-cemig-descricao');
         if (cemigDescOtim) cemigDescOtim.innerHTML = '';
       } else if (task.categoria === 'certificacao-cemig' && task.parentTaskId) {
-        if (os) os.value = String(task.ordemServico || '').trim();
         if (desc) desc.value = this._stripHtmlLite(String(task.descricao || ''));
         const childTituloCem = document.getElementById('op-atd-child-titulo');
         if (childTituloCem) childTituloCem.value = String(task.titulo || '').trim();
@@ -9904,8 +10012,8 @@ const Controllers = {
           if (m) p = m[1].trim();
         }
         if (opCemigProto) opCemigProto.value = p;
+        if (opCemigOs) opCemigOs.value = String(task.numeroOs || '').trim();
         if (proto) proto.value = '';
-        if (os) os.value = '';
         if (dataEnt) dataEnt.value = '';
         this._setOpAtdSubprocessoSelectValue('');
         if (dataInst) dataInst.value = '';
@@ -9922,7 +10030,6 @@ const Controllers = {
           this._wrapBareOtimDescricaoImages(cemigDescEdit);
         }
       } else if ((task.categoria === 'qualidade-potencia' || task.categoria === 'manutencao-corretiva') && task.parentTaskId) {
-        if (os) os.value = String(task.ordemServico || '').trim();
         if (desc) desc.value = String(task.descricao || '').trim();
         const childTituloQdp = document.getElementById('op-atd-child-titulo');
         if (childTituloQdp) childTituloQdp.value = String(task.titulo || '').trim();
@@ -9948,10 +10055,9 @@ const Controllers = {
         const qdpOs = document.getElementById('op-qdp-ordem-servico');
         const qdpCto = document.getElementById('op-qdp-cto');
         if (qdpCli) qdpCli.value = String(task.nomeCliente || '').trim();
-        if (qdpOs) qdpOs.value = String(task.ordemServico || '').trim();
+        if (qdpOs) qdpOs.value = String(task.numeroOs || task.ordemServico || '').trim();
         if (qdpCto) qdpCto.value = String(task.setor || '').trim();
         if (proto) proto.value = '';
-        if (os) os.value = '';
         if (dataEnt) dataEnt.value = '';
         this._setOpAtdSubprocessoSelectValue('');
         if (dataInst) dataInst.value = '';
@@ -9975,7 +10081,6 @@ const Controllers = {
         if (dataEnt) dataEnt.value = String(task.dataEntrada || '').trim();
         this._setOpAtdSubprocessoSelectValue(task.subProcesso);
         if (dataInst) dataInst.value = String(task.dataInstalacao || '').trim();
-        if (os) os.value = String(task.ordemServico || '').trim();
         if (desc) desc.value = String(task.descricao || '').trim();
         const childTituloEdit = document.getElementById('op-atd-child-titulo');
         if (childTituloEdit) {
@@ -9987,6 +10092,8 @@ const Controllers = {
         if (opOtimProto) opOtimProto.value = '';
         if (opOtimOs) opOtimOs.value = '';
         if (opCemigProto) opCemigProto.value = '';
+        if (opGeralOs) opGeralOs.value = String(task.numeroOs || '').trim();
+        if (opAtdParentOs) opAtdParentOs.value = String(task.numeroOs || '').trim();
         const otimDescOther = document.getElementById('op-otim-descricao');
         if (otimDescOther) otimDescOther.innerHTML = '';
         const cemigDescOther = document.getElementById('op-cemig-descricao');
@@ -10282,6 +10389,18 @@ const Controllers = {
           const curTask = Store.findOpTask(tid);
           if (curTask && String(curTask.status) === nextStatus) {
             Controllers.opTask._closeGlobalStatusPicker();
+            return;
+          }
+          const osGuardMsg = linkedOsStartGuard(curTask, nextStatus);
+          if (osGuardMsg) {
+            Controllers.opTask._closeGlobalStatusPicker();
+            ToastService.show(osGuardMsg, 'warning');
+            return;
+          }
+          const numOsGuardMsg = numeroOsStartGuard(curTask, nextStatus);
+          if (numOsGuardMsg) {
+            Controllers.opTask._closeGlobalStatusPicker();
+            ToastService.show(numOsGuardMsg, 'warning');
             return;
           }
           UI._lastMovedOpTask = { id: tid, status: nextStatus };

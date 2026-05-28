@@ -70,13 +70,57 @@ function plannerMaskWebhookConfigForClient(array $cfg): array
     ];
 }
 
-/** Colunas leves para bootstrap / changes (sem descricao completa; inclui descricaoLen). */
+/** Colunas opcionais de op_tasks (dependem de migrations já aplicadas no banco). */
+function plannerOpTaskOptionalSelectFragments(PDO $pdo): array
+{
+    $parts = [];
+    if (dbColumnExists($pdo, 'op_tasks', 'ordem_servico')) {
+        $parts[] = 'ordem_servico AS ordemServico';
+    }
+    if (dbColumnExists($pdo, 'op_tasks', 'numero_os')) {
+        $parts[] = 'numero_os AS numeroOs';
+    }
+    if (dbColumnExists($pdo, 'op_tasks', 'sub_processo')) {
+        $parts[] = 'sub_processo AS subProcesso';
+    }
+    return $parts;
+}
+
+/**
+ * SELECT leve para bootstrap / changes.
+ * @param 'len'|'full' $descricaoMode len = descricaoLen; full = descricao completa (modal).
+ */
+function plannerOpTaskListSelectSqlFor(PDO $pdo, string $descricaoMode = 'len'): string
+{
+    $optionalSql = '';
+    $optional = plannerOpTaskOptionalSelectFragments($pdo);
+    if ($optional) {
+        $optionalSql = ', ' . implode(', ', $optional);
+    }
+    $descSql = $descricaoMode === 'full'
+        ? ', descricao'
+        : ', CHAR_LENGTH(COALESCE(descricao, \'\')) AS descricaoLen';
+
+    return 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
+      coordenadas, localizacao_texto AS localizacaoTexto, categoria, prazo, prioridade, status,
+      is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
+      nome_cliente AS nomeCliente, protocolo'
+        . $optionalSql
+        . ', data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
+      assinada_por AS assinadaPor, assinada_em AS assinadaEm'
+        . $descSql
+        . ', UNIX_TIMESTAMP(updated_at) AS updatedAt
+      FROM op_tasks';
+}
+
+/** @deprecated Use plannerOpTaskListSelectSqlFor($pdo) */
 function plannerOpTaskListSelectSql(): string
 {
     return 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
       coordenadas, localizacao_texto AS localizacaoTexto, categoria, prazo, prioridade, status,
       is_parent_task, parent_task_id, criadaEm, historico, chat_thread_key AS chatThreadKey,
-      nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico, sub_processo AS subProcesso,
+      nome_cliente AS nomeCliente, protocolo, ordem_servico AS ordemServico, numero_os AS numeroOs,
+      sub_processo AS subProcesso,
       data_entrada AS dataEntrada, data_instalacao AS dataInstalacao,
       assinada_por AS assinadaPor, assinada_em AS assinadaEm,
       CHAR_LENGTH(COALESCE(descricao, \'\')) AS descricaoLen,
@@ -84,6 +128,7 @@ function plannerOpTaskListSelectSql(): string
       FROM op_tasks';
 }
 
+/** @deprecated Use plannerOpTaskListSelectSqlFor($pdo) */
 function plannerOpTaskListSelectSqlFallback(): string
 {
     return 'SELECT id, taskCode, titulo, setor, regiao, responsavel, clientesAfetados,
@@ -97,11 +142,18 @@ function plannerOpTaskListSelectSqlFallback(): string
 }
 
 /** Detalhe completo (modal de edição). */
+function plannerOpTaskDetailSelectSqlFor(PDO $pdo): string
+{
+    return plannerOpTaskListSelectSqlFor($pdo, 'full') . ' WHERE id = :id LIMIT 1';
+}
+
+/** @deprecated Use plannerOpTaskDetailSelectSqlFor($pdo) */
 function plannerOpTaskDetailSelectSql(): string
 {
     return plannerOpTaskListSelectSql() . ' WHERE id = :id LIMIT 1';
 }
 
+/** @deprecated Use plannerOpTaskDetailSelectSqlFor($pdo) */
 function plannerOpTaskDetailSelectSqlFallback(): string
 {
     return plannerOpTaskListSelectSqlFallback() . ' WHERE id = :id LIMIT 1';

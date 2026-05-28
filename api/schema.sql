@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS op_tasks (
   nome_cliente VARCHAR(255) NOT NULL DEFAULT '',
   protocolo VARCHAR(180) NOT NULL DEFAULT '',
   ordem_servico VARCHAR(180) NOT NULL DEFAULT '',
+  numero_os VARCHAR(180) NOT NULL DEFAULT '',
   sub_processo VARCHAR(120) NOT NULL DEFAULT '',
   data_entrada VARCHAR(64) NOT NULL DEFAULT '',
   data_instalacao VARCHAR(64) NOT NULL DEFAULT '',

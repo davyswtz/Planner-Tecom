@@ -15,6 +15,8 @@
     'certificacao-cemig': 'Certificação Cemig',
     'qualidade-potencia': 'Qualidade de potência',
     'manutencao-corretiva': 'Manutenção corretiva',
+    'correcao-atenuacao': 'Correção de atenuação',
+    correcao_atenuacao: 'Correção de atenuação',
   };
 
   const STATE = {
@@ -59,8 +61,29 @@
     return '';
   }
 
+  function isAtenuacaoCat(c) {
+    const x = String(c || '').trim();
+    return x === 'correcao-atenuacao' || x === 'correcao_atenuacao';
+  }
+
+  function atenuacaoOsLabel(task) {
+    const code = String(task?.taskCode || '').trim();
+    if (code) return code;
+    const id = Number(task?.id) || 0;
+    return id > 0 ? `ATN-${String(id).padStart(4, '0')}` : 'ATN';
+  }
+
   function osTasksFromStore() {
-    return (Store.getOpTasks?.() || []).filter((t) => t && Number(t.parentTaskId));
+    return (Store.getOpTasks?.() || [])
+      .filter((t) => {
+        if (!t) return false;
+        if (Number(t.parentTaskId)) return true;
+        return isAtenuacaoCat(t.categoria) && isDone(t.status);
+      })
+      .map((t) => {
+        if (!isAtenuacaoCat(t.categoria) || String(t.ordemServico || '').trim()) return t;
+        return { ...t, ordemServico: atenuacaoOsLabel(t) };
+      });
   }
 
   function groupDbRowsToTasks(rows) {

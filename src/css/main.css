@@ -2050,22 +2050,22 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
 #page-troca-etiqueta .te-page,
 #page-troca-etiqueta .te-layout,
 #page-troca-etiqueta #teRoot {
-  height: 100vh;
+  /* ocupa todo espaço disponível no flex container (.page.active) */
+  flex: 1 1 auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 #page-troca-etiqueta #teRoot {
   padding: 16px;
   box-sizing: border-box;
 }
 #page-troca-etiqueta .te-layout {
-  display: flex;
-  flex-direction: column;
   gap: 12px;
-  min-height: 0;
 }
 /* legado removido: layout v1 (te-topbar/te-board/te-modal etc.) */
 /* Troca de etiqueta (v2) */
-#page-troca-etiqueta .te2 { display: grid; gap: 12px; min-height: 0; }
+#page-troca-etiqueta .te2 { display: flex; flex-direction: column; gap: 12px; flex: 1 1 auto; min-height: 0; }
 #page-troca-etiqueta .te2__topbar {
   display: flex;
   align-items: flex-start;
@@ -2142,9 +2142,9 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
 }
 #page-troca-etiqueta .te2__metric[data-te2-metric="conc"] .te2__metric-value { color: #22c55e; }
 
-#page-troca-etiqueta .te2__board { min-height: 0; }
-#page-troca-etiqueta .te2-grid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(260px, 1fr)); align-items: start; }
-#page-troca-etiqueta .te2-col { background: rgba(255,255,255,.02); border: 1px solid var(--border2); border-radius: var(--radius-xl); overflow: hidden; min-height: 0; display:flex; flex-direction:column; }
+#page-troca-etiqueta .te2__board { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+#page-troca-etiqueta .te2-grid { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(260px, 1fr)); align-items: stretch; height: 100%; }
+#page-troca-etiqueta .te2-col { background: rgba(255,255,255,.02); border: 1px solid var(--border2); border-radius: var(--radius-xl); overflow: hidden; min-height: 0; display:flex; flex-direction:column; height: 100%; }
 #page-troca-etiqueta .te2-col__head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding: 12px; background: rgba(0,0,0,.18); border-bottom: 1px solid rgba(255,255,255,.06); }
 #page-troca-etiqueta .te2-col__toggle {
   width: 28px;
@@ -2168,21 +2168,26 @@ tbody td:first-child { color: var(--white); font-weight: 500; }
 #page-troca-etiqueta .te2-col__count { font-family: var(--font-mono); font-weight: 900; color: var(--white2); font-size: 12px; }
 #page-troca-etiqueta .te2-col__body {
   padding: 12px;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
   opacity: 1;
-  max-height: var(--te2-body-h, 900px);
+  /* max-height é gerenciado pelo JS ao colapsar/expandir; não precisa de fallback fixo */
+  max-height: var(--te2-body-h, 9999px);
   transition: max-height 260ms var(--ease-out-smooth), opacity 180ms var(--ease-out-smooth), padding 260ms var(--ease-out-smooth);
   will-change: max-height, opacity;
+  display: flex;
+  flex-direction: column;
 }
 #page-troca-etiqueta .te2-col__body-inner {
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding-bottom: 12px; /* garante respiro pro último card (sem clipping) */
+  padding-bottom: 12px;
   box-sizing: border-box;
 }
 #page-troca-etiqueta .te2-col__body.is-collapsed {

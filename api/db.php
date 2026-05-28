@@ -147,12 +147,34 @@ function dbColumnExists(PDO $pdo, string $table, string $column): bool
     if (array_key_exists($key, $cache)) {
         return $cache[$key];
     }
-    $stmt = $pdo->prepare(
-        'SELECT COUNT(*) FROM information_schema.COLUMNS
-          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t AND COLUMN_NAME = :c'
-    );
-    $stmt->execute([':t' => $table, ':c' => $column]);
-    $cache[$key] = ((int) $stmt->fetchColumn()) > 0;
+
+    // Preferência: information_schema (rápido e portável), mas alguns hosts restringem permissões.
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT COUNT(*) FROM information_schema.COLUMNS
+              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t AND COLUMN_NAME = :c'
+        );
+        $stmt->execute([':t' => $table, ':c' => $column]);
+        $cache[$key] = ((int) $stmt->fetchColumn()) > 0;
+        return $cache[$key];
+    } catch (Throwable $e) {
+        error_log('[db.php] information_schema.COLUMNS blocked: ' . $e->getMessage());
+    }
+
+    // Fallback: SHOW COLUMNS (não depende de information_schema).
+    if (!preg_match('/^[a-z0-9_]+$/i', $table) || !preg_match('/^[a-z0-9_]+$/i', $column)) {
+        $cache[$key] = false;
+        return false;
+    }
+    try {
+        $q = $pdo->prepare("SHOW COLUMNS FROM `{$table}` LIKE :c");
+        $q->execute([':c' => $column]);
+        $cache[$key] = (bool) $q->fetch(PDO::FETCH_ASSOC);
+        return $cache[$key];
+    } catch (Throwable $e2) {
+        error_log('[db.php] SHOW COLUMNS fallback failed: ' . $e2->getMessage());
+        $cache[$key] = false;
+    }
     return $cache[$key];
 }
 

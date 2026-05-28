@@ -30,12 +30,25 @@ function osTecnicosTableExists(PDO $pdo): bool
     if ($exists !== null) {
         return $exists;
     }
-    $stmt = $pdo->prepare(
-        'SELECT 1 FROM information_schema.TABLES
-          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t LIMIT 1'
-    );
-    $stmt->execute([':t' => 'os_tecnicos']);
-    $exists = (bool) $stmt->fetchColumn();
+    // Preferir probe direto (alguns hosts bloqueiam information_schema).
+    try {
+        $pdo->query('SELECT 1 FROM os_tecnicos LIMIT 1');
+        $exists = true;
+        return $exists;
+    } catch (Throwable $e) {
+        // ignora e tenta information_schema como fallback
+    }
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT 1 FROM information_schema.TABLES
+              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t LIMIT 1'
+        );
+        $stmt->execute([':t' => 'os_tecnicos']);
+        $exists = (bool) $stmt->fetchColumn();
+    } catch (Throwable $e2) {
+        error_log('[os_tecnicos] information_schema.TABLES blocked: ' . $e2->getMessage());
+        $exists = false;
+    }
     return $exists;
 }
 
@@ -96,6 +109,35 @@ function osTecCriacaoDay(string $criadaEm): ?string
     return date('Y-m-d', $ts);
 }
 
+function osTecIsAtenuacaoCategory(string $cat): bool
+{
+    $c = trim($cat);
+    return $c === 'correcao-atenuacao' || $c === 'correcao_atenuacao';
+}
+
+function osTecIsDoneStatus(string $status): bool
+{
+    $s = mb_strtolower(trim($status));
+    return in_array($s, ['concluída', 'concluida', 'finalizada', 'finalizado'], true);
+}
+
+/** Rótulo de OS para atividades de correção de atenuação (1 OS por tarefa concluída). */
+function osTecResolveOrdemServico(int $taskId, array $data): string
+{
+    $os = trim((string) ($data['ordemServico'] ?? ''));
+    if ($os !== '') {
+        return $os;
+    }
+    $code = trim((string) ($data['taskCode'] ?? ''));
+    if ($code !== '') {
+        return $code;
+    }
+    if ($taskId > 0) {
+        return 'ATN-' . str_pad((string) $taskId, 4, '0', STR_PAD_LEFT);
+    }
+    return 'ATN';
+}
+
 function osTecShouldSyncTask(array $data): bool
 {
     if (!empty($data['isParentTask'])) {
@@ -104,11 +146,93 @@ function osTecShouldSyncTask(array $data): bool
     $parentId = isset($data['parentTaskId']) && $data['parentTaskId'] !== '' && $data['parentTaskId'] !== null
         ? (int) $data['parentTaskId']
         : 0;
+    if ($parentId <= 0 && isset($data['parent_task_id']) && $data['parent_task_id'] !== '' && $data['parent_task_id'] !== null) {
+        $parentId = (int) $data['parent_task_id'];
+    }
     if ($parentId > 0) {
+        return true;
+    }
+    $cat = (string) ($data['categoria'] ?? '');
+    if (osTecIsAtenuacaoCategory($cat) && osTecIsDoneStatus((string) ($data['status'] ?? ''))) {
         return true;
     }
     $os = trim((string) ($data['ordemServico'] ?? ''));
     return $os !== '';
+}
+
+/**
+ * Tenta "hidratar" campos críticos de op_tasks quando o payload do client vier incompleto.
+ * Evita deletar linhas de os_tecnicos por falta de parentTaskId/ordemServico em updates parciais.
+ *
+ * @param array<string,mixed> $data
+ * @return array<string,mixed>
+ */
+function osTecHydrateFromDbIfMissing(PDO $pdo, int $taskId, array $data): array
+{
+    if ($taskId <= 0) {
+        return $data;
+    }
+    $hasParent = isset($data['parentTaskId']) && $data['parentTaskId'] !== '' && $data['parentTaskId'] !== null;
+    $hasIsParent = array_key_exists('isParentTask', $data);
+    $hasOs = isset($data['ordemServico']) && trim((string) $data['ordemServico']) !== '';
+    if ($hasParent && $hasIsParent && $hasOs) {
+        return $data;
+    }
+
+    try {
+        $hasOrdem = dbColumnExists($pdo, 'op_tasks', 'ordem_servico');
+        $cols = 'id, categoria, status, responsavel, protocolo, prioridade, taskCode, titulo, regiao, criadaEm, historico, is_parent_task, parent_task_id';
+        if ($hasOrdem) {
+            $cols .= ', ordem_servico';
+        }
+        $stmt = $pdo->prepare("SELECT {$cols} FROM op_tasks WHERE id = :id LIMIT 1");
+        $stmt->execute([':id' => $taskId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            return $data;
+        }
+
+        $rowParent = isset($row['parent_task_id']) ? (int) $row['parent_task_id'] : null;
+        $rowIsParent = ((int) ($row['is_parent_task'] ?? 0)) === 1;
+        $rowOs = $hasOrdem ? (string) ($row['ordem_servico'] ?? '') : '';
+
+        if (!array_key_exists('isParentTask', $data)) {
+            $data['isParentTask'] = $rowIsParent;
+        }
+        if (!isset($data['parentTaskId']) || $data['parentTaskId'] === '' || $data['parentTaskId'] === null) {
+            $data['parentTaskId'] = $rowParent;
+        }
+        if ((!isset($data['ordemServico']) || trim((string) $data['ordemServico']) === '') && trim($rowOs) !== '') {
+            $data['ordemServico'] = $rowOs;
+        }
+
+        foreach ([
+            'categoria' => 'categoria',
+            'status' => 'status',
+            'responsavel' => 'responsavel',
+            'protocolo' => 'protocolo',
+            'prioridade' => 'prioridade',
+            'taskCode' => 'taskCode',
+            'titulo' => 'titulo',
+            'regiao' => 'regiao',
+            'criadaEm' => 'criadaEm',
+        ] as $k => $rk) {
+            if (!isset($data[$k]) || trim((string) $data[$k]) === '') {
+                if (isset($row[$rk])) {
+                    $data[$k] = $row[$rk];
+                }
+            }
+        }
+
+        if (!isset($data['historico']) || !is_array($data['historico'])) {
+            $hist = json_decode((string) ($row['historico'] ?? '[]'), true);
+            $data['historico'] = is_array($hist) ? $hist : [];
+        }
+    } catch (Throwable $e) {
+        error_log('[os_tecnicos] hydrate skipped: ' . $e->getMessage());
+    }
+
+    return $data;
 }
 
 function osTecDeleteForTask(PDO $pdo, int $taskId): void
@@ -128,6 +252,8 @@ function osTecSyncFromOpTask(PDO $pdo, int $taskId, array $data): void
         return;
     }
 
+    $data = osTecHydrateFromDbIfMissing($pdo, $taskId, $data);
+
     if (!osTecShouldSyncTask($data)) {
         osTecDeleteForTask($pdo, $taskId);
         return;
@@ -141,18 +267,30 @@ function osTecSyncFromOpTask(PDO $pdo, int $taskId, array $data): void
     $parentId = isset($data['parentTaskId']) && $data['parentTaskId'] !== '' && $data['parentTaskId'] !== null
         ? (int) $data['parentTaskId']
         : null;
+    if ($parentId === null && isset($data['parent_task_id']) && $data['parent_task_id'] !== '' && $data['parent_task_id'] !== null) {
+        $parentId = (int) $data['parent_task_id'];
+    }
     $criadaEm = (string) ($data['criadaEm'] ?? '');
     $dataCriacao = osTecCriacaoDay($criadaEm);
     $dataConclusao = osTecCompletionDayFromHistorico($historico);
+    $categoria = (string) ($data['categoria'] ?? '');
+    $status = (string) ($data['status'] ?? '');
+    if ($dataConclusao === '' && osTecIsDoneStatus($status)) {
+        $dataConclusao = date('Y-m-d');
+    }
+
+    $ordemServico = osTecIsAtenuacaoCategory($categoria)
+        ? osTecResolveOrdemServico($taskId, $data)
+        : trim((string) ($data['ordemServico'] ?? ''));
 
     $base = [
         'parent_task_id' => $parentId,
-        'ordem_servico' => (string) ($data['ordemServico'] ?? ''),
+        'ordem_servico' => $ordemServico,
         'titulo' => (string) ($data['titulo'] ?? ''),
         'task_code' => (string) ($data['taskCode'] ?? ''),
-        'categoria' => (string) ($data['categoria'] ?? ''),
+        'categoria' => $categoria,
         'regiao' => (string) ($data['regiao'] ?? ''),
-        'status' => (string) ($data['status'] ?? ''),
+        'status' => $status,
         'protocolo' => (string) ($data['protocolo'] ?? ''),
         'prioridade' => (string) ($data['prioridade'] ?? ''),
         'data_criacao' => $dataCriacao,
@@ -161,7 +299,10 @@ function osTecSyncFromOpTask(PDO $pdo, int $taskId, array $data): void
     ];
 
     $tecnicos = osTecParseResponsaveis((string) ($data['responsavel'] ?? ''));
-    if (!$tecnicos) {
+    if (osTecIsAtenuacaoCategory($categoria)) {
+        // Cada atividade concluída gera exatamente 1 OS para o técnico responsável.
+        $tecnicos = $tecnicos ? [reset($tecnicos)] : ['—'];
+    } elseif (!$tecnicos) {
         $tecnicos = ['—'];
     }
 
@@ -222,6 +363,7 @@ function osTecRebuildAll(PDO $pdo): int
         "SELECT {$cols} FROM op_tasks
           WHERE (parent_task_id IS NOT NULL AND parent_task_id > 0)"
         . ($hasOrdem ? " OR (TRIM(ordem_servico) <> '' AND is_parent_task = 0)" : '')
+        . " OR categoria IN ('correcao-atenuacao', 'correcao_atenuacao')"
     )->fetchAll() ?: [];
 
     $count = 0;
