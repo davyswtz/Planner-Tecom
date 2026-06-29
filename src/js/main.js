@@ -192,8 +192,27 @@ function linkedOsParentEditLabel(category = '') {
   return map[String(category || '').trim()] || 'Editar tarefa pai';
 }
 
+/** Categoria usada pelo Planner Laravel v2 para OS filhas vinculadas ao card pai. */
+const LINKED_OS_V2_CATEGORY = 'ordem-servico';
+
+function isLinkedOsChildForParent(task, parentTaskOrCategory) {
+  if (!task?.parentTaskId) return false;
+  const parentCat = typeof parentTaskOrCategory === 'object'
+    ? String(parentTaskOrCategory?.categoria || '').trim()
+    : String(parentTaskOrCategory || '').trim();
+  const parentId = typeof parentTaskOrCategory === 'object'
+    ? Number(parentTaskOrCategory?.id)
+    : null;
+  if (parentId && Number(task.parentTaskId) !== parentId) return false;
+  const childCat = String(task.categoria || '').trim();
+  if (childCat === LINKED_OS_V2_CATEGORY && isLinkedOsCategory(parentCat)) return true;
+  return childCat === parentCat;
+}
+
 function isLinkedOsChildTask(task) {
-  return !!task?.parentTaskId && isLinkedOsCategory(task?.categoria);
+  if (!task?.parentTaskId) return false;
+  if (String(task?.categoria || '').trim() === LINKED_OS_V2_CATEGORY) return true;
+  return isLinkedOsCategory(task?.categoria);
 }
 
 function getLinkedOsRootTask(task) {
@@ -202,12 +221,9 @@ function getLinkedOsRootTask(task) {
 }
 
 function getLinkedOsSiblingOrdinal(task) {
-  const parentId = Number(task?.parentTaskId);
-  if (!parentId) return 1;
-  const cat = String(task?.categoria || '').trim();
-  const siblings = Store.getOpTasks()
-    .filter((t) => t && t.categoria === cat && Number(t.parentTaskId) === parentId)
-    .sort((a, b) => Number(a.id) - Number(b.id));
+  const root = getLinkedOsRootTask(task);
+  if (!root || Number(root.id) === Number(task?.id)) return 1;
+  const siblings = getLinkedOsChildren(root);
   const idx = siblings.findIndex((t) => Number(t.id) === Number(task.id));
   return idx >= 0 ? idx + 1 : 1;
 }
@@ -218,7 +234,7 @@ function getLinkedOsChildren(parentTask) {
   const parentId = Number(parentTask?.id);
   if (!parentId || !isLinkedOsCategory(cat)) return [];
   return Store.getOpTasks()
-    .filter((t) => t && t.categoria === cat && Number(t.parentTaskId) === parentId)
+    .filter((t) => isLinkedOsChildForParent(t, parentTask))
     .sort((a, b) => Number(a.id) - Number(b.id));
 }
 
@@ -2846,6 +2862,9 @@ const WebhookService = {
   /** Monta o payload formatado */
   _buildMessage(event, task, category) {
     const opCat = String(task?.categoria ?? '').trim();
+    const opCatEffective = (task?.parentTaskId && opCat === LINKED_OS_V2_CATEGORY)
+      ? String(getLinkedOsRootTask(task)?.categoria || opCat).trim()
+      : opCat;
 
     if (opCat === 'qualidade-potencia') {
       return this._buildQualidadePotenciaMessage(event, task);
@@ -2903,9 +2922,7 @@ const WebhookService = {
         String(histAtd[0]?.autor || '').trim();
       const taskId = String(task.taskCode || `ATD-${String(task.id || '').padStart(4, '0')}`).trim();
 
-      const subtasks = Store.getOpTasks()
-        .filter(t => t && t.categoria === 'atendimento-cliente' && Number(t.parentTaskId) === Number(task.id))
-        .sort((a, b) => Number(a.id) - Number(b.id))
+      const subtasks = getLinkedOsChildren(task)
         .map(t => String(t.titulo || '').trim())
         .filter(Boolean);
 
@@ -2944,7 +2961,7 @@ const WebhookService = {
       };
     }
 
-    if (opCat === 'atendimento-cliente' && event === 'andamento' && task?.parentTaskId) {
+    if (opCatEffective === 'atendimento-cliente' && event === 'andamento' && task?.parentTaskId) {
       const parent = getLinkedOsRootTask(task);
       const childCode = String(task.taskCode || `ATD-${String(task.id || '').padStart(4, '0')}`).trim();
       const tecnico = this._resolveTechnicianDisplay(task, { mention: true });
@@ -2966,7 +2983,7 @@ const WebhookService = {
     }
 
     // Atendimento ao Cliente (OS / tarefa filho) concluída: mensagem curta (pedido do time).
-    if (opCat === 'atendimento-cliente' && event === 'concluida' && task?.parentTaskId) {
+    if (opCatEffective === 'atendimento-cliente' && event === 'concluida' && task?.parentTaskId) {
       const ordinal = getLinkedOsSiblingOrdinal(task);
       const atividade = String(task.titulo || '').trim();
       const history = Array.isArray(task?.historico) ? task.historico : [];
@@ -2983,7 +3000,7 @@ const WebhookService = {
     }
 
     // Rompimento / troca de poste — OS vinculada (andamento e concluída no tópico do pai).
-    if (isOsLinkedChildCategory(opCat) && task?.parentTaskId && (event === 'andamento' || event === 'concluida')) {
+    if (isOsLinkedChildCategory(opCatEffective) && task?.parentTaskId && (event === 'andamento' || event === 'concluida')) {
       const childMsg = this._buildOsLinkedChildMessage(event, task);
       if (childMsg?.text) return childMsg;
     }
@@ -3521,7 +3538,7 @@ const OpTaskService = {
       : Store.getOpTasks();
     tasks.forEach(t => {
       // OS vinculadas (filhas) não inflam contadores do card pai.
-      if (isLinkedOsCategory(t.categoria) && t.parentTaskId) return;
+      if (isLinkedOsChildTask(t)) return;
       if (t.categoria === 'certificacao-cemig') {
         const s = TaskService._normStatus(t.status);
         if (s === 'backlog') counts.Criada++;
@@ -4041,7 +4058,7 @@ const UI = {
           .map(t => {
             const isLate = t.prazo && t.prazo < tod && !doneForLate.includes(t.status);
             const childTasks = (isAtendimento || isLinkedOsBoard)
-              ? tasks.filter(c => Number(c.parentTaskId) === Number(t.id) && c.categoria === category)
+              ? tasks.filter(c => isLinkedOsChildForParent(c, t))
               : [];
             const parentTag = isAtendimento
               ? `<span class="badge s-info" style="margin-bottom:6px">LISTA</span>`
@@ -9264,7 +9281,7 @@ const Controllers = {
       }
 
       const all = Store.getOpTasks()
-        .filter(t => t.categoria === category && Number(t.parentTaskId) === parentId);
+        .filter(t => isLinkedOsChildForParent(t, { id: parentId, categoria: category }));
       if (!all.length) {
         childrenList.innerHTML = '<li><span class="atd-modal-children-meta">Nenhuma ordem de serviço vinculada ainda.</span></li>';
       } else {
@@ -9929,7 +9946,7 @@ const Controllers = {
         }
       }
       Store.editingOpTaskId = id;
-      const isLinkedOsChild = isLinkedOsCategory(task.categoria) && task.parentTaskId;
+      const isLinkedOsChild = isLinkedOsChildTask(task);
       document.getElementById('opTaskModalTitle').textContent =
         isLinkedOsChild ? 'Editar OS vinculada'
           : task.categoria === 'troca-poste' ? 'Editar troca de poste'
@@ -10085,7 +10102,7 @@ const Controllers = {
         const childTituloEdit = document.getElementById('op-atd-child-titulo');
         if (childTituloEdit) {
           childTituloEdit.value =
-            isLinkedOsCategory(task.categoria) && task.parentTaskId
+            isLinkedOsChildTask(task)
               ? String(task.titulo || '').trim()
               : '';
         }
@@ -10201,7 +10218,7 @@ const Controllers = {
     deleteTask(id = Store.editingOpTaskId, options = {}) {
       const task = Store.findOpTask(id);
       if (!task) return;
-      const hasChildren = Store.getOpTasks().some(t => Number(t.parentTaskId) === Number(id));
+      const hasChildren = getLinkedOsChildren(task).length > 0;
       const cascade = options.cascade ?? hasChildren;
       const message = cascade
         ? 'Excluir esta tarefa pai e todas as subtarefas vinculadas?'

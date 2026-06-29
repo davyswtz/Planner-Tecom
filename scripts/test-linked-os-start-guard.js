@@ -26,8 +26,24 @@ function getLinkedOsChildren(parentTask) {
   const parentId = Number(parentTask?.id);
   if (!parentId || !isLinkedOsCategory(cat)) return [];
   return _opTasks.filter(
-    (t) => t && String(t.categoria).trim() === cat && Number(t.parentTaskId) === parentId,
+    (t) => isLinkedOsChildForParent(t, parentTask),
   );
+}
+
+const LINKED_OS_V2_CATEGORY = 'ordem-servico';
+
+function isLinkedOsChildForParent(task, parentTaskOrCategory) {
+  if (!task?.parentTaskId) return false;
+  const parentCat = typeof parentTaskOrCategory === 'object'
+    ? String(parentTaskOrCategory?.categoria || '').trim()
+    : String(parentTaskOrCategory || '').trim();
+  const parentId = typeof parentTaskOrCategory === 'object'
+    ? Number(parentTaskOrCategory?.id)
+    : null;
+  if (parentId && Number(task.parentTaskId) !== parentId) return false;
+  const childCat = String(task.categoria || '').trim();
+  if (childCat === LINKED_OS_V2_CATEGORY && isLinkedOsCategory(parentCat)) return true;
+  return childCat === parentCat;
 }
 
 function linkedOsStartGuard(task, targetStatus) {
@@ -135,6 +151,12 @@ section('Tarefa pai COM ao menos 1 OS vinculada — libera');
     { id: 51, categoria: 'atendimento-cliente', parentTaskId: 50 },
   ];
   assert('atendimento com 1 OS → libera', linkedOsStartGuard(paiAtd, 'Em andamento') === null);
+
+  const paiLaravel = { id: 60, categoria: 'rompimentos', parentTaskId: null };
+  _opTasks = [
+    { id: 61, categoria: 'ordem-servico', parentTaskId: 60 },
+  ];
+  assert('OS Laravel (ordem-servico) vinculada → libera', linkedOsStartGuard(paiLaravel, 'Em andamento') === null);
 }
 
 section('OS filha de outro pai não contamina o bloco');

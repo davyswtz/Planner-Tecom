@@ -274,6 +274,28 @@ function osTecSyncFromOpTask(PDO $pdo, int $taskId, array $data): void
     $dataCriacao = osTecCriacaoDay($criadaEm);
     $dataConclusao = osTecCompletionDayFromHistorico($historico);
     $categoria = (string) ($data['categoria'] ?? '');
+    if ($categoria === 'ordem-servico' && $parentId > 0) {
+        try {
+            $pStmt = $pdo->prepare(
+                'SELECT categoria, regiao, protocolo, prioridade FROM op_tasks WHERE id = :id LIMIT 1'
+            );
+            $pStmt->execute([':id' => $parentId]);
+            $parentRow = $pStmt->fetch(PDO::FETCH_ASSOC);
+            if (is_array($parentRow)) {
+                $parentCat = trim((string) ($parentRow['categoria'] ?? ''));
+                if ($parentCat !== '') {
+                    $categoria = $parentCat;
+                }
+                foreach (['regiao', 'protocolo', 'prioridade'] as $fk) {
+                    if ((!isset($data[$fk]) || trim((string) $data[$fk]) === '') && trim((string) ($parentRow[$fk] ?? '')) !== '') {
+                        $data[$fk] = $parentRow[$fk];
+                    }
+                }
+            }
+        } catch (Throwable $e) {
+            error_log('[os_tecnicos] parent hydrate skipped: ' . $e->getMessage());
+        }
+    }
     $status = (string) ($data['status'] ?? '');
     if ($dataConclusao === '' && osTecIsDoneStatus($status)) {
         $dataConclusao = date('Y-m-d');
