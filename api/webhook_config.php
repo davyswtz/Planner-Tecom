@@ -1,7 +1,6 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/db.php';
-require __DIR__ . '/planner_helpers.inc.php';
 require __DIR__ . '/webhooks_config.inc.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -14,7 +13,6 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
 
 try {
     requireAuth();
-    plannerRequirePrivilegedUser();
 
     $pdo = db();
     $cfg = plannerLoadWebhookConfigMerged($pdo);

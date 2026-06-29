@@ -10686,7 +10686,7 @@ const Controllers = {
     init() {
       document.getElementById('openWebhookBtn')?.addEventListener('click', async () => {
         let config = Store.getWebhookConfig();
-        if (ApiService.enabled() && plannerUserIsPrivileged()) {
+        if (ApiService.enabled()) {
           try {
             const st = await ApiService.getWebhookInstallStatus();
             if (st?.ok && !st.hasRealUrls && st.localFile) {
@@ -10724,10 +10724,6 @@ const Controllers = {
       document.getElementById('testWebhookBtn-backup')?.addEventListener('click', async () => test('f-webhookUrl-backup'));
 
       document.getElementById('saveWebhookBtn').addEventListener('click', async () => {
-        if (Store.isRemoteApiEnabled() && !plannerUserIsPrivileged()) {
-          ToastService.show('Somente gestores podem alterar webhooks no servidor.', 'warning');
-          return;
-        }
         const goval = document.getElementById('f-webhookUrl-goval')?.value?.trim() || '';
         const vale  = document.getElementById('f-webhookUrl-vale')?.value?.trim() || '';
         const cara  = document.getElementById('f-webhookUrl-caratinga')?.value?.trim() || '';

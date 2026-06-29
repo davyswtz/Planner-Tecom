@@ -1,7 +1,6 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . '/db.php';
-require __DIR__ . '/planner_helpers.inc.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     jsonResponse(['ok' => true]);
@@ -20,7 +19,6 @@ try {
 
     $stmt = $pdo->prepare('INSERT INTO app_config (cfg_key, cfg_value) VALUES (:k, :v) ON DUPLICATE KEY UPDATE cfg_value = VALUES(cfg_value)');
     if (isset($data['webhookConfig']) && is_array($data['webhookConfig'])) {
-        plannerRequirePrivilegedUser();
         $incoming = $data['webhookConfig'];
         $existing = [];
         $sel = $pdo->prepare('SELECT cfg_value FROM app_config WHERE cfg_key = :k LIMIT 1');
